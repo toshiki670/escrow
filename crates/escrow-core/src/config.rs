@@ -157,8 +157,14 @@ impl fmt::Display for Language {
 
 /// cookie の取り出し元。
 ///
-/// 綴りを自由にすると、外部ツールが受け付けない値を設定できてしまう。値は
-/// yt-dlp の `--cookies-from-browser` が挙げるものに合わせてある。
+/// 綴りを自由にすると、外部ツールが受け付けない値を設定できてしまう。
+///
+/// 値は **yt-dlp と gallery-dl の両方が受け付けるものだけ**に絞ってある。#2 が
+/// 「認証の取得元はプラットフォームごとに分けない」と決めており、1つの値が両方へ
+/// 渡るため。片方しか知らない綴りを許すと、YouTube は通って X だけ落ちる。
+///
+/// 入らなかったもの: `whale`（yt-dlp のみ）、`floorp` / `librewolf` / `orion` /
+/// `thorium` / `zen`（gallery-dl のみ）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Browser {
@@ -170,11 +176,10 @@ pub enum Browser {
     Opera,
     Safari,
     Vivaldi,
-    Whale,
 }
 
 impl Browser {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 8] = [
         Self::Brave,
         Self::Chrome,
         Self::Chromium,
@@ -183,7 +188,6 @@ impl Browser {
         Self::Opera,
         Self::Safari,
         Self::Vivaldi,
-        Self::Whale,
     ];
 
     /// 外部ツールへ渡す値。
@@ -197,7 +201,6 @@ impl Browser {
             Self::Opera => "opera",
             Self::Safari => "safari",
             Self::Vivaldi => "vivaldi",
-            Self::Whale => "whale",
         }
     }
 }
@@ -527,7 +530,11 @@ interval_hours = 0
             assert_eq!(config.auth.cookies_from, browser);
         }
 
-        assert!(Config::from_toml("[auth]\ncookies_from = \"netscape\"\n").is_err());
+        // 片方のツールしか知らない綴りは、共通設定として使えないので入れていない。
+        for only_one_tool in ["whale", "librewolf", "zen", "netscape"] {
+            let toml = format!("[auth]\ncookies_from = \"{only_one_tool}\"\n");
+            assert!(Config::from_toml(&toml).is_err(), "{only_one_tool}");
+        }
     }
 
     /// 空の `db_path` は Application Support 配下へ埋まる。
