@@ -18,7 +18,11 @@ jobs:
 
       # ツールチェインは rust-toolchain.toml に従って rustup が入れる。
       - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@nextest
 
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test --workspace
+      - run: cargo nextest run --workspace
+
+      # nextest は doctest を実行しないので、そこだけ cargo test で拾う。
+      - run: cargo test --workspace --doc
