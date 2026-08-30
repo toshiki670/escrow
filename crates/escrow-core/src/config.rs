@@ -397,15 +397,13 @@ impl Paths {
 /// 起動したときと GUI から起動したときで同じ設定が別の場所を指す。#2 の既定は
 /// どれもホーム配下なので、ホーム基準の方が読みとしても自然。
 fn expand(raw: &str, home: &Path) -> PathBuf {
-    // パス区切りは `/` と `\` の両方を見る。macOS では前者だけだが、
-    // 区切りを1つに決め打つ理由もない。
-    const SEPARATORS: [char; 2] = ['/', '\\'];
-
     let path = match raw.strip_prefix('~') {
         Some("") => return home.to_owned(),
-        // `~/x` はホーム配下。
-        Some(rest) if rest.starts_with(SEPARATORS) => {
-            return home.join(rest.trim_start_matches(SEPARATORS));
+        // 区切りかどうかは [`std::path::is_separator`] に決めさせる。自分で
+        // `/` と `\` を並べると、`\` が正規のファイル名文字である Unix で
+        // 名前を潰してしまう。
+        Some(rest) if rest.starts_with(std::path::is_separator) => {
+            return home.join(rest.trim_start_matches(std::path::is_separator));
         }
         // `~other/x` は別人のホームを指す記法。escrow は解釈しない。
         _ => Path::new(raw),
@@ -571,13 +569,29 @@ interval_hours = 0
 
         assert_eq!(expand("~", home), Path::new("/Users/t"));
         assert_eq!(expand("~/Movies", home), Path::new("/Users/t/Movies"));
-        assert_eq!(expand("~\\Movies", home), Path::new("/Users/t/Movies"));
         assert_eq!(
             expand("/opt/homebrew/bin", home),
             Path::new("/opt/homebrew/bin")
         );
         // 途中の `~` は普通の文字。
         assert_eq!(expand("/tmp/~/x", home), Path::new("/tmp/~/x"));
+
+        // 区切りの判定は std に任せてあるので、その環境の区切りで通ること。
+        let separator = std::path::MAIN_SEPARATOR;
+        assert_eq!(
+            expand(&format!("~{separator}Movies"), home),
+            Path::new("/Users/t/Movies")
+        );
+    }
+
+    /// Unix では `\` は普通のファイル名文字。区切りとして扱うと名前が潰れる。
+    #[cfg(unix)]
+    #[test]
+    fn a_backslash_is_an_ordinary_character_here() {
+        let home = Path::new("/Users/t");
+
+        assert_eq!(expand("~\\Movies", home), Path::new("/Users/t/~\\Movies"));
+        assert_eq!(expand("/tmp/a\\b", home), Path::new("/tmp/a\\b"));
     }
 
     /// 相対パスは CWD ではなくホームを基準にする。
