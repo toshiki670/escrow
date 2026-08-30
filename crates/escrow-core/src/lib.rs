@@ -7,6 +7,7 @@
 //! 境界で型のある値へ写し、写した先では全域関数だけで扱う。
 
 pub mod asset;
+pub mod config;
 pub mod content;
 pub mod item;
 pub mod liveness;
@@ -14,4 +15,5 @@ pub mod source;
 pub mod state;
 pub mod store;
 pub mod timestamp;
+pub mod tools;
 pub mod url;
