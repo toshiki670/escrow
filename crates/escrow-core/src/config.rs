@@ -9,7 +9,7 @@
 
 use std::fmt;
 use std::num::NonZeroU32;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -391,23 +391,23 @@ impl Paths {
 
 /// 設定に書かれたパスを実際の場所へ写す。
 ///
-/// 先頭の `~` はホームへ差し替える。それ以外の位置の `~` は普通の文字。
+/// 先頭の1成分が `~` のときだけホームへ差し替える。`~` はシェルの記法で
+/// [`std::path`] の概念ではないので、その一段だけがここの仕事。
 ///
-/// **相対パスもホーム基準にする。** プロセスの CWD を基準にすると、ターミナルから
+/// **成分の切り出しは [`Path::components`] に任せる。** 区切りが何文字か、
+/// 重複した区切りをどう畳むか、`~other` が別の成分かは、すべてそちらが答える。
+/// 自分で文字列を切ると環境差が入り込む。
+///
+/// **相対パスはホーム基準にする。** プロセスの CWD を基準にすると、ターミナルから
 /// 起動したときと GUI から起動したときで同じ設定が別の場所を指す。#2 の既定は
 /// どれもホーム配下なので、ホーム基準の方が読みとしても自然。
 fn expand(raw: &str, home: &Path) -> PathBuf {
-    let path = match raw.strip_prefix('~') {
-        Some("") => return home.to_owned(),
-        // 区切りかどうかは [`std::path::is_separator`] に決めさせる。自分で
-        // `/` と `\` を並べると、`\` が正規のファイル名文字である Unix で
-        // 名前を潰してしまう。
-        Some(rest) if rest.starts_with(std::path::is_separator) => {
-            return home.join(rest.trim_start_matches(std::path::is_separator));
-        }
-        // `~other/x` は別人のホームを指す記法。escrow は解釈しない。
-        _ => Path::new(raw),
-    };
+    let path = Path::new(raw);
+
+    let mut rest = path.components();
+    if matches!(rest.next(), Some(Component::Normal(first)) if first == "~") {
+        return home.join(rest.as_path());
+    }
 
     if path.is_absolute() {
         path.to_owned()
@@ -573,18 +573,21 @@ interval_hours = 0
             expand("/opt/homebrew/bin", home),
             Path::new("/opt/homebrew/bin")
         );
-        // 途中の `~` は普通の文字。
+        // 先頭の成分でなければ `~` は普通の名前。
         assert_eq!(expand("/tmp/~/x", home), Path::new("/tmp/~/x"));
-
-        // 区切りの判定は std に任せてあるので、その環境の区切りで通ること。
-        let separator = std::path::MAIN_SEPARATOR;
-        assert_eq!(
-            expand(&format!("~{separator}Movies"), home),
-            Path::new("/Users/t/Movies")
-        );
     }
 
-    /// Unix では `\` は普通のファイル名文字。区切りとして扱うと名前が潰れる。
+    /// 区切りの重複や `.` は [`Path::components`] が畳む。自分では扱わない。
+    #[test]
+    fn the_path_parser_normalizes_the_rest() {
+        let home = Path::new("/Users/t");
+
+        assert_eq!(expand("~//Movies", home), Path::new("/Users/t/Movies"));
+        assert_eq!(expand("~/./Movies", home), Path::new("/Users/t/Movies"));
+    }
+
+    /// この環境で `\` が区切りかどうかも [`Path::components`] が答える。
+    /// Unix では普通のファイル名文字なので、`~\Movies` は1つの成分。
     #[cfg(unix)]
     #[test]
     fn a_backslash_is_an_ordinary_character_here() {
