@@ -17,26 +17,7 @@ use std::io;
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 
-/// `Item` の外部ハンドル。#4 の `escrow release <id>` が受け取る値で、
-/// 実体の置き場所もここから導出される（#1）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct ItemId(i64);
-
-impl ItemId {
-    pub const fn new(id: i64) -> Self {
-        Self(id)
-    }
-
-    pub const fn get(self) -> i64 {
-        self.0
-    }
-}
-
-impl fmt::Display for ItemId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
+use crate::item::ItemId;
 
 /// 実体の種類。ファイル名の先頭に出る。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]

@@ -11,7 +11,8 @@ use crate::liveness::PresenceConfirmed;
 ///
 /// 文字列から作る口はここに置かない。`state` と `release_reference` の2列を
 /// 揃えて初めて決まるので、片方だけ見る `FromStr` は黙って `Released { reference: None }`
-/// を作ってしまう。読み戻しは行を丸ごと見る parse 層の仕事。
+/// を作ってしまう。読み戻しは行を丸ごと見る parse 層の仕事で、名前だけが要る
+/// 場面には [`StateName`] がある。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum State {
     /// 見つけたが、まだ取得していない。
@@ -37,9 +38,27 @@ pub enum State {
     Error,
 }
 
-impl State {
+/// 状態の名前だけ。
+///
+/// 値を伴わない場面 — DB の絞り込み、#4 の `--state`、#6 の一覧の見出し — で使う。
+/// [`State`] と違って `release_reference` を持たないので、名前から状態を復元する
+/// つもりの誤用が起きない。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum StateName {
+    Waiting,
+    Acquiring,
+    Transcribing,
+    Holding,
+    Kept,
+    Discarded,
+    Released,
+    Deleted,
+    Error,
+}
+
+impl StateName {
     /// #1 の状態表の値。DB と #4 の JSON に出る文字列。
-    pub const fn as_str(&self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Waiting => "waiting",
             Self::Acquiring => "acquiring",
@@ -47,10 +66,65 @@ impl State {
             Self::Holding => "holding",
             Self::Kept => "kept",
             Self::Discarded => "discarded",
-            Self::Released { .. } => "released",
+            Self::Released => "released",
             Self::Deleted => "deleted",
             Self::Error => "error",
         }
+    }
+
+    pub const ALL: [Self; 9] = [
+        Self::Waiting,
+        Self::Acquiring,
+        Self::Transcribing,
+        Self::Holding,
+        Self::Kept,
+        Self::Discarded,
+        Self::Released,
+        Self::Deleted,
+        Self::Error,
+    ];
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error("escrow が知らない状態: {0}")]
+pub struct UnknownState(pub String);
+
+impl std::str::FromStr for StateName {
+    type Err = UnknownState;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::ALL
+            .into_iter()
+            .find(|n| n.as_str() == s)
+            .ok_or_else(|| UnknownState(s.to_owned()))
+    }
+}
+
+impl std::fmt::Display for StateName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl State {
+    /// 値を落とした名前。
+    pub const fn name(&self) -> StateName {
+        match self {
+            Self::Waiting => StateName::Waiting,
+            Self::Acquiring => StateName::Acquiring,
+            Self::Transcribing => StateName::Transcribing,
+            Self::Holding => StateName::Holding,
+            Self::Kept => StateName::Kept,
+            Self::Discarded => StateName::Discarded,
+            Self::Released { .. } => StateName::Released,
+            Self::Deleted => StateName::Deleted,
+            Self::Error => StateName::Error,
+        }
+    }
+
+    /// #1 の状態表の値。DB と #4 の JSON に出る文字列。
+    pub const fn as_str(&self) -> &'static str {
+        self.name().as_str()
     }
 
     /// 見つけた直後の状態。#1 の `[*]` から出る2本。
@@ -489,6 +563,18 @@ mod tests {
     fn initial_state_follows_whether_there_is_media_to_fetch() {
         assert_eq!(State::initial(MediaPresence::Present), State::Waiting);
         assert_eq!(State::initial(MediaPresence::Absent), State::Kept);
+    }
+
+    /// 状態と名前が1対1であること。どちらかを足したらここが落ちる。
+    #[test]
+    fn every_state_has_a_name_and_back() {
+        let names: Vec<StateName> = State::all().iter().map(State::name).collect();
+        assert_eq!(names, StateName::ALL.to_vec());
+
+        for name in StateName::ALL {
+            assert_eq!(name.as_str().parse::<StateName>().unwrap(), name);
+        }
+        assert!("gone".parse::<StateName>().is_err());
     }
 
     #[test]

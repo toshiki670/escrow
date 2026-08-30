@@ -7,6 +7,9 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # sqlx の query! はビルド時にスキーマを突き合わせる。CI に DB は置かず、
+  # コミット済みの .sqlx/ を読む。SQL を変えたら cargo sqlx prepare を掛け直す。
+  SQLX_OFFLINE: "true"
 
 jobs:
   check:

@@ -10,6 +10,8 @@ use crate::url::NormalizedUrl;
 /// #1 の種別。subtype の判別子を兼ねる。
 ///
 /// 値はプラットフォーム名を含み、プラットフォームをまたいで重複しない。
+/// 中身を持たない場面（`Exclude` の対象、#6 の絞り込み、DB の列）でも使うので、
+/// [`Content`] とは別に立っている。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ContentType {
     YoutubeShorts,
@@ -33,16 +35,18 @@ impl ContentType {
         }
     }
 
-    /// 種別が決まれば中身の形も決まる。#1 の subtype 列。
-    pub const fn shape(self) -> ContentShape {
+    /// subtype が `Media` ならその種別。`Post` 側（`x_post`）は `None`。
+    pub const fn media_type(self) -> Option<MediaType> {
         match self {
-            Self::YoutubeShorts | Self::YoutubeVideo | Self::YoutubeLive => ContentShape::Media,
-            Self::XPost => ContentShape::Post,
-            Self::XSpace | Self::XBroadcast => ContentShape::Media,
+            Self::YoutubeShorts => Some(MediaType::YoutubeShorts),
+            Self::YoutubeVideo => Some(MediaType::YoutubeVideo),
+            Self::YoutubeLive => Some(MediaType::YoutubeLive),
+            Self::XSpace => Some(MediaType::XSpace),
+            Self::XBroadcast => Some(MediaType::XBroadcast),
+            Self::XPost => None,
         }
     }
 
-    /// 巡回や網羅テストのために全種別を並べる。
     pub const ALL: [Self; 6] = [
         Self::YoutubeShorts,
         Self::YoutubeVideo,
@@ -53,11 +57,29 @@ impl ContentType {
     ];
 }
 
-/// 中身の形。`Post` も画像や動画を持つので、境目は**本文の枠があるかどうか**（#1）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ContentShape {
-    Media,
-    Post,
+/// subtype が `Media` になる種別。#1 の表で `Media` 側の5つ。
+///
+/// [`Content::Media`] がこれを持つことで、`content_type` と中身の食い違いが
+/// **表現できなくなる**。両方を並べて持って突き合わせる、という形にしない。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum MediaType {
+    YoutubeShorts,
+    YoutubeVideo,
+    YoutubeLive,
+    XSpace,
+    XBroadcast,
+}
+
+impl MediaType {
+    pub const fn content_type(self) -> ContentType {
+        match self {
+            Self::YoutubeShorts => ContentType::YoutubeShorts,
+            Self::YoutubeVideo => ContentType::YoutubeVideo,
+            Self::YoutubeLive => ContentType::YoutubeLive,
+            Self::XSpace => ContentType::XSpace,
+            Self::XBroadcast => ContentType::XBroadcast,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -85,11 +107,20 @@ impl fmt::Display for ContentType {
 ///
 /// 「`Media` に `body` は無い」を守るのは Rust の enum であって DB ではない（#1）。
 /// DB は平らなカラムを持つだけで、`CHECK` 制約も置かない。保証はここ。
+///
+/// 種別は中身から導ける（[`Content::content_type`]）ので、並べて持たない。
+/// #1 の「計算・導出できるものは持たない」。
+///
+/// `Post` も画像や動画を持つので、境目は「メディアを持つほう」ではなく
+/// **本文の枠があるかどうか**（#1）。動画だけの X 投稿は `body` が空の `Post`。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Content {
-    /// 見出しを持つ項目。YouTube の全種別、X Space、X ライブ配信。
-    Media { title: String },
-    /// 本文と繋がりを持つ項目。X 投稿。
+    /// 見出しを持つ項目。
+    Media {
+        media_type: MediaType,
+        title: String,
+    },
+    /// 本文と繋がりを持つ項目。いまは `x_post` だけがこの形。
     Post {
         /// 動画だけの投稿では空文字列になる。「無い」のではなく「空」。
         body: String,
@@ -99,16 +130,21 @@ pub enum Content {
 }
 
 impl Content {
-    pub const fn shape(&self) -> ContentShape {
+    pub const fn content_type(&self) -> ContentType {
         match self {
-            Self::Media { .. } => ContentShape::Media,
-            Self::Post { .. } => ContentShape::Post,
+            Self::Media { media_type, .. } => media_type.content_type(),
+            Self::Post { .. } => ContentType::XPost,
         }
     }
 
-    /// 種別と中身が噛み合っているか。境界で行を組み立てるときに使う。
-    pub fn matches(&self, content_type: ContentType) -> bool {
-        self.shape() == content_type.shape()
+    /// #6 の一覧に出す見出し。`Media` は `title`、`Post` は `body`。
+    ///
+    /// 何文字で切るか改行をどう畳むかは表示する側が決めるので、ここでは丸ごと返す（#4）。
+    pub fn headline(&self) -> &str {
+        match self {
+            Self::Media { title, .. } => title,
+            Self::Post { body, .. } => body,
+        }
     }
 }
 
@@ -117,34 +153,38 @@ mod tests {
     use super::*;
 
     /// #1 の種別表をそのまま写したもの。表が動いたらここが落ちる。
-    const TABLE: [(ContentType, &str, ContentShape); 6] = [
+    const TABLE: [(ContentType, &str, Option<MediaType>); 6] = [
         (
             ContentType::YoutubeShorts,
             "youtube_shorts",
-            ContentShape::Media,
+            Some(MediaType::YoutubeShorts),
         ),
         (
             ContentType::YoutubeVideo,
             "youtube_video",
-            ContentShape::Media,
+            Some(MediaType::YoutubeVideo),
         ),
         (
             ContentType::YoutubeLive,
             "youtube_live",
-            ContentShape::Media,
+            Some(MediaType::YoutubeLive),
         ),
-        (ContentType::XPost, "x_post", ContentShape::Post),
-        (ContentType::XSpace, "x_space", ContentShape::Media),
-        (ContentType::XBroadcast, "x_broadcast", ContentShape::Media),
+        (ContentType::XPost, "x_post", None),
+        (ContentType::XSpace, "x_space", Some(MediaType::XSpace)),
+        (
+            ContentType::XBroadcast,
+            "x_broadcast",
+            Some(MediaType::XBroadcast),
+        ),
     ];
 
     #[test]
     fn matches_the_type_table() {
         assert_eq!(TABLE.len(), ContentType::ALL.len(), "ALL に漏れがある");
 
-        for (content_type, value, shape) in TABLE {
+        for (content_type, value, media_type) in TABLE {
             assert_eq!(content_type.as_str(), value);
-            assert_eq!(content_type.shape(), shape);
+            assert_eq!(content_type.media_type(), media_type);
             assert_eq!(value.parse::<ContentType>().unwrap(), content_type);
         }
     }
@@ -155,9 +195,29 @@ mod tests {
         assert!("".parse::<ContentType>().is_err());
     }
 
+    /// 種別と中身は往復する。`Media` 側の5つはどれも同じ値へ戻る。
     #[test]
-    fn shape_must_agree_with_the_discriminator() {
+    fn content_carries_its_own_type() {
+        for (content_type, _, media_type) in TABLE {
+            let content = match media_type {
+                Some(media_type) => Content::Media {
+                    media_type,
+                    title: "○○の雑談配信".to_owned(),
+                },
+                None => Content::Post {
+                    body: "明日の配信は21時から。".to_owned(),
+                    in_reply_to: None,
+                    quoted: None,
+                },
+            };
+            assert_eq!(content.content_type(), content_type);
+        }
+    }
+
+    #[test]
+    fn headline_comes_from_whichever_field_the_shape_has() {
         let media = Content::Media {
+            media_type: MediaType::YoutubeLive,
             title: "○○の雑談配信".to_owned(),
         };
         let post = Content::Post {
@@ -166,9 +226,7 @@ mod tests {
             quoted: None,
         };
 
-        assert!(media.matches(ContentType::YoutubeLive));
-        assert!(!media.matches(ContentType::XPost));
-        assert!(post.matches(ContentType::XPost));
-        assert!(!post.matches(ContentType::XSpace));
+        assert_eq!(media.headline(), "○○の雑談配信");
+        assert_eq!(post.headline(), "明日の配信は21時から。");
     }
 }
