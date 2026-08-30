@@ -333,10 +333,12 @@ impl Dirs {
     pub fn discover() -> Result<Self, ConfigError> {
         let project =
             directories::ProjectDirs::from("", "", "escrow").ok_or(ConfigError::NoHome)?;
-        let home = directories::BaseDirs::new().ok_or(ConfigError::NoHome)?;
+        // ホームは std が答える。`directories` は Application Support の
+        // 場所を出すためだけに使う。
+        let home = std::env::home_dir().ok_or(ConfigError::NoHome)?;
 
         Ok(Self {
-            home: home.home_dir().to_owned(),
+            home,
             config_dir: project.config_dir().to_owned(),
             data_dir: project.data_dir().to_owned(),
         })

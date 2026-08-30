@@ -9,6 +9,7 @@
 pub mod asset;
 pub mod config;
 pub mod content;
+mod id;
 pub mod item;
 pub mod liveness;
 pub mod source;

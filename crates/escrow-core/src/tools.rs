@@ -132,17 +132,17 @@ impl Resolver {
     }
 }
 
-#[cfg(unix)]
+/// **このプロセスが実行できるか**を確かめる。
+///
+/// 実行ビットが「誰かに」立っているかを自分で見ると、他人にだけ実行を許した
+/// ファイル（`0o010` など）を見つけたことにしてしまい、実際に起動して初めて
+/// 落ちる。しかも PATH の手前にそれが在ると、後ろの本物を隠す。
+///
+/// 正しい問いは `access(2)` の `X_OK` だが、std が出すのは `mode` までで、
+/// `access` を直接呼ぶには `unsafe` が要る（この crate は `unsafe_code = "forbid"`）。
+/// `which` に任せる。絶対パスを渡した場合は PATH を読まず、その1つを調べる。
 fn is_executable(path: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-
-    std::fs::metadata(path)
-        .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
-}
-
-#[cfg(not(unix))]
-fn is_executable(path: &Path) -> bool {
-    path.is_file()
+    which::which(path).is_ok()
 }
 
 #[cfg(test)]
@@ -232,15 +232,48 @@ mod tests {
         assert_eq!(resolver.resolve(Tool::YtDlp), Resolution::Found(expected));
     }
 
-    /// 名前が合っていても実行できなければ見つけたことにしない。
+    /// 名前が合っていても、**このプロセスが実行できなければ**見つけたことにしない。
+    ///
+    /// `0o010` / `0o001` は「誰かに実行ビットが立っている」が自分では起動できない。
+    /// 見つけたことにすると、PATH の後ろに在る本物を隠して実行時に落ちる。
     #[cfg(unix)]
     #[test]
-    fn a_file_without_the_executable_bit_does_not_count() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("yt-dlp"), b"not executable").unwrap();
+    fn a_file_this_process_cannot_run_does_not_count() {
+        use std::os::unix::fs::PermissionsExt;
 
-        let resolver = Resolver::new(Some(&path_var(&[dir.path()])), &[]);
-        assert_eq!(resolver.resolve(Tool::YtDlp), Resolution::NotFound);
+        for mode in [0o644, 0o444, 0o010, 0o001] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("yt-dlp");
+            std::fs::write(&path, b"#!/bin/sh\n").unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
+
+            let resolver = Resolver::new(Some(&path_var(&[dir.path()])), &[]);
+            assert_eq!(
+                resolver.resolve(Tool::YtDlp),
+                Resolution::NotFound,
+                "mode {mode:o}"
+            );
+        }
+    }
+
+    /// Homebrew や mise が張る symlink は追う。
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_to_an_executable_counts() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let cellar = tempfile::tempdir().unwrap();
+        let bin = tempfile::tempdir().unwrap();
+
+        let real = cellar.path().join("yt-dlp");
+        std::fs::write(&real, b"#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let link = bin.path().join("yt-dlp");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        let resolver = Resolver::new(Some(&path_var(&[bin.path()])), &[]);
+        assert!(resolver.resolve(Tool::YtDlp).is_found());
     }
 
     #[test]
