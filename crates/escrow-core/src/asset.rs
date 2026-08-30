@@ -113,9 +113,14 @@ pub fn item_dir(media_dir: &Path, item: ItemId) -> PathBuf {
 ///
 /// ディレクトリが無い場合は空を返す。まだ何も取得していない項目は普通にこれ。
 pub fn scan(media_dir: &Path, item: ItemId) -> io::Result<Vec<Asset>> {
-    let dir = item_dir(media_dir, item);
+    scan_dir(&item_dir(media_dir, item))
+}
 
-    let entries = match fs::read_dir(&dir) {
+/// 置き場所を直接指してのぞく。
+///
+/// 外部ツールのアダプタは `ItemId` を知らず、書き込み先のディレクトリだけを渡される。
+pub fn scan_dir(dir: &Path) -> io::Result<Vec<Asset>> {
+    let entries = match fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(e) => return Err(e),
