@@ -1,0 +1,20 @@
+[package]
+name = "escrow-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# バイナリ名は escrow。#3 の Cask が Contents/MacOS/escrow を PATH へ繋ぎ、
+# #4 の外部インターフェースも escrow を呼ぶ前提で書かれている。
+[[bin]]
+name = "escrow"
+path = "src/main.rs"
+
+[dependencies]
+escrow-core.workspace = true
+clap.workspace = true
+
+[lints]
+workspace = true

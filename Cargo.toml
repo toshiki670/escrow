@@ -1,0 +1,20 @@
+[workspace]
+resolver = "3"
+members = ["crates/escrow-core", "crates/escrow-cli", "crates/escrow-gui"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+license = "MIT"
+repository = "https://github.com/toshiki670/escrow"
+
+[workspace.dependencies]
+escrow-core = { path = "crates/escrow-core" }
+clap = { version = "4.6", features = ["derive"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
