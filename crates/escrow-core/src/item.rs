@@ -1,34 +1,18 @@
 //! 見つけた1件と、その現在の状態。台帳を兼ね、手放した後も行は残る（#1）。
 
-use std::fmt;
-
 use crate::content::{Content, ContentType};
+use crate::id::id_type;
 use crate::source::SourceId;
 use crate::state::State;
 use crate::timestamp::Timestamp;
 use crate::url::NormalizedUrl;
 
-/// `Item` の外部ハンドル。
-///
-/// #4 の `escrow release <id>` が受け取る値で、実体の置き場所もここから導出される（#1）。
-/// `url` が自然キーで、こちらは外へ見せる同一性。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct ItemId(i64);
-
-impl ItemId {
-    pub const fn new(id: i64) -> Self {
-        Self(id)
-    }
-
-    pub const fn get(self) -> i64 {
-        self.0
-    }
-}
-
-impl fmt::Display for ItemId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
+id_type! {
+    /// `Item` の外部ハンドル。
+    ///
+    /// #4 の `escrow release <id>` が受け取る値で、実体の置き場所もここから導出される（#1）。
+    /// `url` が自然キーで、こちらは外へ見せる同一性。
+    ItemId
 }
 
 /// 台帳の1行。

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id AS \"id!\", source_id, content_type, enabled FROM exclude ORDER BY id",
+  "query": "SELECT id AS \"id!\", source_id, content_type, enabled AS \"enabled: bool\"\n               FROM exclude ORDER BY id",
   "describe": {
     "columns": [
       {
@@ -37,7 +37,7 @@
         }
       },
       {
-        "name": "enabled",
+        "name": "enabled: bool",
         "ordinal": 3,
         "type_info": "Integer",
         "origin": {
@@ -58,5 +58,5 @@
       false
     ]
   },
-  "hash": "ada0500e2b6bc13a27cf4322b70f5fa71cb82bbf3fb5b87573dbd0b1bd8f2c8f"
+  "hash": "ddd0497ac01a6d14f2cefad7a0f86215b688b9a950e18fef397936826f47432a"
 }

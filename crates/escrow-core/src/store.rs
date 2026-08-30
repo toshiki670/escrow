@@ -211,7 +211,7 @@ impl Store {
     pub async fn source(&self, id: SourceId) -> Result<Option<Source>, StoreError> {
         let key = id.get();
         let row = sqlx::query!(
-            r#"SELECT id AS "id!", person_id, url, enabled, created_at, hold_days,
+            r#"SELECT id AS "id!", person_id, url, enabled AS "enabled: bool", created_at, hold_days,
                       discover_interval_minutes
                FROM source WHERE id = ?"#,
             key
@@ -233,7 +233,7 @@ impl Store {
             id: SourceId::new(row.id),
             person_id: PersonId::new(row.person_id),
             url,
-            enabled: row.enabled != 0,
+            enabled: row.enabled,
             created_at: Timestamp::parse(&row.created_at).map_err(|_| {
                 RowError::BadSourceTimestamp {
                     id: row.id,
@@ -282,7 +282,8 @@ impl Store {
     /// 全除外条件。当たり判定は [`Exclude::covers`] が持つ。
     pub async fn excludes(&self) -> Result<Vec<Exclude>, StoreError> {
         let rows = sqlx::query!(
-            r#"SELECT id AS "id!", source_id, content_type, enabled FROM exclude ORDER BY id"#
+            r#"SELECT id AS "id!", source_id, content_type, enabled AS "enabled: bool"
+               FROM exclude ORDER BY id"#
         )
         .fetch_all(&self.pool)
         .await?;
@@ -298,7 +299,7 @@ impl Store {
                             value: row.content_type.clone(),
                         }
                     })?,
-                    enabled: row.enabled != 0,
+                    enabled: row.enabled,
                 })
             })
             .collect()

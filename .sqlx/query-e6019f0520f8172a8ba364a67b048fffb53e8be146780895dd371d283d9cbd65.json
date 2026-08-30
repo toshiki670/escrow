@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id AS \"id!\", person_id, url, enabled, created_at, hold_days,\n                      discover_interval_minutes\n               FROM source WHERE id = ?",
+  "query": "SELECT id AS \"id!\", person_id, url, enabled AS \"enabled: bool\", created_at, hold_days,\n                      discover_interval_minutes\n               FROM source WHERE id = ?",
   "describe": {
     "columns": [
       {
@@ -37,7 +37,7 @@
         }
       },
       {
-        "name": "enabled",
+        "name": "enabled: bool",
         "ordinal": 3,
         "type_info": "Integer",
         "origin": {
@@ -94,5 +94,5 @@
       false
     ]
   },
-  "hash": "fcf60a36509ce3c3dd1a4ec91066748955072d477a9b2c59ad79f75b59647cce"
+  "hash": "e6019f0520f8172a8ba364a67b048fffb53e8be146780895dd371d283d9cbd65"
 }

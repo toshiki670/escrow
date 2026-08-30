@@ -1,36 +1,12 @@
 //! 配信元と、その持ち主、取り込まない種別。#1 の `Person` / `Source` / `Exclude`。
 
-use std::fmt;
 use std::num::NonZeroU32;
 
 use crate::content::ContentType;
+use crate::id::id_type;
 use crate::state::HoldPolicy;
 use crate::timestamp::Timestamp;
 use crate::url::NormalizedUrl;
-
-macro_rules! id_type {
-    ($(#[$meta:meta])* $name:ident) => {
-        $(#[$meta])*
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-        pub struct $name(i64);
-
-        impl $name {
-            pub const fn new(id: i64) -> Self {
-                Self(id)
-            }
-
-            pub const fn get(self) -> i64 {
-                self.0
-            }
-        }
-
-        impl fmt::Display for $name {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                write!(f, "{}", self.0)
-            }
-        }
-    };
-}
 
 id_type! {
     /// 配信元の持ち主の識別子。
