@@ -123,10 +123,16 @@ impl TryFrom<String> for Language {
     type Error = EmptyLanguage;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        match value.as_str() {
-            "" => Err(EmptyLanguage),
-            "auto" => Ok(Self::Auto),
-            _ => Ok(Self::Code(value)),
+        // 前後の空白と `auto` の綴り揺れだけ吸収する。言語コードそのものは
+        // whisper が解釈するので、escrow は畳まない。
+        let trimmed = value.trim();
+
+        if trimmed.is_empty() {
+            Err(EmptyLanguage)
+        } else if trimmed.eq_ignore_ascii_case("auto") {
+            Ok(Self::Auto)
+        } else {
+            Ok(Self::Code(trimmed.to_owned()))
         }
     }
 }
@@ -264,18 +270,34 @@ impl Config {
     }
 
     /// 設定画面から書き戻す。**コメントは保持しない**（#2）。
+    ///
+    /// 同じディレクトリの一時ファイルへ書いてから rename する。途中で落ちても、
+    /// 切れた設定ファイルが残らない。[`Config::load`] は無いファイルだけ既定に
+    /// 落として壊れたファイルは落とすので、**自分の書き込みでその状態を作らない**
+    /// ようにしておく。
     pub fn save(&self, path: &Path) -> Result<(), ConfigError> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|source| ConfigError::Io {
-                path: parent.to_owned(),
-                source,
-            })?;
-        }
+        use std::io::Write as _;
 
-        std::fs::write(path, self.to_toml()?).map_err(|source| ConfigError::Io {
+        let text = self.to_toml()?;
+        let parent = path.parent().unwrap_or(Path::new("."));
+
+        let io_error = |path: &Path| {
+            let path = path.to_owned();
+            move |source| ConfigError::Io { path, source }
+        };
+
+        std::fs::create_dir_all(parent).map_err(io_error(parent))?;
+
+        let mut temp = tempfile::NamedTempFile::new_in(parent).map_err(io_error(parent))?;
+        temp.write_all(text.as_bytes()).map_err(io_error(parent))?;
+        // rename が先に見えて中身が後、を防ぐ。
+        temp.as_file().sync_all().map_err(io_error(parent))?;
+        temp.persist(path).map_err(|e| ConfigError::Io {
             path: path.to_owned(),
-            source,
-        })
+            source: e.error,
+        })?;
+
+        Ok(())
     }
 
     pub fn from_toml(text: &str) -> Result<Self, ConfigError> {
@@ -367,17 +389,32 @@ impl Paths {
     }
 }
 
-/// 先頭の `~` をホームへ差し替える。それ以外の位置の `~` は触らない。
+/// 設定に書かれたパスを実際の場所へ写す。
+///
+/// 先頭の `~` はホームへ差し替える。それ以外の位置の `~` は普通の文字。
+///
+/// **相対パスもホーム基準にする。** プロセスの CWD を基準にすると、ターミナルから
+/// 起動したときと GUI から起動したときで同じ設定が別の場所を指す。#2 の既定は
+/// どれもホーム配下なので、ホーム基準の方が読みとしても自然。
 fn expand(raw: &str, home: &Path) -> PathBuf {
-    match raw.strip_prefix('~') {
-        Some("") => home.to_owned(),
-        Some(rest) => match rest.strip_prefix('/') {
-            // `~/x` はホーム配下。`~other/x` は別人のホームを指す記法だが、
-            // escrow は解釈しないのでそのまま渡す。
-            Some(rest) => home.join(rest),
-            None => PathBuf::from(raw),
-        },
-        None => PathBuf::from(raw),
+    // パス区切りは `/` と `\` の両方を見る。macOS では前者だけだが、
+    // 区切りを1つに決め打つ理由もない。
+    const SEPARATORS: [char; 2] = ['/', '\\'];
+
+    let path = match raw.strip_prefix('~') {
+        Some("") => return home.to_owned(),
+        // `~/x` はホーム配下。
+        Some(rest) if rest.starts_with(SEPARATORS) => {
+            return home.join(rest.trim_start_matches(SEPARATORS));
+        }
+        // `~other/x` は別人のホームを指す記法。escrow は解釈しない。
+        _ => Path::new(raw),
+    };
+
+    if path.is_absolute() {
+        path.to_owned()
+    } else {
+        home.join(path)
     }
 }
 
@@ -534,15 +571,83 @@ interval_hours = 0
 
         assert_eq!(expand("~", home), Path::new("/Users/t"));
         assert_eq!(expand("~/Movies", home), Path::new("/Users/t/Movies"));
+        assert_eq!(expand("~\\Movies", home), Path::new("/Users/t/Movies"));
         assert_eq!(
             expand("/opt/homebrew/bin", home),
             Path::new("/opt/homebrew/bin")
         );
-        assert_eq!(expand("relative/path", home), Path::new("relative/path"));
-        // 別人のホームを指す記法。escrow は解釈せずそのまま渡す。
-        assert_eq!(expand("~other/x", home), Path::new("~other/x"));
         // 途中の `~` は普通の文字。
         assert_eq!(expand("/tmp/~/x", home), Path::new("/tmp/~/x"));
+    }
+
+    /// 相対パスは CWD ではなくホームを基準にする。
+    ///
+    /// CWD 基準にすると、ターミナルから起動したときと GUI から起動したときで
+    /// 同じ設定が別の場所を指す。
+    #[test]
+    fn relative_paths_hang_off_home_not_the_working_directory() {
+        let home = Path::new("/Users/t");
+
+        assert_eq!(
+            expand("Movies/escrow", home),
+            Path::new("/Users/t/Movies/escrow")
+        );
+        // 別人のホームを指す記法も、escrow は解釈せずホーム基準の相対として扱う。
+        assert_eq!(expand("~other/x", home), Path::new("/Users/t/~other/x"));
+    }
+
+    /// 一部のセクションだけ書いた設定が、残りの既定と混ざること。
+    /// `serde(default)` の契約を固定しておく。
+    #[test]
+    fn a_partial_file_merges_with_the_defaults() {
+        let partial = r#"
+[storage]
+min_free_gb = 50
+"#;
+        let config = Config::from_toml(partial).unwrap();
+
+        assert_eq!(config.storage.min_free_gb, 50);
+        // 同じセクションの他の項目も、別のセクションも既定のまま。
+        assert_eq!(config.storage.media_dir, Storage::default().media_dir);
+        assert_eq!(config.transcribe, Transcribe::default());
+        assert_eq!(config.auth, Auth::default());
+    }
+
+    /// 書き戻しは一時ファイル経由。中途半端なファイルも書き残しも残らない。
+    #[test]
+    fn saving_leaves_nothing_but_the_config_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+
+        Config::default().save(&path).unwrap();
+        let mut config = Config::default();
+        config.storage.min_free_gb = 99;
+        config.save(&path).unwrap();
+
+        let left: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(left, ["config.toml"], "一時ファイルが残っていない");
+        assert_eq!(Config::load(&path).unwrap().storage.min_free_gb, 99);
+    }
+
+    /// `auto` の綴り揺れと前後の空白は吸収する。言語コードそのものは畳まない。
+    #[test]
+    fn the_auto_sentinel_tolerates_spelling() {
+        for raw in ["auto", "AUTO", "Auto", "  auto  "] {
+            assert_eq!(
+                Language::try_from(raw.to_owned()).unwrap(),
+                Language::Auto,
+                "{raw:?}"
+            );
+        }
+
+        assert_eq!(
+            Language::try_from("  ja  ".to_owned()).unwrap(),
+            Language::Code("ja".to_owned())
+        );
+        assert!(Language::try_from("   ".to_owned()).is_err());
     }
 
     #[test]
