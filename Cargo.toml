@@ -12,6 +12,10 @@ repository = "https://github.com/toshiki670/escrow"
 [workspace.dependencies]
 escrow-core = { path = "crates/escrow-core" }
 clap = { version = "4.6", features = ["derive"] }
+thiserror = "2.0"
+url = "2.5"
+
+tempfile = "3.27"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
