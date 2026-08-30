@@ -1,0 +1,15 @@
+# sqlx の query! はビルド時に実スキーマへ SQL を突き合わせる。その参照先。
+# 秘密は入らない（#2 のとおり生の認証情報はファイルに置かない）。
+#
+# 既に DATABASE_URL が環境にあればそちらが優先される（force を付けていないため）。
+#
+# クローン直後の一度だけ、DB の実体を作る:
+#   DATABASE_URL=sqlite://target/escrow-dev.db \
+#     cargo sqlx database setup --source crates/escrow-core/migrations
+#
+# SQL を変えたら .sqlx/ を取り直す:
+#   DATABASE_URL=sqlite://target/escrow-dev.db cargo sqlx prepare --workspace
+#
+# CI は SQLX_OFFLINE=true で .sqlx/ を読むので、この値を使わない。
+[env]
+DATABASE_URL = "sqlite://target/escrow-dev.db"
