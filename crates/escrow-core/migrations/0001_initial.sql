@@ -51,5 +51,8 @@ CREATE TABLE item (
 
 -- #1 の索引表。
 CREATE UNIQUE INDEX item_url ON item(url);
+-- 同じ配信元を二度登録できないようにする。item.url がグローバルに一意なので、
+-- 二個目の配信元は同じ項目を入れられず、検知が毎回空振りする。
+CREATE UNIQUE INDEX source_url ON source(url);
 CREATE INDEX item_state ON item(state);
 CREATE INDEX item_source_id ON item(source_id);

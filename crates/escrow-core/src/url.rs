@@ -183,6 +183,9 @@ fn x_item(url: &Url, input: &str) -> Result<(NormalizedUrl, TypeHint), UrlError>
         // /<handle>/status/<id> と、その後ろに /photo/1 などが付く形。
         // 先頭は捨てるので、/i/status/<id> もここに入る。
         [_, "status" | "statuses", id, ..] => ("status", *id),
+        // 共有リンクやリダイレクトの途中で出る形。x.com/i/web/status/20 は
+        // 307 で x.com/jack/status/20 へ飛ぶ。
+        ["i", "web", "status" | "statuses", id, ..] => ("status", *id),
         ["i", "spaces", id, ..] => ("spaces", *id),
         ["i", "broadcasts", id, ..] => ("broadcasts", *id),
         _ => return Err(not_an_item()),
@@ -288,6 +291,7 @@ mod tests {
             "https://x.com/jack/status/20?s=20&t=abc",
             "https://x.com/jack/status/20/photo/1",
             "https://x.com/i/status/20",
+            "https://x.com/i/web/status/20",
         ] {
             let (url, hint) = normalize_item(input).expect(input);
             assert_eq!(url.as_str(), CANONICAL, "{input}");

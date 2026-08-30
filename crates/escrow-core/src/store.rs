@@ -22,7 +22,7 @@ use thiserror::Error;
 use crate::content::{Content, ContentType};
 use crate::item::{Item, ItemId};
 use crate::source::{Exclude, ExcludeId, Person, PersonId, Source, SourceId};
-use crate::state::{ReleaseReference, State, StateName};
+use crate::state::{self, Event, IllegalTransition, ReleaseReference, State, StateName};
 use crate::timestamp::Timestamp;
 use crate::url::{self, NormalizedUrl};
 
@@ -37,6 +37,8 @@ pub enum StoreError {
     Migrate(#[from] sqlx::migrate::MigrateError),
     #[error("DB の行を読めない")]
     Row(#[from] RowError),
+    #[error(transparent)]
+    IllegalTransition(#[from] IllegalTransition),
 }
 
 /// 行をドメイン型へ写せなかったとき。
@@ -400,25 +402,28 @@ impl Store {
             .map_err(StoreError::Row)
     }
 
-    /// 状態を compare-and-swap で進める。
+    /// 事象を1つ適用する。
     ///
-    /// 期待した状態のときだけ書く。`false` が返ったら、誰かが先に動かしている
-    /// （`escrow release` とエンジンは別プロセス）ので、読み直して決め直す。
+    /// 次の状態は [`crate::state::next`] が決める。**次の状態を直接渡す口は無い**ので、
+    /// 図に無い遷移を DB へ書くことができない。
     ///
-    /// 遷移が正しいかを決めるのは [`crate::state::next`] で、こちらは**決めたときの
-    /// 前提を DB に対して表明する**役。
-    pub async fn advance_state(
+    /// 書き込みは compare-and-swap で、`from` が今も DB の状態と一致するときだけ通る。
+    /// 一致しなければ [`Applied::Superseded`] を返す — `escrow release` とエンジンは
+    /// 別プロセスなので、誰かが先に動かしていることがある。読み直して決め直す。
+    pub async fn apply(
         &self,
         id: ItemId,
-        expected: StateName,
-        next: &State,
+        from: &State,
+        event: &Event,
         now: Timestamp,
-    ) -> Result<bool, StoreError> {
+    ) -> Result<Applied, StoreError> {
+        let next = state::next(from, event)?;
+
         let key = id.get();
-        let expected = expected.as_str();
+        let expected = from.as_str();
         let state = next.as_str();
         let state_since = now.to_text();
-        let reference = match next {
+        let reference = match &next {
             State::Released { reference } => reference.as_ref().map(|r| r.as_str().to_owned()),
             _ => None,
         };
@@ -436,8 +441,21 @@ impl Store {
         .await?
         .rows_affected();
 
-        Ok(affected == 1)
+        Ok(if affected == 1 {
+            Applied::Written(next)
+        } else {
+            Applied::Superseded
+        })
     }
+}
+
+/// [`Store::apply`] の結果。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Applied {
+    /// 書けた。
+    Written(State),
+    /// 読んだときから状態が動いていたので書かなかった。読み直して決め直す。
+    Superseded,
 }
 
 // ---------------------------------------------------------------- 行との往復
@@ -828,9 +846,9 @@ mod tests {
         );
     }
 
-    /// 期待した状態のときだけ書く。誰かが先に動かしていたら書かない。
+    /// 読んだときの状態が動いていたら書かない。
     #[tokio::test]
-    async fn advancing_state_is_compare_and_swap() {
+    async fn applying_an_event_is_compare_and_swap() {
         let (store, source) = seeded().await;
         let id = store
             .add_item(&media_item(source, State::Holding))
@@ -839,43 +857,100 @@ mod tests {
         let now = at("2026-03-08T09:00:00+09:00");
 
         // 別プロセスが先に holding -> kept へ動かした、という体。
-        assert!(
+        assert_eq!(
             store
-                .advance_state(id, StateName::Holding, &State::Kept, now)
-                .await
-                .unwrap()
-        );
-
-        // こちらは holding のつもりで discarded にしようとする。通ってはいけない。
-        assert!(
-            !store
-                .advance_state(id, StateName::Holding, &State::Discarded, now)
+                .apply(id, &State::Holding, &Event::SourceGone, now)
                 .await
                 .unwrap(),
+            Applied::Written(State::Kept)
+        );
+
+        // こちらは holding のつもりで期限切れを適用しようとする。
+        // 遷移としては合法（holding -> discarded）だが、もう holding ではない。
+        let confirmed = crate::liveness::Presence::Present.confirmed().unwrap();
+        assert_eq!(
+            store
+                .apply(id, &State::Holding, &Event::HeldToDeadline(confirmed), now)
+                .await
+                .unwrap(),
+            Applied::Superseded,
             "先に動かされていたら書かない"
         );
 
         assert_eq!(store.item(id).await.unwrap().unwrap().state, State::Kept);
     }
 
+    /// 図に無い遷移は DB まで届かない。次の状態を直接渡す口が無いため。
     #[tokio::test]
-    async fn advancing_to_released_carries_the_reference() {
+    async fn an_illegal_transition_never_reaches_the_database() {
+        let (store, source) = seeded().await;
+        let id = store
+            .add_item(&media_item(source, State::Holding))
+            .await
+            .unwrap();
+
+        // #4 の「holding では release できない」。
+        let result = store
+            .apply(
+                id,
+                &State::Holding,
+                &Event::Released { reference: None },
+                at("2026-03-02T10:00:00+09:00"),
+            )
+            .await;
+
+        assert!(matches!(result, Err(StoreError::IllegalTransition(_))));
+        assert_eq!(store.item(id).await.unwrap().unwrap().state, State::Holding);
+    }
+
+    #[tokio::test]
+    async fn releasing_carries_the_reference() {
         let (store, source) = seeded().await;
         let id = store
             .add_item(&media_item(source, State::Kept))
             .await
             .unwrap();
 
-        let next = State::Released {
-            reference: Some(ReleaseReference::new("Attachments/○○.mp4")),
+        let reference = ReleaseReference::new("Attachments/○○.mp4");
+        let applied = store
+            .apply(
+                id,
+                &State::Kept,
+                &Event::Released {
+                    reference: Some(reference.clone()),
+                },
+                at("2026-03-02T10:00:00+09:00"),
+            )
+            .await
+            .unwrap();
+
+        let expected = State::Released {
+            reference: Some(reference),
         };
-        assert!(
-            store
-                .advance_state(id, StateName::Kept, &next, at("2026-03-02T10:00:00+09:00"))
-                .await
-                .unwrap()
-        );
-        assert_eq!(store.item(id).await.unwrap().unwrap().state, next);
+        assert_eq!(applied, Applied::Written(expected.clone()));
+        assert_eq!(store.item(id).await.unwrap().unwrap().state, expected);
+    }
+
+    /// 同じ配信元を二度登録できない。できてしまうと、二個目は item.url の
+    /// UNIQUE に阻まれて検知が毎回空振りする。
+    #[tokio::test]
+    async fn the_same_source_cannot_be_registered_twice() {
+        let (store, source_id) = seeded().await;
+        let source = store.source(source_id).await.unwrap().unwrap();
+        let person = store.add_person("△△").await.unwrap();
+
+        let again = store
+            .add_source(&NewSource {
+                person_id: person,
+                url: source.url.clone(),
+                enabled: true,
+                created_at: at("2026-02-01T00:00:00+09:00"),
+                hold_days: None,
+                discover_interval_minutes: NonZeroU32::new(5).unwrap(),
+            })
+            .await;
+
+        assert!(again.is_err(), "別の持ち主でも同じ配信元は二度入らない");
     }
 
     /// #1 の「持ち主のいない `Source` は作れない」と、削除の連鎖。
