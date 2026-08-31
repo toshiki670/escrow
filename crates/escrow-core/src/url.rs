@@ -9,7 +9,7 @@
 use thiserror::Error;
 use url::Url;
 
-use crate::content::ContentType;
+use crate::content::{ContentType, Platform};
 
 /// 正規化を通った URL。
 ///
@@ -73,8 +73,8 @@ pub fn normalize_item(input: &str) -> Result<(NormalizedUrl, TypeHint), UrlError
 
 /// 配信元の URL を正規形へ写す。
 ///
-/// YouTube は `@handle` を受け付けない。改名されうるうえ、`UC...` への解決は
-/// ネットワークを要る仕事で、この関数の責務ではないため。解決してから渡す。
+/// ハンドルは受け付けない。改名されうるうえ、不変 ID への解決はネットワークを
+/// 要る仕事で、この関数の責務ではないため。解決してから渡す。
 pub fn normalize_source(input: &str) -> Result<NormalizedUrl, UrlError> {
     let parsed = parse(input)?;
 
@@ -88,16 +88,21 @@ pub fn normalize_source(input: &str) -> Result<NormalizedUrl, UrlError> {
                 input: input.to_owned(),
             }),
         },
-        // X の配信元の正規形は未決（#7）。gallery-dl が数値のユーザー ID を
-        // 返すか確かめられていないので、当てずっぽうの形を作らない。
-        Host::X => Err(UrlError::UnresolvedSource {
-            platform: "X",
-            input: input.to_owned(),
-        }),
+        Host::X => x_source(&parsed, input),
         Host::YoutubeShort => Err(UrlError::NotAnItem {
             host: "youtu.be".to_owned(),
             input: input.to_owned(),
         }),
+    }
+}
+
+/// 正規化した配信元 URL が、どのプラットフォームのものか。
+pub fn platform_of_source(url: &NormalizedUrl) -> Option<Platform> {
+    let parsed = Url::parse(url.as_str()).ok()?;
+    match host_kind(&parsed)? {
+        Host::Youtube => Some(Platform::Youtube),
+        Host::X => Some(Platform::X),
+        Host::YoutubeShort => None,
     }
 }
 
@@ -206,6 +211,29 @@ fn x_item(url: &Url, input: &str) -> Result<(NormalizedUrl, TypeHint), UrlError>
     ))
 }
 
+fn x_source(url: &Url, input: &str) -> Result<NormalizedUrl, UrlError> {
+    let unresolved = || UrlError::UnresolvedSource {
+        platform: "X",
+        input: input.to_owned(),
+    };
+
+    // X が数値のユーザー ID で人を指す2つの形。プロフィールへの直接リンクと、
+    // フォロー導線が使う intent。どちらもハンドルを含まない。
+    let id = match segments(url).as_slice() {
+        ["i", "user", id] => (*id).to_owned(),
+        ["intent", "user"] => query_value(url, "user_id")
+            .ok_or_else(unresolved)?
+            .into_owned(),
+        // ハンドルは改名されうるので受け付けない。
+        _ => return Err(unresolved()),
+    };
+
+    if !is_numeric_id(&id) {
+        return Err(unresolved());
+    }
+    Ok(NormalizedUrl(format!("https://x.com/i/user/{id}")))
+}
+
 fn youtube_watch(id: &str) -> NormalizedUrl {
     NormalizedUrl(format!("https://www.youtube.com/watch?v={id}"))
 }
@@ -218,6 +246,11 @@ fn is_video_id(s: &str) -> bool {
 /// チャンネル ID は `UC` で始まる 24 文字。
 fn is_channel_id(s: &str) -> bool {
     s.len() == 24 && s.starts_with("UC") && s.bytes().all(is_base64url)
+}
+
+/// ユーザー ID は数字。
+fn is_numeric_id(s: &str) -> bool {
+    !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())
 }
 
 /// Space とライブ配信の ID は base64url、投稿 ID は数字。まとめて緩く見る。
@@ -234,7 +267,6 @@ mod tests {
     use super::*;
 
     /// 同じ動画へ辿り着く入口は、どれも1つの正規形へ潰れる。
-    /// 期待値は yt-dlp の `webpage_url` をオラクルにして取った。
     #[test]
     fn youtube_entrances_collapse_to_one_form() {
         const WATCH: &str = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
@@ -341,12 +373,32 @@ mod tests {
         ));
     }
 
-    /// X の配信元の正規形は未決（#7）。当てずっぽうの形を作らず、はっきり断る。
+    /// X の配信元も不変 ID へ寄せる。X がハンドル抜きで人を指す2つの形を受ける。
     #[test]
-    fn x_sources_are_not_decided_yet() {
-        assert!(matches!(
-            normalize_source("https://x.com/jack"),
-            Err(UrlError::UnresolvedSource { platform: "X", .. })
-        ));
+    fn x_sources_must_arrive_as_numeric_ids() {
+        const CANONICAL: &str = "https://x.com/i/user/12";
+
+        for input in [
+            "https://x.com/i/user/12",
+            "https://twitter.com/i/user/12",
+            "https://x.com/intent/user?user_id=12",
+        ] {
+            assert_eq!(normalize_source(input).expect(input).as_str(), CANONICAL);
+        }
+
+        // ハンドルは改名されうるので、解決前の形は受け付けない。
+        for handle in [
+            "https://x.com/jack",
+            "https://x.com/i/user/jack",
+            "https://x.com/intent/user?screen_name=jack",
+        ] {
+            assert!(
+                matches!(
+                    normalize_source(handle),
+                    Err(UrlError::UnresolvedSource { platform: "X", .. })
+                ),
+                "{handle}"
+            );
+        }
     }
 }

@@ -1,0 +1,9 @@
+[
+  [
+    -1,
+    {
+      "error": "AuthRequired",
+      "message": "authenticated cookies needed to access this timeline"
+    }
+  ]
+]

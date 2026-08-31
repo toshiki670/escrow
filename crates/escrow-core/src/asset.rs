@@ -43,6 +43,21 @@ impl AssetKind {
     fn parse(s: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|k| k.as_str() == s)
     }
+
+    /// 拡張子から種類を当てる。
+    ///
+    /// 取得する側が自分の名前で書いたものを、#1 の命名規則へ移すときに使う。
+    /// **名前を決めるのは escrow** なので、ツールが何と呼んだかは持ち込まない。
+    pub fn of_extension(extension: &str) -> Option<Self> {
+        let lower = extension.to_ascii_lowercase();
+        match lower.as_str() {
+            "mp4" | "webm" | "mkv" | "mov" | "m4v" => Some(Self::Video),
+            "m4a" | "mp3" | "aac" | "ogg" | "opus" | "wav" => Some(Self::Audio),
+            "jpg" | "jpeg" | "png" | "webp" | "gif" | "avif" => Some(Self::Image),
+            "vtt" => Some(Self::Transcript),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for AssetKind {
@@ -57,7 +72,7 @@ pub struct Asset {
     pub kind: AssetKind,
     /// 1 から始まる通し番号。ライブが切れた断片は 2, 3 と増える。
     pub ordinal: NonZeroU32,
-    /// 拡張子。yt-dlp が実際に何を書くかで変わる（mp4 / webm など）ので、
+    /// 拡張子。取得する側が実際に何を書くかで変わる（mp4 / webm など）ので、
     /// 種類からは決めない。読む側は来たものを受け取る。`.` は含まない。
     pub extension: String,
 }
@@ -81,10 +96,10 @@ impl Asset {
 
     /// ファイル名から読み戻す。規則に合わないものは `None`。
     ///
-    /// ディレクトリには yt-dlp の中間ファイルなど規則外のものも落ちうるので、
+    /// ディレクトリには取得中の中間ファイルなど規則外のものも落ちうるので、
     /// この関数はどんな文字列を渡されても落ちない。
     pub fn parse_file_name(file_name: &str) -> Option<Self> {
-        // ちょうど3つ。`video.1.mp4.part` のような yt-dlp の中間ファイルは、
+        // ちょうど3つ。`video.1.mp4.part` のように途中で増えた中間ファイルは
         // 4つに割れるのでここで落ちる。まだ取得中のものを実体として数えない。
         let [kind, ordinal_text, extension] =
             <[&str; 3]>::try_from(file_name.split('.').collect::<Vec<_>>()).ok()?;
@@ -113,9 +128,14 @@ pub fn item_dir(media_dir: &Path, item: ItemId) -> PathBuf {
 ///
 /// ディレクトリが無い場合は空を返す。まだ何も取得していない項目は普通にこれ。
 pub fn scan(media_dir: &Path, item: ItemId) -> io::Result<Vec<Asset>> {
-    let dir = item_dir(media_dir, item);
+    scan_dir(&item_dir(media_dir, item))
+}
 
-    let entries = match fs::read_dir(&dir) {
+/// 置き場所を直接指してのぞく。
+///
+/// 外部ツールのアダプタは `ItemId` を知らず、書き込み先のディレクトリだけを渡される。
+pub fn scan_dir(dir: &Path) -> io::Result<Vec<Asset>> {
+    let entries = match fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(e) => return Err(e),
@@ -158,7 +178,7 @@ mod tests {
         }
     }
 
-    /// 拡張子は種類から決めない。yt-dlp が webm を書けば webm で持つ。
+    /// 拡張子は種類から決めない。webm が書かれれば webm で持つ。
     #[test]
     fn extension_comes_from_the_file_not_the_kind() {
         let webm = Asset::parse_file_name("video.1.webm").unwrap();
@@ -178,7 +198,7 @@ mod tests {
             "video.01.mp4", // 往復しない形は受けない
             "video.-1.mp4",
             "movie.1.mp4",
-            "video.1.mp4.part", // yt-dlp の中間ファイル
+            "video.1.mp4.part", // 取得中の中間ファイル
             "transcript.1.ja.vtt",
             ".hidden",
         ] {
@@ -187,6 +207,23 @@ mod tests {
                 "受けてはいけない: {name:?}"
             );
         }
+    }
+
+    #[test]
+    fn kinds_can_be_guessed_from_an_extension() {
+        for (ext, expected) in [
+            ("mp4", AssetKind::Video),
+            ("WEBM", AssetKind::Video),
+            ("m4a", AssetKind::Audio),
+            ("jpg", AssetKind::Image),
+            ("vtt", AssetKind::Transcript),
+        ] {
+            assert_eq!(AssetKind::of_extension(ext), Some(expected), "{ext}");
+        }
+
+        // 知らないものは当てずっぽうで決めない。
+        assert_eq!(AssetKind::of_extension("part"), None);
+        assert_eq!(AssetKind::of_extension(""), None);
     }
 
     #[test]
@@ -222,7 +259,7 @@ mod tests {
             "video.2.mp4",
             "transcript.1.vtt",
             "video.1.mp4",
-            "yt-dlp.log",       // 規則外
+            "download.log",     // 規則外
             "video.3.mp4.part", // 取得中の中間ファイル
         ] {
             fs::write(dir.join(name), b"").unwrap();
