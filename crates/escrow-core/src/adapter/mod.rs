@@ -24,6 +24,7 @@
 //! 語を出さない。「タイムラインを列挙する」ではなく「配信元から、まだ見ていない
 //! 項目を見つける」。ツールを入れ替えても、呼ぶ側は動かない。
 
+pub mod gallerydl;
 pub mod invocation;
 pub mod tools;
 pub mod whisper;

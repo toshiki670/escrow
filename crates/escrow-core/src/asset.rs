@@ -43,6 +43,21 @@ impl AssetKind {
     fn parse(s: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|k| k.as_str() == s)
     }
+
+    /// 拡張子から種類を当てる。
+    ///
+    /// 取得する側が自分の名前で書いたものを、#1 の命名規則へ移すときに使う。
+    /// **名前を決めるのは escrow** なので、ツールが何と呼んだかは持ち込まない。
+    pub fn of_extension(extension: &str) -> Option<Self> {
+        let lower = extension.to_ascii_lowercase();
+        match lower.as_str() {
+            "mp4" | "webm" | "mkv" | "mov" | "m4v" => Some(Self::Video),
+            "m4a" | "mp3" | "aac" | "ogg" | "opus" | "wav" => Some(Self::Audio),
+            "jpg" | "jpeg" | "png" | "webp" | "gif" | "avif" => Some(Self::Image),
+            "vtt" => Some(Self::Transcript),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for AssetKind {
@@ -192,6 +207,23 @@ mod tests {
                 "受けてはいけない: {name:?}"
             );
         }
+    }
+
+    #[test]
+    fn kinds_can_be_guessed_from_an_extension() {
+        for (ext, expected) in [
+            ("mp4", AssetKind::Video),
+            ("WEBM", AssetKind::Video),
+            ("m4a", AssetKind::Audio),
+            ("jpg", AssetKind::Image),
+            ("vtt", AssetKind::Transcript),
+        ] {
+            assert_eq!(AssetKind::of_extension(ext), Some(expected), "{ext}");
+        }
+
+        // 知らないものは当てずっぽうで決めない。
+        assert_eq!(AssetKind::of_extension("part"), None);
+        assert_eq!(AssetKind::of_extension(""), None);
     }
 
     #[test]
