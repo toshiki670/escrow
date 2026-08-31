@@ -20,10 +20,7 @@ CREATE TABLE source (
     created_at                TEXT    NOT NULL,
     -- 預かる日数。NULL は「捨てない」。
     hold_days                 INTEGER,
-    discover_interval_minutes INTEGER NOT NULL,
-    -- 最後に検知が通った日時。NULL は「まだ一度も通っていない」。
-    -- 次にいつ回すかと、どこまで遡るかを兼ねる。
-    last_discovered_at        TEXT
+    discover_interval_minutes INTEGER NOT NULL
 ) STRICT;
 
 CREATE TABLE exclude (
@@ -43,10 +40,6 @@ CREATE TABLE item (
     published_at    TEXT    NOT NULL,
     state           TEXT    NOT NULL,
     state_since     TEXT    NOT NULL,
-    -- いまの状態で連続して落ちた回数。状態が動いたら 0 に戻る。
-    -- 状態と対でしか意味を持たない値だが、release_reference と違って
-    -- 「その状態なら必ず在る」ので NOT NULL で持てる。
-    attempts        INTEGER NOT NULL DEFAULT 0,
     -- ここから下が #1 の「NULL を許す」列。
     title           TEXT,  -- subtype が Post なら NULL
     body            TEXT,  -- subtype が Media なら NULL

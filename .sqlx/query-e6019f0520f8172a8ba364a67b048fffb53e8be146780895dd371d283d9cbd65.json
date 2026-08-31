@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id AS \"id!\", person_id, url, enabled AS \"enabled: bool\", created_at, hold_days,\n                      discover_interval_minutes, last_discovered_at\n               FROM source WHERE id = ?",
+  "query": "SELECT id AS \"id!\", person_id, url, enabled AS \"enabled: bool\", created_at, hold_days,\n                      discover_interval_minutes\n               FROM source WHERE id = ?",
   "describe": {
     "columns": [
       {
@@ -79,17 +79,6 @@
             "name": "discover_interval_minutes"
           }
         }
-      },
-      {
-        "name": "last_discovered_at",
-        "ordinal": 7,
-        "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "source",
-            "name": "last_discovered_at"
-          }
-        }
       }
     ],
     "parameters": {
@@ -102,9 +91,8 @@
       false,
       false,
       true,
-      false,
-      true
+      false
     ]
   },
-  "hash": "97bb424dd54cf8d09fb9f8f8cd7c3a55da58ebcaac553bcaa4a9e9674113061d"
+  "hash": "e6019f0520f8172a8ba364a67b048fffb53e8be146780895dd371d283d9cbd65"
 }

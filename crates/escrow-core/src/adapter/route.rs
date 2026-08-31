@@ -195,7 +195,6 @@ mod tests {
             created_at: Timestamp::parse("2026-01-01T00:00:00+09:00").unwrap(),
             hold_days: None,
             discover_interval_minutes: NonZeroU32::new(15).unwrap(),
-            last_discovered_at: None,
         }
     }
 

@@ -20,6 +20,7 @@
 //! こちらの落ち度でない失敗がリトライを食い潰して項目を `error` にする。
 //! 振り分けは [`Handling`] が全域関数で持つ。
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use thiserror::Error;
@@ -35,7 +36,7 @@ use crate::liveness::Presence;
 use crate::pipeline::{Pipeline, PipelineError};
 use crate::source::{Source, SourceId};
 use crate::state::{Event, State, StateName};
-use crate::store::{Applied, Failure, NewItem, Store, StoreError};
+use crate::store::{Applied, NewItem, Store, StoreError};
 use crate::timestamp::Timestamp;
 use crate::url;
 
@@ -207,21 +208,78 @@ impl Report {
     }
 }
 
+/// 巡回の途中経過。**台帳には残さない。**
+///
+/// 前回いつ検知したかも、いま何回落ちているかも、#1 は持てと言っていない。
+/// 常駐している間だけ覚えていれば足りる。
+///
+/// 落ちて忘れるのは欠陥ではない。起動直後に全部の配信元を見に行くのは、
+/// 止まっていた間の取りこぼしがあるので**正しい**。回数の方も、再起動は
+/// 普通「何かを直したから」起きるので、数え直す方が妥当になる。
+#[derive(Debug, Default)]
+struct Progress {
+    /// 配信元ごとに、最後に検知が通った時刻。
+    discovered: HashMap<SourceId, Timestamp>,
+    /// 項目ごとに、**どの状態で**何回続けて落ちたか。
+    ///
+    /// 状態を一緒に持つので、状態が動けば数え直しになる。回数だけを持つと、
+    /// 取得で数えたぶんが文字起こしへ持ち越され、1回も落ちていない段が
+    /// 上限に達する。
+    failures: HashMap<ItemId, (StateName, u32)>,
+}
+
+impl Progress {
+    /// いま検知を回す番か。一度も通っていなければ回す。
+    fn due(&self, source: &Source, now: Timestamp) -> bool {
+        match self.discovered.get(&source.id) {
+            None => true,
+            Some(&last) => now >= last + source.interval(),
+        }
+    }
+
+    /// 検知が1周通ったことを記録する。
+    ///
+    /// **通ったときだけ呼ぶ。** 落ちた回に進めると、次の番まで待つあいだ、
+    /// その回に配信元が返せなかったものを見に行かない。
+    fn mark_discovered(&mut self, source: SourceId, at: Timestamp) {
+        self.discovered.insert(source, at);
+    }
+
+    /// いまの状態で1回落ちたことを数え、その状態での連続回数を返す。
+    fn record_failure(&mut self, item: &Item) -> u32 {
+        let state = item.state.name();
+        let entry = self.failures.entry(item.id).or_insert((state, 0));
+
+        if entry.0 != state {
+            *entry = (state, 0);
+        }
+        entry.1 += 1;
+        entry.1
+    }
+
+    /// 数えを捨てる。段を1つ進んだ項目と、諦めた項目。
+    fn forget(&mut self, item: ItemId) {
+        self.failures.remove(&item);
+    }
+}
+
 /// 巡回するもの。
 pub struct Engine<'a, P> {
     store: &'a Store,
     ports: &'a P,
     media_dir: &'a Path,
     limits: Limits,
+    progress: Progress,
 }
 
 impl<'a, P: Ports> Engine<'a, P> {
-    pub const fn new(store: &'a Store, ports: &'a P, media_dir: &'a Path, limits: Limits) -> Self {
+    pub fn new(store: &'a Store, ports: &'a P, media_dir: &'a Path, limits: Limits) -> Self {
         Self {
             store,
             ports,
             media_dir,
             limits,
+            progress: Progress::default(),
         }
     }
 
@@ -230,29 +288,43 @@ impl<'a, P: Ports> Engine<'a, P> {
     /// 生存確認は入らない。#1 が `Source.discover_interval_minutes`（分）と
     /// `check.interval_hours`（時）を別の概念として分けているので、
     /// 回す間隔も別にする（[`Self::check_liveness`]）。
-    pub async fn tick(&self, now: Timestamp) -> Result<Report, EngineError> {
+    pub async fn tick(&mut self, now: Timestamp) -> Result<Report, EngineError> {
+        // 途中経過を手元へ外してから回す。各段は `&self` と `&mut Progress` を
+        // 別々に借りるので、外の世界（`ports`）を借りたまま数えられる。
+        let mut progress = std::mem::take(&mut self.progress);
+        let result = self.rounds(&mut progress, now).await;
+        self.progress = progress;
+        result
+    }
+
+    async fn rounds(&self, progress: &mut Progress, now: Timestamp) -> Result<Report, EngineError> {
         std::fs::create_dir_all(self.media_dir).map_err(|source| EngineError::Io {
             path: self.media_dir.to_owned(),
             source,
         })?;
 
         let mut report = Report::default();
-        self.discover_round(now, &mut report).await?;
-        self.acquire_round(now, &mut report).await?;
-        self.transcribe_round(now, &mut report).await?;
+        self.discover_round(progress, now, &mut report).await?;
+        self.acquire_round(progress, now, &mut report).await?;
+        self.transcribe_round(progress, now, &mut report).await?;
         Ok(report)
     }
 
     // ------------------------------------------------------------ 検知ループ
 
     /// 番の来た配信元を見て、まだ台帳に無いものを足す。
-    async fn discover_round(&self, now: Timestamp, report: &mut Report) -> Result<(), EngineError> {
+    async fn discover_round(
+        &self,
+        progress: &mut Progress,
+        now: Timestamp,
+        report: &mut Report,
+    ) -> Result<(), EngineError> {
         // #7 の「`Exclude` の適用」。検知の時点で `content_type` は確定するので、
         // 当たったものは**行を作らずに済む**。
         let excludes = self.store.excludes().await?;
 
         for source in self.store.sources().await? {
-            if !source.enabled || !source.due(now) {
+            if !source.enabled || !progress.due(&source, now) {
                 continue;
             }
 
@@ -269,7 +341,11 @@ impl<'a, P: Ports> Engine<'a, P> {
                 }
             };
 
-            let found = match discoverer.discover(&source, source.discover_since()).await {
+            // #1 の「登録日時。これ以降の投稿を監視する」。前回どこまで見たかを
+            // 覚えて狭めることはしない — 覚えていない周（起動直後）と挙動が
+            // 変わるうえ、一覧に載るのが遅れたものを取り落とす。
+            // 重ねて見たぶんは `Item.url` が一意なので二重に行を作らない。
+            let found = match discoverer.discover(&source, source.created_at).await {
                 Ok(found) => found,
                 Err(e) => {
                     report.note(platform, &e);
@@ -302,9 +378,8 @@ impl<'a, P: Ports> Engine<'a, P> {
                 report.discovered += 1;
             }
 
-            // 1周通ったときだけ進める。落ちた回に進めると、その回に配信元が
-            // 返せなかったものを二度と見に行かなくなる。
-            self.store.mark_discovered(source.id, now).await?;
+            // 1周通ったときだけ進める。
+            progress.mark_discovered(source.id, now);
         }
 
         Ok(())
@@ -316,7 +391,12 @@ impl<'a, P: Ports> Engine<'a, P> {
     ///
     /// 残ったものを先に片づける。手元に半端な実体を抱えたまま新しい取得を始めると、
     /// 空きが二重に要る。
-    async fn acquire_round(&self, now: Timestamp, report: &mut Report) -> Result<(), EngineError> {
+    async fn acquire_round(
+        &self,
+        progress: &mut Progress,
+        now: Timestamp,
+        report: &mut Report,
+    ) -> Result<(), EngineError> {
         let mut queue = self.store.items_in_state(StateName::Acquiring).await?;
         queue.extend(self.store.items_in_state(StateName::Waiting).await?);
 
@@ -336,13 +416,21 @@ impl<'a, P: Ports> Engine<'a, P> {
             }
 
             let source = self.source_of(&item).await?;
-            let acquirer = self.ports.acquirer(item.content_type());
-            let transcriber = self.ports.transcriber();
-            let pipeline = Pipeline::new(self.store, self.media_dir, &acquirer, &transcriber);
 
-            match pipeline.acquire(&item, source.hold_policy()).await {
-                Ok(_) => report.advanced += 1,
-                Err(e) => self.handle(&item, e, now, report).await?,
+            // 外の世界を借りるのはこの括弧の中だけ。抜けてから数える。
+            let outcome = {
+                let acquirer = self.ports.acquirer(item.content_type());
+                let transcriber = self.ports.transcriber();
+                let pipeline = Pipeline::new(self.store, self.media_dir, &acquirer, &transcriber);
+                pipeline.acquire(&item, source.hold_policy()).await
+            };
+
+            match outcome {
+                Ok(_) => {
+                    progress.forget(item.id);
+                    report.advanced += 1;
+                }
+                Err(e) => self.handle(progress, &item, e, now, report).await?,
             }
         }
 
@@ -354,18 +442,26 @@ impl<'a, P: Ports> Engine<'a, P> {
     /// `transcribing` の項目を進める。断片ごとに `video.N` → `transcript.N`（#1）。
     async fn transcribe_round(
         &self,
+        progress: &mut Progress,
         now: Timestamp,
         report: &mut Report,
     ) -> Result<(), EngineError> {
         for item in self.store.items_in_state(StateName::Transcribing).await? {
             let source = self.source_of(&item).await?;
-            let acquirer = self.ports.acquirer(item.content_type());
-            let transcriber = self.ports.transcriber();
-            let pipeline = Pipeline::new(self.store, self.media_dir, &acquirer, &transcriber);
 
-            match pipeline.transcribe(&item, source.hold_policy()).await {
-                Ok(_) => report.advanced += 1,
-                Err(e) => self.handle(&item, e, now, report).await?,
+            let outcome = {
+                let acquirer = self.ports.acquirer(item.content_type());
+                let transcriber = self.ports.transcriber();
+                let pipeline = Pipeline::new(self.store, self.media_dir, &acquirer, &transcriber);
+                pipeline.transcribe(&item, source.hold_policy()).await
+            };
+
+            match outcome {
+                Ok(_) => {
+                    progress.forget(item.id);
+                    report.advanced += 1;
+                }
+                Err(e) => self.handle(progress, &item, e, now, report).await?,
             }
         }
 
@@ -444,6 +540,7 @@ impl<'a, P: Ports> Engine<'a, P> {
     /// 失敗を振り分ける。項目を `error` にするのは、ここだけ。
     async fn handle(
         &self,
+        progress: &mut Progress,
         item: &Item,
         error: PipelineError,
         now: Timestamp,
@@ -466,28 +563,20 @@ impl<'a, P: Ports> Engine<'a, P> {
 
         // 段の途中で状態は動いている。`waiting` の項目を渡しても、落ちた時点では
         // もう `acquiring` になっている。数えるのも諦めるのも**いまの行**に対して
-        // 行わないと、compare-and-swap が噛み合わず何も起きない。
+        // 行う — 数えは状態ごとなので古い状態で数えると別勘定になり、諦めの
+        // compare-and-swap は古い状態では噛み合わない。
         let Some(current) = self.store.item(item.id).await? else {
             // 人が消した。次の周で読み直す。
             return Ok(());
         };
 
         match handling {
-            Handling::Abandon => self.give_up(&current, now, report).await?,
+            Handling::Abandon => self.give_up(progress, &current, now, report).await?,
             Handling::Retry => {
-                match self
-                    .store
-                    .record_failure(current.id, &current.state)
-                    .await?
-                {
-                    Failure::Superseded => {}
-                    Failure::Recorded(attempts) => {
-                        // `max_retries` は**やり直しの回数**なので、最初の1回を
-                        // 足したぶんだけ落ちて初めて超える。0 なら1回目で `error`。
-                        if attempts > self.limits.max_retries {
-                            self.give_up(&current, now, report).await?;
-                        }
-                    }
+                // `max_retries` は**やり直しの回数**なので、最初の1回を足した
+                // ぶんだけ落ちて初めて超える。0 なら1回目で `error`。
+                if progress.record_failure(&current) > self.limits.max_retries {
+                    self.give_up(progress, &current, now, report).await?;
                 }
             }
             Handling::Halt | Handling::Notify => unreachable!("上で返している"),
@@ -504,11 +593,13 @@ impl<'a, P: Ports> Engine<'a, P> {
     /// 理由の数だけ扉を足さない。
     async fn give_up(
         &self,
+        progress: &mut Progress,
         item: &Item,
         now: Timestamp,
         report: &mut Report,
     ) -> Result<(), EngineError> {
         if self.step(item, &Event::RetriesExhausted, now).await? {
+            progress.forget(item.id);
             report.failed += 1;
         }
         Ok(())
@@ -605,6 +696,8 @@ mod tests {
         presence: Result<Presence, Outcome>,
         acquire_calls: Mutex<usize>,
         probe_calls: Mutex<usize>,
+        /// 検知に渡された `since`。呼ばれた回数も長さで分かる。
+        discover_since: Mutex<Vec<Timestamp>>,
     }
 
     impl Default for World {
@@ -616,6 +709,7 @@ mod tests {
                 presence: Ok(Presence::Unknown),
                 acquire_calls: Mutex::new(0),
                 probe_calls: Mutex::new(0),
+                discover_since: Mutex::new(Vec::new()),
             }
         }
     }
@@ -629,6 +723,8 @@ mod tests {
             _source: &Source,
             since: Timestamp,
         ) -> Result<Vec<Found>, AdapterError> {
+            self.0.discover_since.lock().unwrap().push(since);
+
             if let Some(e) = self.0.discovery.error() {
                 return Err(e);
             }
@@ -881,7 +977,7 @@ mod tests {
             ..World::default()
         };
         // やり直し 2 回まで。最初の1回を足して 3 回落ちたら諦める。
-        let engine = Engine::new(&store, &world, media.path(), limits(2));
+        let mut engine = Engine::new(&store, &world, media.path(), limits(2));
 
         for round in 1..=2 {
             let report = engine.tick(at("2026-03-01T21:00:00+09:00")).await.unwrap();
@@ -944,7 +1040,7 @@ mod tests {
             acquisition: Outcome::Unauthenticated,
             ..World::default()
         };
-        let engine = Engine::new(&store, &world, media.path(), limits(0));
+        let mut engine = Engine::new(&store, &world, media.path(), limits(0));
 
         for _ in 0..5 {
             let report = engine.tick(at("2026-03-01T21:00:00+09:00")).await.unwrap();
@@ -1200,53 +1296,76 @@ mod tests {
         );
     }
 
-    /// 番が来るまで叩かない。前の周と重ねて見るので、`since` は間隔ぶん戻る。
+    /// 番が来るまで叩かない。間隔は `discover_interval_minutes`（この配信元は 15 分）。
     #[tokio::test]
     async fn a_source_is_only_visited_when_its_turn_comes() {
         let store = Store::open_in_memory().await.unwrap();
-        let id = source_with(&store, None).await;
+        source_with(&store, None).await;
         let media = tempfile::tempdir().unwrap();
         let world = World::default();
-        let engine = Engine::new(&store, &world, media.path(), limits(3));
+        let mut engine = Engine::new(&store, &world, media.path(), limits(3));
 
-        let first = at("2026-03-01T21:00:00+09:00");
-        engine.tick(first).await.unwrap();
+        let visits = || world.discover_since.lock().unwrap().len();
 
-        let source = store.source(id).await.unwrap().unwrap();
-        assert_eq!(source.last_discovered_at, Some(first));
-        assert!(!source.due(at("2026-03-01T21:14:59+09:00")));
-        assert!(source.due(at("2026-03-01T21:15:00+09:00")));
-        // 15 分の間隔ぶん重ねて見る。
-        assert_eq!(source.discover_since(), at("2026-03-01T20:45:00+09:00"));
+        engine.tick(at("2026-03-01T21:00:00+09:00")).await.unwrap();
+        assert_eq!(visits(), 1, "一度も通っていなければ番");
+
+        engine.tick(at("2026-03-01T21:14:59+09:00")).await.unwrap();
+        assert_eq!(visits(), 1, "間隔の中では叩かない");
+
+        engine.tick(at("2026-03-01T21:15:00+09:00")).await.unwrap();
+        assert_eq!(visits(), 2, "間隔が過ぎたら次の番");
     }
 
-    /// 落ちた周は進めない。進めると、その回に配信元が返せなかったものを
-    /// 二度と見に行かなくなる。
+    /// どこまで遡るかは #1 の `Source.created_at`。
+    ///
+    /// 前回どこまで見たかを覚えて狭めない。覚えていない周（起動直後）と挙動が
+    /// 変わるうえ、一覧に載るのが遅れたものを取り落とす。
     #[tokio::test]
-    async fn a_failed_round_does_not_advance_the_mark() {
+    async fn discovery_always_looks_back_to_when_the_source_was_registered() {
         let store = Store::open_in_memory().await.unwrap();
         let id = source_with(&store, None).await;
+        let created_at = store.source(id).await.unwrap().unwrap().created_at;
+        let media = tempfile::tempdir().unwrap();
+        let world = World::default();
+        let mut engine = Engine::new(&store, &world, media.path(), limits(3));
+
+        engine.tick(at("2026-03-01T21:00:00+09:00")).await.unwrap();
+        engine.tick(at("2026-03-01T21:15:00+09:00")).await.unwrap();
+
+        assert_eq!(
+            world.discover_since.lock().unwrap().as_slice(),
+            [created_at, created_at],
+            "2周目も同じところまで遡る"
+        );
+    }
+
+    /// 落ちた周は番を進めない。進めると、その回に配信元が返せなかったものを、
+    /// 次の番が来るまで見に行かない。
+    #[tokio::test]
+    async fn a_failed_round_does_not_advance_the_turn() {
+        let store = Store::open_in_memory().await.unwrap();
+        source_with(&store, None).await;
         let media = tempfile::tempdir().unwrap();
 
         let world = World {
             discovery: Outcome::Transient,
             ..World::default()
         };
-        Engine::new(&store, &world, media.path(), limits(3))
-            .tick(at("2026-03-01T21:00:00+09:00"))
-            .await
-            .unwrap();
+        let mut engine = Engine::new(&store, &world, media.path(), limits(3));
 
-        let source = store.source(id).await.unwrap().unwrap();
-        assert_eq!(source.last_discovered_at, None);
-        assert_eq!(source.discover_since(), source.created_at);
+        engine.tick(at("2026-03-01T21:00:00+09:00")).await.unwrap();
+        // 間隔の中だが、前の周が通っていないのでまた叩く。
+        engine.tick(at("2026-03-01T21:00:01+09:00")).await.unwrap();
+
+        assert_eq!(world.discover_since.lock().unwrap().len(), 2);
     }
 
     /// 止めた配信元は見に行かない。
     #[tokio::test]
     async fn a_disabled_source_is_skipped() {
         let store = Store::open_in_memory().await.unwrap();
-        let id = enabled_source(&store, None, false).await;
+        enabled_source(&store, None, false).await;
         let media = tempfile::tempdir().unwrap();
 
         let world = World {
@@ -1263,9 +1382,9 @@ mod tests {
             .unwrap();
 
         assert_eq!(report.discovered, 0);
-        assert_eq!(
-            store.source(id).await.unwrap().unwrap().last_discovered_at,
-            None
+        assert!(
+            world.discover_since.lock().unwrap().is_empty(),
+            "止めた配信元は叩きもしない"
         );
     }
 
@@ -1318,7 +1437,7 @@ mod tests {
             )],
             ..World::default()
         };
-        let engine = Engine::new(&store, &world, media.path(), limits(3));
+        let mut engine = Engine::new(&store, &world, media.path(), limits(3));
 
         assert_eq!(
             engine

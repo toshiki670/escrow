@@ -52,14 +52,6 @@ impl std::ops::Add<TimeDelta> for Timestamp {
     }
 }
 
-impl std::ops::Sub<TimeDelta> for Timestamp {
-    type Output = Self;
-
-    fn sub(self, delta: TimeDelta) -> Self {
-        self.0.checked_sub_signed(delta).map_or(self, Self::from)
-    }
-}
-
 impl From<DateTime<FixedOffset>> for Timestamp {
     fn from(value: DateTime<FixedOffset>) -> Self {
         Self(value.trunc_subsecs(0))
@@ -124,8 +116,8 @@ mod tests {
             "2026-03-01T20:15:00+09:00"
         );
         assert_eq!(
-            (t - TimeDelta::days(2)).to_text(),
-            "2026-02-27T20:00:00+09:00"
+            (t + TimeDelta::days(7)).to_text(),
+            "2026-03-08T20:00:00+09:00"
         );
         // 時差は保つ。
         assert_eq!(
@@ -139,7 +131,6 @@ mod tests {
     fn an_impossible_shift_leaves_it_where_it_is() {
         let t = Timestamp::parse("2026-03-01T20:00:00+09:00").unwrap();
         assert_eq!(t + TimeDelta::MAX, t);
-        assert_eq!(t - TimeDelta::MAX, t);
     }
 
     #[test]

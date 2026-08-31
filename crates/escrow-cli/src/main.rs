@@ -394,7 +394,7 @@ impl App {
     /// すべて `Engine` が持ち、ここが決めるのは「いつ呼ぶか」と「何を出すか」だけ。
     async fn run(&self) -> Result<()> {
         let adapters = self.adapters()?;
-        let engine = Engine::new(
+        let mut engine = Engine::new(
             &self.store,
             &adapters,
             &self.paths.media_dir,
