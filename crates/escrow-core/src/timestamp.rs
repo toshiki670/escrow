@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use chrono::{DateTime, FixedOffset, Local, SecondsFormat, SubsecRound};
+use chrono::{DateTime, FixedOffset, Local, SecondsFormat, SubsecRound, TimeDelta};
 use thiserror::Error;
 
 /// 時差を保つ日時。秒までで丸める。
@@ -37,6 +37,26 @@ impl Timestamp {
 
     pub const fn inner(self) -> DateTime<FixedOffset> {
         self.0
+    }
+}
+
+/// 期間を足す。次に検知を回す時刻や、預かりの期限を出すのに使う。
+///
+/// 桁あふれしたときは動かさない。西暦 26 万年の話なので、`Option` を全経路へ
+/// 配って回るより、動かさないほうが呼ぶ側の全域性が保てる。
+impl std::ops::Add<TimeDelta> for Timestamp {
+    type Output = Self;
+
+    fn add(self, delta: TimeDelta) -> Self {
+        self.0.checked_add_signed(delta).map_or(self, Self::from)
+    }
+}
+
+impl std::ops::Sub<TimeDelta> for Timestamp {
+    type Output = Self;
+
+    fn sub(self, delta: TimeDelta) -> Self {
+        self.0.checked_sub_signed(delta).map_or(self, Self::from)
     }
 }
 
@@ -93,6 +113,33 @@ mod tests {
                 "通ってはいけない: {text:?}"
             );
         }
+    }
+
+    #[test]
+    fn shifts_by_a_duration() {
+        let t = Timestamp::parse("2026-03-01T20:00:00+09:00").unwrap();
+
+        assert_eq!(
+            (t + TimeDelta::minutes(15)).to_text(),
+            "2026-03-01T20:15:00+09:00"
+        );
+        assert_eq!(
+            (t - TimeDelta::days(2)).to_text(),
+            "2026-02-27T20:00:00+09:00"
+        );
+        // 時差は保つ。
+        assert_eq!(
+            (t + TimeDelta::hours(24)).inner().offset(),
+            t.inner().offset()
+        );
+    }
+
+    /// 桁あふれでは落とさず、動かさない。
+    #[test]
+    fn an_impossible_shift_leaves_it_where_it_is() {
+        let t = Timestamp::parse("2026-03-01T20:00:00+09:00").unwrap();
+        assert_eq!(t + TimeDelta::MAX, t);
+        assert_eq!(t - TimeDelta::MAX, t);
     }
 
     #[test]

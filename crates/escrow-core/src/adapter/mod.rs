@@ -43,7 +43,7 @@ use crate::timestamp::Timestamp;
 use crate::url::NormalizedUrl;
 
 pub use invocation::{Completed, Invocation, run};
-pub use route::{Acquirer, Adapters, Discoverer};
+pub use route::{Acquirer, Adapters, Discoverer, Prober};
 pub use tools::{Resolution, Resolver, Tool};
 
 /// 外部ツールが期待どおりに働かなかったとき。
@@ -154,6 +154,22 @@ pub trait Transcribe {
     ) -> impl Future<Output = Result<Asset, AdapterError>> + Send;
 }
 
+/// 参照でも同じ口を満たす。
+///
+/// [`Discover`] / [`Acquire`] / [`Probe`] は #5 の対応表が借りた値を包んだ enum を
+/// 返すのに対し、文字起こしは種別で分かれないので道具そのものを借りて返す。
+/// この1本があると、[`Ports`] の4つの口の形が揃う。
+impl<T: Transcribe + Sync> Transcribe for &T {
+    fn transcribe(
+        &self,
+        media: &Path,
+        into: &Path,
+        ordinal: std::num::NonZeroU32,
+    ) -> impl Future<Output = Result<Asset, AdapterError>> + Send {
+        (**self).transcribe(media, into, ordinal)
+    }
+}
+
 /// 配信元にまだ在るかを確かめる。
 pub trait Probe {
     /// #5 のとおり、**在ることを確かめられたときだけ** [`Presence::Present`]。
@@ -162,6 +178,30 @@ pub trait Probe {
         &self,
         url: &NormalizedUrl,
     ) -> impl Future<Output = Result<Presence, AdapterError>> + Send;
+}
+
+/// エンジンが外の世界へ触れる口を、ひとまとめにしたもの。
+///
+/// エンジン（[`crate::engine`]）は #5 の対応表を知らない。「この配信元を検知する
+/// もの」「この種別を取るもの」を訊くだけで、**どのツールが動いたかを見ない**。
+/// 実物は [`Adapters`]、テストは口だけを満たした偽物を差す。
+///
+/// 4つの口を1つの trait に束ねるのは、エンジンが4つ全部を同時に要るから。
+/// 別々の型引数にすると、呼ぶ側が対応表と同じ組み合わせを手で揃えることになり、
+/// 表を1か所に置いた意味が消える。
+pub trait Ports {
+    /// #5 の「検知」列。プラットフォームを決められない配信元はここで落ちる。
+    fn discoverer(&self, source: &Source) -> Result<impl Discover, AdapterError>;
+
+    /// #5 の「取得」列。全種別に担当がいるので、選ぶところでは失敗しない。
+    fn acquirer(&self, content_type: ContentType) -> impl Acquire;
+
+    /// #5 の「生存確認」列。手段が決まっていない種別にも
+    /// [`Presence::Unknown`] を返すものが返るので、選ぶところでは失敗しない。
+    fn prober(&self, content_type: ContentType) -> impl Probe;
+
+    /// 文字起こし。#5 の表に列が無い — 種別で分かれないため。
+    fn transcriber(&self) -> impl Transcribe;
 }
 
 #[cfg(test)]

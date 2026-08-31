@@ -4,9 +4,13 @@
 //! **どの事象をいつ起こすか**だけを持つ。外の世界（アダプタ）と台帳（store）を
 //! 繋ぐ場所。
 //!
-//! 巡回・待ち行列・リトライ・空き容量の門は Phase 4（#7）。ここは1件を1回運ぶだけ。
+//! # 段はそれぞれ独立に呼べる
+//!
+//! [`Pipeline::acquire`] と [`Pipeline::transcribe`] は別々に呼べる。落ちた項目は
+//! その状態のまま台帳に残るので、次の周は**残った状態から**続けられる。
+//! 巡回してどれをいつ呼ぶかを決めるのは [`crate::engine`] で、ここは呼ばれた1件を
+//! 1段進めるだけ。
 
-use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 
 use thiserror::Error;
@@ -14,7 +18,7 @@ use thiserror::Error;
 use crate::adapter::{Acquire, AdapterError, Transcribe};
 use crate::asset::{self, Asset, AssetKind};
 use crate::item::{Item, ItemId};
-use crate::state::{Event, HoldPolicy, State, TranscriptNeed};
+use crate::state::{Event, HoldPolicy, State, StateName, TranscriptNeed};
 use crate::store::{Applied, Store, StoreError};
 use crate::timestamp::Timestamp;
 
@@ -28,6 +32,12 @@ pub enum PipelineError {
     NoSuchItem(ItemId),
     #[error("読んだときから状態が動いている。読み直してやり直す")]
     Superseded,
+    #[error("項目 {id} は {state} なので、{step}の段には入れない")]
+    NotAtThisStep {
+        id: ItemId,
+        state: StateName,
+        step: &'static str,
+    },
     #[error("手元の実体を扱えない: {path}")]
     Io {
         path: PathBuf,
@@ -59,24 +69,76 @@ impl<'a, A: Acquire, T: Transcribe> Pipeline<'a, A, T> {
     /// #6 のダッシュボードが「いま動いているもの」を読める。
     pub async fn run(&self, id: ItemId, hold: HoldPolicy) -> Result<State, PipelineError> {
         let item = self.load(id).await?;
+        let item = self.acquire(&item, hold).await?;
 
-        let item = self.step(&item, &Event::AcquisitionStarted).await?;
-        let assets = self.download(&item).await?;
-
-        let transcript = transcript_need(&assets);
-        let item = self
-            .step(&item, &Event::Acquired { transcript, hold })
-            .await?;
-
-        let item = match transcript {
-            TranscriptNeed::Needed => {
-                self.write_transcripts(&item, &assets).await?;
-                self.step(&item, &Event::Transcribed { hold }).await?
-            }
-            TranscriptNeed::NotNeeded => item,
+        let item = match item.state {
+            State::Transcribing => self.transcribe(&item, hold).await?,
+            State::Waiting
+            | State::Acquiring
+            | State::Holding
+            | State::Kept
+            | State::Discarded
+            | State::Released { .. }
+            | State::Deleted
+            | State::Error => item,
         };
 
         Ok(item.state)
+    }
+
+    /// 取得の段。`waiting` から始めるか、`acquiring` の続きから。
+    ///
+    /// 前の周が落ちて `acquiring` のまま残ったものには、事象を重ねない。図に
+    /// `acquiring --> acquiring` は無いので、重ねると[`crate::state::next`] が弾く。
+    /// 「始める」と「続ける」は台帳の状態で見分けられるので、呼ぶ側は分けなくてよい。
+    pub async fn acquire(&self, item: &Item, hold: HoldPolicy) -> Result<Item, PipelineError> {
+        let started = match item.state {
+            State::Waiting => self.step(item, &Event::AcquisitionStarted).await?,
+            State::Acquiring => item.clone(),
+            State::Transcribing
+            | State::Holding
+            | State::Kept
+            | State::Discarded
+            | State::Released { .. }
+            | State::Deleted
+            | State::Error => {
+                return Err(PipelineError::NotAtThisStep {
+                    id: item.id,
+                    state: item.state.name(),
+                    step: "取得",
+                });
+            }
+        };
+
+        let assets = self.download(&started).await?;
+        let transcript = transcript_need(&assets);
+
+        self.step(&started, &Event::Acquired { transcript, hold })
+            .await
+    }
+
+    /// 文字起こしの段。`transcribing` の項目だけが入れる。
+    pub async fn transcribe(&self, item: &Item, hold: HoldPolicy) -> Result<Item, PipelineError> {
+        match item.state {
+            State::Transcribing => {}
+            State::Waiting
+            | State::Acquiring
+            | State::Holding
+            | State::Kept
+            | State::Discarded
+            | State::Released { .. }
+            | State::Deleted
+            | State::Error => {
+                return Err(PipelineError::NotAtThisStep {
+                    id: item.id,
+                    state: item.state.name(),
+                    step: "文字起こし",
+                });
+            }
+        }
+
+        self.write_transcripts(item).await?;
+        self.step(item, &Event::Transcribed { hold }).await
     }
 
     async fn load(&self, id: ItemId) -> Result<Item, PipelineError> {
@@ -107,10 +169,27 @@ impl<'a, A: Acquire, T: Transcribe> Pipeline<'a, A, T> {
     }
 
     /// 断片ごとに1本作る（#1）。`video.2.mp4` には `transcript.2.vtt` が対応する。
-    async fn write_transcripts(&self, item: &Item, assets: &[Asset]) -> Result<(), PipelineError> {
+    ///
+    /// 手元にあるものを数え直すので、前の周が途中で落ちていれば**済んだぶんを
+    /// 飛ばして続きから**やる。文字起こしは1本で数分かかるので、やり直しの
+    /// たびに全部引き直すと期限までに終わらない。
+    async fn write_transcripts(&self, item: &Item) -> Result<(), PipelineError> {
         let dir = asset::item_dir(self.media_dir, item.id);
+        let assets = asset::scan(self.media_dir, item.id).map_err(|source| PipelineError::Io {
+            path: dir.clone(),
+            source,
+        })?;
+
+        let done: Vec<_> = assets
+            .iter()
+            .filter(|a| a.kind == AssetKind::Transcript)
+            .map(|a| a.ordinal)
+            .collect();
 
         for source in assets.iter().filter(|a| is_audible(a)) {
+            if done.contains(&source.ordinal) {
+                continue;
+            }
             let media = dir.join(source.file_name());
             self.transcribe
                 .transcribe(&media, &dir, source.ordinal)
@@ -134,11 +213,6 @@ fn is_audible(asset: &Asset) -> bool {
     matches!(asset.kind, AssetKind::Video | AssetKind::Audio)
 }
 
-/// 通し番号を素直に扱うための補助。
-pub fn ordinal(n: u32) -> Option<NonZeroU32> {
-    NonZeroU32::new(n)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -146,6 +220,7 @@ mod tests {
     use crate::source::SourceId;
     use crate::store::{NewItem, NewSource};
     use crate::url::{self, NormalizedUrl};
+    use std::num::NonZeroU32;
     use std::sync::Mutex;
 
     /// 落ちるものを置く代わりの取得。アダプタの口だけを満たす。
@@ -386,7 +461,8 @@ mod tests {
         );
     }
 
-    /// 図に無い出発点からは動かない。
+    /// 図に無い出発点からは動かない。台帳を読んだ時点で断るので、
+    /// 外部ツールは起動しない。
     #[tokio::test]
     async fn only_a_waiting_item_can_start() {
         let store = Store::open_in_memory().await.unwrap();
@@ -413,7 +489,80 @@ mod tests {
 
         assert!(matches!(
             result,
-            Err(PipelineError::Store(StoreError::IllegalTransition(_)))
+            Err(PipelineError::NotAtThisStep {
+                state: StateName::Deleted,
+                ..
+            })
         ));
+    }
+
+    /// 落ちて `acquiring` のまま残ったものは、続きから運べる。
+    /// 事象を重ねないので、図に無い `acquiring --> acquiring` を通らない。
+    #[tokio::test]
+    async fn a_stalled_acquisition_resumes_where_it_stopped() {
+        let store = Store::open_in_memory().await.unwrap();
+        let (_, id) = waiting_item(&store).await;
+        let media = tempfile::tempdir().unwrap();
+        let transcribe = FakeTranscribe {
+            calls: Mutex::new(Vec::new()),
+        };
+
+        // 1周目は取得で落ちる。acquiring のまま残る。
+        assert!(
+            Pipeline::new(&store, media.path(), &Failing, &transcribe)
+                .run(id, HoldPolicy::NoHold)
+                .await
+                .is_err()
+        );
+        let stalled = store.item(id).await.unwrap().unwrap();
+        assert_eq!(stalled.state, State::Acquiring);
+
+        // 2周目は同じ項目を acquiring から続ける。
+        let acquire = FakeAcquire {
+            files: vec!["video.1.mp4"],
+            calls: Mutex::new(0),
+        };
+        let state = Pipeline::new(&store, media.path(), &acquire, &transcribe)
+            .run(id, HoldPolicy::NoHold)
+            .await
+            .unwrap();
+
+        assert_eq!(state, State::Kept);
+    }
+
+    /// 済んだ文字起こしは引き直さない。1本で数分かかるので、やり直しのたびに
+    /// 全部引くと期限までに終わらない。
+    #[tokio::test]
+    async fn transcription_picks_up_where_it_left_off() {
+        let store = Store::open_in_memory().await.unwrap();
+        let (_, id) = waiting_item(&store).await;
+        let media = tempfile::tempdir().unwrap();
+        let dir = asset::item_dir(media.path(), id);
+
+        // video.1 のぶんは前の周で済んでいる、という体。
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("transcript.1.vtt"), b"WEBVTT\n").unwrap();
+
+        let transcribe = FakeTranscribe {
+            calls: Mutex::new(Vec::new()),
+        };
+        Pipeline::new(
+            &store,
+            media.path(),
+            &FakeAcquire {
+                files: vec!["video.1.mp4", "video.2.mp4"],
+                calls: Mutex::new(0),
+            },
+            &transcribe,
+        )
+        .run(id, HoldPolicy::NoHold)
+        .await
+        .unwrap();
+
+        assert_eq!(
+            transcribe.calls.lock().unwrap().as_slice(),
+            ["video.2.mp4"],
+            "済んでいる 1 を飛ばして 2 だけ引く"
+        );
     }
 }

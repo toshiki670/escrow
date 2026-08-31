@@ -1,11 +1,14 @@
 //! #5 の対応表。**プラットフォーム × 操作 → ツール**。
 //!
-//! | | 検知 | 取得 |
-//! |---|---|---|
-//! | YouTube ショート / 動画 / 配信 | yt-dlp | yt-dlp |
-//! | X 投稿 | gallery-dl | gallery-dl |
-//! | X Space | gallery-dl | yt-dlp |
-//! | X ライブ配信 | gallery-dl | yt-dlp |
+//! | | 検知 | 取得 | 生存確認 |
+//! |---|---|---|---|
+//! | YouTube ショート / 動画 / 配信 | yt-dlp | yt-dlp | yt-dlp |
+//! | X 投稿 | gallery-dl | gallery-dl | **未定** |
+//! | X Space | gallery-dl | yt-dlp | **未定** |
+//! | X ライブ配信 | gallery-dl | yt-dlp | **未定** |
+//!
+//! 生存確認の列は #5 が yt-dlp しか書いていない。X のぶんは [`Prober::Undecided`]
+//! で、表から抜けているのではなく**決まっていない**ことを型で持つ。
 //!
 //! **この対応をコードの1か所に置く。** 散らばっていると「X の取得を別ツールへ」が
 //! 何箇所の変更になるか分からない。ここに集めてあれば、変わるのは表の1行になる。
@@ -15,10 +18,12 @@
 use std::path::Path;
 
 use super::gallerydl::GalleryDl;
+use super::whisper::Whisper;
 use super::ytdlp::YtDlp;
-use super::{Acquire, AdapterError, Discover, Found};
+use super::{Acquire, AdapterError, Discover, Found, Ports, Probe, Transcribe};
 use crate::asset::Asset;
 use crate::content::{ContentType, Platform};
+use crate::liveness::Presence;
 use crate::source::Source;
 use crate::timestamp::Timestamp;
 use crate::url::{self, NormalizedUrl};
@@ -27,11 +32,16 @@ use crate::url::{self, NormalizedUrl};
 pub struct Adapters {
     pub ytdlp: YtDlp,
     pub gallerydl: GalleryDl,
+    pub whisper: Whisper,
 }
 
 impl Adapters {
-    pub const fn new(ytdlp: YtDlp, gallerydl: GalleryDl) -> Self {
-        Self { ytdlp, gallerydl }
+    pub const fn new(ytdlp: YtDlp, gallerydl: GalleryDl, whisper: Whisper) -> Self {
+        Self {
+            ytdlp,
+            gallerydl,
+            whisper,
+        }
     }
 
     /// 対応表の「取得」列。
@@ -61,6 +71,39 @@ impl Adapters {
             }),
         }
     }
+
+    /// 対応表の「生存確認」列。
+    ///
+    /// X のぶんを #5 が決めていないので [`Prober::Undecided`]。返さないのではなく
+    /// 「確かめられない」を返すので、#5 の非対称性の規則がそのまま効く —
+    /// 在ることを確かめられない項目は `holding` に留まり、捨てられない。
+    pub const fn prober(&self, content_type: ContentType) -> Prober<'_> {
+        match content_type {
+            ContentType::YoutubeShorts | ContentType::YoutubeVideo | ContentType::YoutubeLive => {
+                Prober::YtDlp(&self.ytdlp)
+            }
+            ContentType::XPost | ContentType::XSpace | ContentType::XBroadcast => Prober::Undecided,
+        }
+    }
+}
+
+/// エンジンが外の世界へ触れる口。#5 の対応表を通すのはここだけ。
+impl Ports for Adapters {
+    fn discoverer(&self, source: &Source) -> Result<impl Discover, AdapterError> {
+        Self::discoverer(self, source)
+    }
+
+    fn acquirer(&self, content_type: ContentType) -> impl Acquire {
+        Self::acquirer(self, content_type)
+    }
+
+    fn prober(&self, content_type: ContentType) -> impl Probe {
+        Self::prober(self, content_type)
+    }
+
+    fn transcriber(&self) -> impl Transcribe {
+        &self.whisper
+    }
 }
 
 /// 取得を担うもの。呼ぶ側はどれが動いたかを知らない。
@@ -79,6 +122,26 @@ impl Acquire for Acquirer<'_> {
         match self {
             Self::YtDlp(tool) => tool.acquire(url, content_type, into).await,
             Self::GalleryDl(tool) => tool.acquire(url, content_type, into).await,
+        }
+    }
+}
+
+/// 生存確認を担うもの。
+pub enum Prober<'a> {
+    YtDlp(&'a YtDlp),
+    /// 手段が決まっていない。#5 の「生存確認」は yt-dlp のことしか書いていない。
+    ///
+    /// 空を返さず、この変種が [`Presence::Unknown`] を返す。#5 の
+    /// 「それ以外すべては判定保留」に当たるので、呼ぶ側に分岐が要らず、
+    /// 手段が無い配信元を黙って捨てにいく経路も生まれない。
+    Undecided,
+}
+
+impl Probe for Prober<'_> {
+    async fn probe(&self, url: &NormalizedUrl) -> Result<Presence, AdapterError> {
+        match self {
+            Self::YtDlp(tool) => tool.probe(url).await,
+            Self::Undecided => Ok(Presence::Unknown),
         }
     }
 }
@@ -113,6 +176,12 @@ mod tests {
         Adapters::new(
             YtDlp::new("/bin/yt-dlp", Browser::Firefox),
             GalleryDl::new("/bin/gallery-dl", Browser::Firefox),
+            Whisper::new(
+                "/bin/whisper-cli",
+                "/bin/ffmpeg",
+                "/models/ggml.bin",
+                crate::config::Language::Code("ja".to_owned()),
+            ),
         )
     }
 
@@ -125,6 +194,7 @@ mod tests {
             created_at: Timestamp::parse("2026-01-01T00:00:00+09:00").unwrap(),
             hold_days: None,
             discover_interval_minutes: NonZeroU32::new(15).unwrap(),
+            last_discovered_at: None,
         }
     }
 
@@ -189,6 +259,33 @@ mod tests {
         for content_type in ContentType::ALL {
             let _ = adapters.acquirer(content_type);
         }
+    }
+
+    /// 「生存確認」列。X は #5 が決めていないので、手段が無いことを持つ。
+    #[test]
+    fn liveness_follows_the_table() {
+        let adapters = adapters();
+
+        for content_type in ContentType::ALL {
+            let decided = matches!(adapters.prober(content_type), Prober::YtDlp(_));
+            assert_eq!(
+                decided,
+                content_type.platform() == Platform::Youtube,
+                "{content_type}"
+            );
+        }
+    }
+
+    /// 手段が無い配信元は、消えたとは答えない（#5 の非対称性）。
+    #[tokio::test]
+    async fn an_undecided_prober_never_says_gone() {
+        let url = url::normalize_item("https://x.com/jack/status/20")
+            .unwrap()
+            .0;
+        assert_eq!(
+            Prober::Undecided.probe(&url).await.unwrap(),
+            Presence::Unknown
+        );
     }
 
     #[test]

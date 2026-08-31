@@ -5,6 +5,7 @@
 
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, Result, bail};
 use clap::{Parser, Subcommand};
@@ -14,6 +15,7 @@ use escrow_core::adapter::{
 };
 use escrow_core::config::{Config, Dirs, Paths};
 use escrow_core::content::ContentType;
+use escrow_core::engine::{Engine, Limits, Report};
 use escrow_core::handover;
 use escrow_core::item::ItemId;
 use escrow_core::pipeline::Pipeline;
@@ -63,6 +65,8 @@ enum Command {
     Item(ItemCommand),
     /// 項目を1つ、引き渡せる状態まで運ぶ。
     Fetch { id: i64 },
+    /// 巡回し続ける。Ctrl-C で止まる。
+    Run,
     /// 外部ツールがどこで見つかるかを出す。
     Doctor,
 }
@@ -125,8 +129,31 @@ async fn main() -> Result<()> {
             url,
         }) => app.add_item(source, r#type.as_deref(), &url).await,
         Command::Fetch { id } => app.fetch(id).await,
+        Command::Run => app.run().await,
         Command::Doctor => app.doctor(),
     }
+}
+
+/// 1周の経過を人へ出す。
+///
+/// **知らせは黙って捨てない。** cookie の失効も、外部ツールの仕様変更も、
+/// 台帳には残らない（#5）ので、ここへ出さないと誰も気づかないまま
+/// 取得が止まり続ける。
+fn announce(report: &Report) {
+    for notice in &report.notices {
+        eprintln!("  ⚠ {notice}");
+    }
+
+    let moved =
+        report.discovered + report.advanced + report.failed + report.kept + report.discarded;
+    if moved == 0 {
+        return;
+    }
+
+    println!(
+        "  見つけた {} / 進めた {} / 諦めた {} / 残した {} / 捨てた {}",
+        report.discovered, report.advanced, report.failed, report.kept, report.discarded
+    );
 }
 
 /// 設定と置き場所を解決した状態。
@@ -162,6 +189,12 @@ impl App {
         Ok(Adapters::new(
             YtDlp::new(self.tool(Tool::YtDlp)?, browser),
             GalleryDl::new(self.tool(Tool::GalleryDl)?, browser),
+            Whisper::new(
+                self.tool(Tool::WhisperCli)?,
+                self.tool(Tool::Ffmpeg)?,
+                &self.paths.transcribe_model,
+                self.config.transcribe.language.clone(),
+            ),
         ))
     }
 
@@ -312,19 +345,69 @@ impl App {
         let adapters = self.adapters()?;
         // #5 の対応表が、この種別を取るのがどのツールかを決める。
         let acquirer = adapters.acquirer(item.content_type());
-        let whisper = Whisper::new(
-            self.tool(Tool::WhisperCli)?,
-            self.tool(Tool::Ffmpeg)?,
-            &self.paths.transcribe_model,
-            self.config.transcribe.language.clone(),
-        );
 
-        let state = Pipeline::new(&self.store, &self.paths.media_dir, &acquirer, &whisper)
-            .run(id, source.hold_policy())
-            .await?;
+        let state = Pipeline::new(
+            &self.store,
+            &self.paths.media_dir,
+            &acquirer,
+            &adapters.whisper,
+        )
+        .run(id, source.hold_policy())
+        .await?;
 
         println!("{id} -> {state}", state = state.as_str());
         Ok(())
+    }
+
+    /// 巡回し続ける。
+    ///
+    /// **判断はここに無い。** どの配信元がいつ番か、どの項目を諦めるか、いつ捨てるかは
+    /// すべて `Engine` が持ち、ここが決めるのは「いつ呼ぶか」と「何を出すか」だけ。
+    async fn run(&self) -> Result<()> {
+        let adapters = self.adapters()?;
+        let engine = Engine::new(
+            &self.store,
+            &adapters,
+            &self.paths.media_dir,
+            Limits::from(&self.config),
+        );
+
+        // 番かどうかは `Source` ごとの間隔が決めるので、こちらは短く一定に打つ。
+        // 起きるだけで何もしない周が普通。
+        let heartbeat = Duration::from_secs(60);
+        let check_every =
+            Duration::from_secs(3600 * u64::from(self.config.check.interval_hours.get()));
+        // 生存確認は起動直後に1回。落ちていた間に期限を過ぎたものがある。
+        let mut next_check = Instant::now();
+
+        println!("巡回を始めます（Ctrl-C で止まります）");
+
+        loop {
+            let now = Timestamp::now();
+
+            // 1周落ちても止めない。常駐が1回の失敗で消えると、そのぶん
+            // 配信元から消えたものを取り逃す。
+            match engine.tick(now).await {
+                Ok(report) => announce(&report),
+                Err(e) => eprintln!("巡回で落ちました: {e:#}"),
+            }
+
+            if Instant::now() >= next_check {
+                match engine.check_liveness(now).await {
+                    Ok(report) => announce(&report),
+                    Err(e) => eprintln!("生存確認で落ちました: {e:#}"),
+                }
+                next_check = Instant::now() + check_every;
+            }
+
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {
+                    println!("止めます");
+                    return Ok(());
+                }
+                () = tokio::time::sleep(heartbeat) => {}
+            }
+        }
     }
 
     fn doctor(&self) -> Result<()> {

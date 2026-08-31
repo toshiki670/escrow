@@ -49,6 +49,11 @@ pub struct Source {
     /// 生存確認（共通設定）とは別の概念なので、`Source` ごとに持つ。X は配信が
     /// 予約されず突発的に始まるので高頻度、YouTube は予約枠が先に見えるので低頻度（#1）。
     pub discover_interval_minutes: NonZeroU32,
+    /// 最後に検知が通った日時。まだ一度も通っていなければ空。
+    ///
+    /// **通ったときだけ動かす。** 落ちた回に進めると、その回に配信元が返せなかった
+    /// ものを二度と見に行かなくなる。
+    pub last_discovered_at: Option<Timestamp>,
 }
 
 impl Source {
@@ -60,6 +65,35 @@ impl Source {
             Some(_) => HoldPolicy::Hold,
             None => HoldPolicy::NoHold,
         }
+    }
+
+    /// いま検知を回す番か。
+    ///
+    /// 一度も通っていなければ回す。以後は前回から `discover_interval_minutes`。
+    pub fn due(&self, now: Timestamp) -> bool {
+        match self.last_discovered_at {
+            None => true,
+            Some(last) => now >= last + self.interval(),
+        }
+    }
+
+    /// 検知でどこまで遡るか。[`crate::adapter::Discover::discover`] の `since`。
+    ///
+    /// 前回の続きから見るが、**1周ぶん重ねる**。配信元は投稿の直後に一覧へ載せると
+    /// は限らないので、境界ちょうどで切ると載るのが遅れたものを落とす。重なったぶんは
+    /// `Item.url` が一意なので二重に行を作らない。
+    ///
+    /// `created_at` より前へは行かない。#1 の「登録日時。これ以降の投稿を監視する」。
+    pub fn discover_since(&self) -> Timestamp {
+        match self.last_discovered_at {
+            None => self.created_at,
+            Some(last) => (last - self.interval()).max(self.created_at),
+        }
+    }
+
+    fn interval(&self) -> chrono::TimeDelta {
+        // 分は最大 u32 なので、TimeDelta（i64 ミリ秒）に収まる。
+        chrono::TimeDelta::minutes(i64::from(self.discover_interval_minutes.get()))
     }
 }
 
@@ -100,6 +134,7 @@ mod tests {
             created_at: Timestamp::parse("2026-01-01T00:00:00+09:00").unwrap(),
             hold_days: hold_days.map(|d| NonZeroU32::new(d).unwrap()),
             discover_interval_minutes: NonZeroU32::new(15).unwrap(),
+            last_discovered_at: None,
         }
     }
 

@@ -2,6 +2,7 @@
 
 use thiserror::Error;
 
+use crate::hold::DeadlineReached;
 use crate::liveness::PresenceConfirmed;
 
 /// #1 の状態表。
@@ -217,8 +218,13 @@ pub enum Event {
     SourceGone,
     /// 期限まで配信元に在ることを確かめた。捨ててよい。
     ///
-    /// 証を要求するので、`state_since + hold_days < now` だけで捨てる実装は書けない。
-    HeldToDeadline(PresenceConfirmed),
+    /// #1 の「期限まで**在った**」は2つの条件の連言なので、証も2つ要る。
+    /// [`PresenceConfirmed`] が無ければ沈黙で捨てる実装は書けず、
+    /// [`DeadlineReached`] が無ければ期限前に捨てる実装は書けない。
+    HeldToDeadline {
+        presence: PresenceConfirmed,
+        deadline: DeadlineReached,
+    },
     /// 外部が受け取った。
     Released { reference: Option<ReleaseReference> },
     /// 人が消した。
@@ -243,7 +249,7 @@ impl Event {
             Self::Acquired { .. } => "acquired",
             Self::Transcribed { .. } => "transcribed",
             Self::SourceGone => "source_gone",
-            Self::HeldToDeadline(_) => "held_to_deadline",
+            Self::HeldToDeadline { .. } => "held_to_deadline",
             Self::Released { .. } => "released",
             Self::Deleted => "deleted",
             Self::RetriesExhausted => "retries_exhausted",
@@ -322,7 +328,7 @@ pub fn next(state: &State, event: &Event) -> Result<State, IllegalTransition> {
             | S::Error => return Err(illegal()),
         },
 
-        E::HeldToDeadline(_) => match state {
+        E::HeldToDeadline { .. } => match state {
             S::Holding => S::Discarded,
             S::Waiting
             | S::Acquiring
@@ -387,6 +393,22 @@ mod tests {
             .expect("Present なら証が取れる")
     }
 
+    /// 期限を過ぎた `holding`。証はここからしか作れない。
+    fn deadline_reached() -> DeadlineReached {
+        let state_since = crate::timestamp::Timestamp::parse("2026-03-01T20:00:00+09:00").unwrap();
+        let now = crate::timestamp::Timestamp::parse("2026-03-09T20:00:00+09:00").unwrap();
+        crate::hold::HoldDeadline::new(state_since, std::num::NonZeroU32::new(7).unwrap())
+            .reached(now)
+            .expect("期限を過ぎているので証が取れる")
+    }
+
+    fn held_to_deadline() -> Event {
+        Event::HeldToDeadline {
+            presence: confirmed(),
+            deadline: deadline_reached(),
+        }
+    }
+
     /// 全事象の代表値。網羅の勘定に使う。
     fn all_events() -> [Event; 9] {
         [
@@ -399,7 +421,7 @@ mod tests {
                 hold: HoldPolicy::NoHold,
             },
             Event::SourceGone,
-            Event::HeldToDeadline(confirmed()),
+            held_to_deadline(),
             Event::Released { reference: None },
             Event::Deleted,
             Event::RetriesExhausted,
@@ -462,11 +484,7 @@ mod tests {
                 State::Kept,
             ),
             (State::Holding, Event::SourceGone, State::Kept),
-            (
-                State::Holding,
-                Event::HeldToDeadline(confirmed()),
-                State::Discarded,
-            ),
+            (State::Holding, held_to_deadline(), State::Discarded),
             (
                 State::Kept,
                 Event::Released { reference: None },
@@ -535,7 +553,7 @@ mod tests {
         assert!(Presence::Gone.confirmed().is_none());
 
         // 証があってはじめて事象が作れ、そこではじめて discarded へ行ける。
-        let event = Event::HeldToDeadline(Presence::Present.confirmed().unwrap());
+        let event = held_to_deadline();
         assert_eq!(next(&State::Holding, &event).unwrap(), State::Discarded);
     }
 

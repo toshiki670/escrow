@@ -131,6 +131,20 @@ pub fn scan(media_dir: &Path, item: ItemId) -> io::Result<Vec<Asset>> {
     scan_dir(&item_dir(media_dir, item))
 }
 
+/// 1つの項目の実体をまとめて消す。
+///
+/// `discarded` と `released` の後始末。どちらも**台帳を先に更新してからここへ
+/// 来る**ので、途中で落ちても残るのは行と対応しない孤児ファイルだけになる（#7）。
+///
+/// もう無ければ何もしない。前の周の途中で落ちていれば普通にこれ。
+pub fn remove(media_dir: &Path, item: ItemId) -> io::Result<()> {
+    match fs::remove_dir_all(item_dir(media_dir, item)) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e),
+    }
+}
+
 /// 置き場所を直接指してのぞく。
 ///
 /// 外部ツールのアダプタは `ItemId` を知らず、書き込み先のディレクトリだけを渡される。

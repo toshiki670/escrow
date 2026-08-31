@@ -134,12 +134,10 @@ pub async fn release(
     }
 
     // ここから先で落ちても、残るのは孤児ファイルだけ。
-    let dir = asset::item_dir(media_dir, id);
-    match std::fs::remove_dir_all(&dir) {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(source) => return Err(HandoverError::Io { path: dir, source }),
-    }
+    asset::remove(media_dir, id).map_err(|source| HandoverError::Io {
+        path: asset::item_dir(media_dir, id),
+        source,
+    })?;
 
     Ok(handed)
 }

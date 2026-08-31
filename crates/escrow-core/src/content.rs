@@ -75,6 +75,22 @@ pub enum Platform {
     X,
 }
 
+impl Platform {
+    /// 人に見せる名前。台帳にも設定にも出ないので、外部との約束ではない。
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Youtube => "YouTube",
+            Self::X => "X",
+        }
+    }
+}
+
+impl fmt::Display for Platform {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// subtype が `Media` になる種別。#1 の表で `Media` 側の5つ。
 ///
 /// [`Content::Media`] がこれを持つことで、`content_type` と中身の食い違いが

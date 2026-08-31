@@ -210,50 +210,58 @@ impl Store {
 
     pub async fn source(&self, id: SourceId) -> Result<Option<Source>, StoreError> {
         let key = id.get();
-        let row = sqlx::query!(
+        let row = sqlx::query_as!(
+            SourceRow,
             r#"SELECT id AS "id!", person_id, url, enabled AS "enabled: bool", created_at, hold_days,
-                      discover_interval_minutes
+                      discover_interval_minutes, last_discovered_at
                FROM source WHERE id = ?"#,
             key
         )
         .fetch_optional(&self.pool)
         .await?;
 
-        let Some(row) = row else { return Ok(None) };
+        row.map(Source::try_from)
+            .transpose()
+            .map_err(StoreError::Row)
+    }
 
-        let url = url::normalize_source(&row.url)
-            .ok()
-            .filter(|u| u.as_str() == row.url);
-        let url = url.ok_or(RowError::UnnormalizedSourceUrl {
-            id: row.id,
-            value: row.url.clone(),
-        })?;
+    /// 全配信元。検知ループが1周ぶん読む。
+    ///
+    /// `enabled` で絞らないのは、#6 のダッシュボードが止めているものも並べるため。
+    /// 回すかどうかを決めるのは読んだ側（[`Source::enabled`] と [`Source::due`]）。
+    pub async fn sources(&self) -> Result<Vec<Source>, StoreError> {
+        let rows = sqlx::query_as!(
+            SourceRow,
+            r#"SELECT id AS "id!", person_id, url, enabled AS "enabled: bool", created_at, hold_days,
+                      discover_interval_minutes, last_discovered_at
+               FROM source ORDER BY id"#
+        )
+        .fetch_all(&self.pool)
+        .await?;
 
-        Ok(Some(Source {
-            id: SourceId::new(row.id),
-            person_id: PersonId::new(row.person_id),
-            url,
-            enabled: row.enabled,
-            created_at: Timestamp::parse(&row.created_at).map_err(|_| {
-                RowError::BadSourceTimestamp {
-                    id: row.id,
-                    value: row.created_at.clone(),
-                }
-            })?,
-            hold_days: positive(row.hold_days, "source", row.id, "hold_days")?,
-            discover_interval_minutes: positive(
-                Some(row.discover_interval_minutes),
-                "source",
-                row.id,
-                "discover_interval_minutes",
-            )?
-            .ok_or(RowError::OutOfRange {
-                table: "source",
-                id: row.id,
-                column: "discover_interval_minutes",
-                value: row.discover_interval_minutes,
-            })?,
-        }))
+        rows.into_iter()
+            .map(Source::try_from)
+            .collect::<Result<_, _>>()
+            .map_err(StoreError::Row)
+    }
+
+    /// 検知が1周通ったことを記録する。
+    ///
+    /// **通ったときだけ呼ぶ。** 落ちた回に進めると、その回に配信元が返せなかった
+    /// ものを二度と見に行かなくなる（[`Source::discover_since`]）。
+    pub async fn mark_discovered(&self, id: SourceId, at: Timestamp) -> Result<(), StoreError> {
+        let key = id.get();
+        let at = at.to_text();
+
+        sqlx::query!(
+            "UPDATE source SET last_discovered_at = ? WHERE id = ?",
+            at,
+            key
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
     }
 
     pub async fn add_exclude(
@@ -429,8 +437,10 @@ impl Store {
             _ => None,
         };
 
+        // `attempts` は「いまの状態で連続して落ちた回数」なので、状態が動いたら 0。
+        // ここが `state` の唯一の書き手なので、両者がずれる書き方が他所にできない。
         let affected = sqlx::query!(
-            "UPDATE item SET state = ?, state_since = ?, release_reference = ? \
+            "UPDATE item SET state = ?, state_since = ?, release_reference = ?, attempts = 0 \
              WHERE id = ? AND state = ?",
             state,
             state_since,
@@ -448,6 +458,51 @@ impl Store {
             Applied::Superseded
         })
     }
+
+    /// いまの状態で1回落ちたことを数える。
+    ///
+    /// 状態は動かさない。取得が落ちた項目は `acquiring` のまま残り、次の周で
+    /// やり直す（#7 の「取得の待ち行列」）。`error` へ移すかどうかは、返った回数と
+    /// `acquire.max_retries` を突き合わせて呼ぶ側が決める。
+    ///
+    /// [`Self::apply`] と同じく compare-and-swap。`escrow release` やエンジンの
+    /// 別の周が先に状態を動かしていたら数えない — 動いた後の状態で1回目を
+    /// 数えたことにすると、回数の意味がずれる。
+    pub async fn record_failure(&self, id: ItemId, state: &State) -> Result<Failure, StoreError> {
+        let key = id.get();
+        let expected = state.as_str();
+
+        let row = sqlx::query!(
+            r#"UPDATE item SET attempts = attempts + 1 WHERE id = ? AND state = ?
+               RETURNING attempts AS "attempts!: i64""#,
+            key,
+            expected,
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+
+        let Some(row) = row else {
+            return Ok(Failure::Superseded);
+        };
+
+        let attempts = u32::try_from(row.attempts).map_err(|_| RowError::OutOfRange {
+            table: "item",
+            id: key,
+            column: "attempts",
+            value: row.attempts,
+        })?;
+
+        Ok(Failure::Recorded(attempts))
+    }
+}
+
+/// [`Store::record_failure`] の結果。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Failure {
+    /// 数えた。いまの状態で連続して落ちた回数。
+    Recorded(u32),
+    /// 読んだときから状態が動いていたので数えなかった。読み直して決め直す。
+    Superseded,
 }
 
 /// [`Store::apply`] の結果。
@@ -460,6 +515,67 @@ pub enum Applied {
 }
 
 // ---------------------------------------------------------------- 行との往復
+
+/// `source` の1行そのまま。
+struct SourceRow {
+    id: i64,
+    person_id: i64,
+    url: String,
+    enabled: bool,
+    created_at: String,
+    hold_days: Option<i64>,
+    discover_interval_minutes: i64,
+    last_discovered_at: Option<String>,
+}
+
+impl TryFrom<SourceRow> for Source {
+    type Error = RowError;
+
+    fn try_from(row: SourceRow) -> Result<Self, Self::Error> {
+        let id = row.id;
+
+        let url = url::normalize_source(&row.url)
+            .ok()
+            .filter(|u| u.as_str() == row.url)
+            .ok_or_else(|| RowError::UnnormalizedSourceUrl {
+                id,
+                value: row.url.clone(),
+            })?;
+
+        let source_timestamp = |value: &str| {
+            Timestamp::parse(value).map_err(|_| RowError::BadSourceTimestamp {
+                id,
+                value: value.to_owned(),
+            })
+        };
+
+        Ok(Self {
+            id: SourceId::new(id),
+            person_id: PersonId::new(row.person_id),
+            url,
+            enabled: row.enabled,
+            created_at: source_timestamp(&row.created_at)?,
+            hold_days: positive(row.hold_days, "source", id, "hold_days")?,
+            discover_interval_minutes: positive(
+                Some(row.discover_interval_minutes),
+                "source",
+                id,
+                "discover_interval_minutes",
+            )?
+            .ok_or(RowError::OutOfRange {
+                table: "source",
+                id,
+                column: "discover_interval_minutes",
+                value: row.discover_interval_minutes,
+            })?,
+            last_discovered_at: row
+                .last_discovered_at
+                .as_deref()
+                .map(source_timestamp)
+                .transpose()?,
+        })
+    }
+}
 
 /// `item` の1行そのまま。ここから先はドメイン型なので、この形は外へ出さない。
 struct ItemRow {
@@ -868,10 +984,18 @@ mod tests {
 
         // こちらは holding のつもりで期限切れを適用しようとする。
         // 遷移としては合法（holding -> discarded）だが、もう holding ではない。
-        let confirmed = crate::liveness::Presence::Present.confirmed().unwrap();
+        let held_to_deadline = Event::HeldToDeadline {
+            presence: crate::liveness::Presence::Present.confirmed().unwrap(),
+            deadline: crate::hold::HoldDeadline::new(
+                at("2026-03-01T20:00:00+09:00"),
+                NonZeroU32::new(1).unwrap(),
+            )
+            .reached(now)
+            .unwrap(),
+        };
         assert_eq!(
             store
-                .apply(id, &State::Holding, &Event::HeldToDeadline(confirmed), now)
+                .apply(id, &State::Holding, &held_to_deadline, now)
                 .await
                 .unwrap(),
             Applied::Superseded,
@@ -1145,5 +1269,99 @@ mod tests {
         assert_eq!(excludes.len(), 2);
         assert_eq!(excludes[0].source_id, Some(source));
         assert_eq!(excludes[1].source_id, None, "共通条件は source_id が空");
+    }
+
+    // ------------------------------------------------------------ エンジンの2列
+
+    /// 新しい配信元はまだ一度も検知が通っていない。
+    #[tokio::test]
+    async fn a_new_source_has_never_been_visited() {
+        let (store, id) = seeded().await;
+        let source = store.source(id).await.unwrap().unwrap();
+
+        assert_eq!(source.last_discovered_at, None);
+        assert!(source.due(source.created_at), "一度も通っていなければ番");
+    }
+
+    #[tokio::test]
+    async fn the_discovery_mark_round_trips() {
+        let (store, id) = seeded().await;
+        let at = at("2026-03-01T21:00:00+09:00");
+
+        store.mark_discovered(id, at).await.unwrap();
+
+        assert_eq!(
+            store.source(id).await.unwrap().unwrap().last_discovered_at,
+            Some(at)
+        );
+        assert_eq!(
+            store.sources().await.unwrap()[0].last_discovered_at,
+            Some(at)
+        );
+    }
+
+    /// 落ちた回数は状態ごと。状態が動いたら 0 に戻る。
+    ///
+    /// 戻さないと、前の状態で数えたぶんが次の状態に持ち越され、1回も落ちて
+    /// いない段が上限に達する。
+    #[tokio::test]
+    async fn the_failure_count_starts_over_when_the_state_moves() {
+        let (store, source) = seeded().await;
+        let id = store
+            .add_item(&media_item(source, State::Acquiring))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            store.record_failure(id, &State::Acquiring).await.unwrap(),
+            Failure::Recorded(1)
+        );
+        assert_eq!(
+            store.record_failure(id, &State::Acquiring).await.unwrap(),
+            Failure::Recorded(2)
+        );
+
+        store
+            .apply(
+                id,
+                &State::Acquiring,
+                &Event::Acquired {
+                    transcript: crate::state::TranscriptNeed::Needed,
+                    hold: crate::state::HoldPolicy::NoHold,
+                },
+                at("2026-03-01T23:00:00+09:00"),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            store
+                .record_failure(id, &State::Transcribing)
+                .await
+                .unwrap(),
+            Failure::Recorded(1),
+            "動いた先では1回目から数え直す"
+        );
+    }
+
+    /// 数えるのも compare-and-swap。読んだときと状態が違えば数えない。
+    #[tokio::test]
+    async fn counting_a_failure_against_a_stale_state_does_nothing() {
+        let (store, source) = seeded().await;
+        let id = store
+            .add_item(&media_item(source, State::Acquiring))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            store.record_failure(id, &State::Waiting).await.unwrap(),
+            Failure::Superseded,
+            "acquiring の行に waiting のつもりで数えない"
+        );
+        // 数えていないので、正しい状態で数えれば1回目。
+        assert_eq!(
+            store.record_failure(id, &State::Acquiring).await.unwrap(),
+            Failure::Recorded(1)
+        );
     }
 }
