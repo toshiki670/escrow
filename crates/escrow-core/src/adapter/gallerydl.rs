@@ -99,6 +99,16 @@ pub fn timeline_argv(program: &Path, timeline: &str, browser: Browser) -> Invoca
         .arg(timeline)
 }
 
+/// 1つの投稿の中身を取る。落とさない。
+///
+/// タイムラインと同じ envelope が返るので、読み取りは共通。
+pub fn describe_argv(program: &Path, url: &NormalizedUrl, browser: Browser) -> Invocation {
+    base(program, browser)
+        .arg("--dump-json")
+        .args(["-o", "extractor.twitter.text-tweets=true"])
+        .arg(url.as_str())
+}
+
 /// 1つの投稿の実体を落とす。
 ///
 /// 出力先は一時の置き場。名前を #1 の規則へ移すのは呼んだ側。
@@ -174,7 +184,10 @@ pub fn parse_timeline(stdout: &str) -> Result<Vec<Found>, AdapterError> {
                 Some(last) => last.media = MediaPresence::Present,
                 None => return Err(parse_error(&"見出しの前にファイルが出た")),
             },
-            _ => {}
+            // 知らない種別を黙って捨てない。投稿を載せた新しい形が来たとき、
+            // 取りこぼしが「空のタイムライン」に見える。Parse なので判定は
+            // 保留に倒れ、預かり中のものは捨てられない（#5）。
+            other => return Err(parse_error(&format!("知らない出力の種別 {other}"))),
         }
     }
 
@@ -234,8 +247,10 @@ fn failure(detail: Option<&serde_json::Value>) -> AdapterError {
         .and_then(serde_json::Value::as_str)
         .unwrap_or("");
 
-    if error == "AuthRequired" || says_auth_expired(message) {
-        AdapterError::AuthExpired
+    if error == "AuthRequired" || says_unauthenticated(message) {
+        AdapterError::Unauthenticated {
+            detail: format!("{error}: {message}"),
+        }
     } else {
         AdapterError::Transient {
             program: PROGRAM.to_owned(),
@@ -251,12 +266,14 @@ fn parse_error(detail: &dyn std::fmt::Display) -> AdapterError {
     }
 }
 
-fn says_auth_expired(stderr: &str) -> bool {
-    const AUTH: [&str; 4] = [
+fn says_unauthenticated(stderr: &str) -> bool {
+    const AUTH: [&str; 6] = [
         "Login required",
         "authorization",
         "Unauthorized",
         "requires authentication",
+        "could not find",
+        "cookies database",
     ];
     let lowered = stderr.to_ascii_lowercase();
     AUTH.iter()
@@ -264,8 +281,10 @@ fn says_auth_expired(stderr: &str) -> bool {
 }
 
 fn classify(completed: &Completed) -> AdapterError {
-    if says_auth_expired(&completed.stderr) {
-        AdapterError::AuthExpired
+    if says_unauthenticated(&completed.stderr) {
+        AdapterError::Unauthenticated {
+            detail: completed.stderr_tail(),
+        }
     } else {
         AdapterError::Transient {
             program: PROGRAM.to_owned(),
@@ -275,6 +294,23 @@ fn classify(completed: &Completed) -> AdapterError {
 }
 
 // ------------------------------------------------------------------ 実行
+
+impl GalleryDl {
+    /// 1件の中身を取る。人が URL を登録するときの入口（#5）。
+    pub async fn describe(&self, url: &NormalizedUrl) -> Result<Found, AdapterError> {
+        let completed = run(&describe_argv(&self.program, url, self.browser), None).await?;
+        if !completed.success {
+            return Err(classify(&completed));
+        }
+
+        parse_timeline(&completed.stdout)?
+            .into_iter()
+            .next()
+            .ok_or_else(|| AdapterError::Unavailable {
+                url: url.as_str().to_owned(),
+            })
+    }
+}
 
 impl Discover for GalleryDl {
     async fn discover(
@@ -346,7 +382,8 @@ fn rename_into_place(from: &Path, into: &Path) -> Result<Vec<Asset>, AdapterErro
     // gallery-dl の `{num}` が並び順を持つので、名前で並べれば投稿内の順になる。
     downloaded.sort();
 
-    let mut counts = [0u32; 4];
+    // 通し番号は種類ごとに1から振り直す。宣言順に依存しないよう、種類を鍵にする。
+    let mut counts: std::collections::HashMap<AssetKind, u32> = std::collections::HashMap::new();
     let mut assets = Vec::new();
 
     for path in downloaded {
@@ -357,7 +394,7 @@ fn rename_into_place(from: &Path, into: &Path) -> Result<Vec<Asset>, AdapterErro
             continue;
         };
 
-        let slot = &mut counts[kind as usize];
+        let slot = counts.entry(kind).or_default();
         *slot += 1;
         let ordinal = std::num::NonZeroU32::new(*slot).expect("1 から数える");
 
@@ -435,6 +472,7 @@ mod tests {
     fn every_call_ignores_the_users_own_config_and_names_the_browser() {
         for invocation in [
             timeline_argv(&program(), "https://x.com/id:12/timeline", Browser::Safari),
+            describe_argv(&program(), &post_url(), Browser::Safari),
             download_argv(
                 &program(),
                 &post_url(),
@@ -570,7 +608,10 @@ mod tests {
     fn an_auth_failure_inside_the_output_is_not_an_empty_timeline() {
         let error = parse_timeline(AUTH_REQUIRED).expect_err("失敗として読めること");
 
-        assert!(matches!(error, AdapterError::AuthExpired), "{error:?}");
+        assert!(
+            matches!(error, AdapterError::Unauthenticated { .. }),
+            "{error:?}"
+        );
         // cookie の失効は消えたことを意味しない。判定は保留（#5）。
         assert_eq!(error.presence(), crate::liveness::Presence::Unknown);
     }
@@ -591,7 +632,10 @@ mod tests {
             stdout: String::new(),
             stderr: "[twitter][error] Login required to access this resource".to_owned(),
         };
-        assert!(matches!(classify(&completed), AdapterError::AuthExpired));
+        assert!(matches!(
+            classify(&completed),
+            AdapterError::Unauthenticated { .. }
+        ));
         // cookie の失効は消えたことを意味しない。判定は保留（#5）。
         assert_eq!(
             classify(&completed).presence(),
@@ -631,6 +675,19 @@ mod tests {
 
         let assets = rename_into_place(from.path(), into.path()).unwrap();
         assert_eq!(assets.len(), 1);
+    }
+
+    /// 出力の形が増えたら気づけること。黙って捨てると取りこぼしが
+    /// 「空のタイムライン」に見える。
+    #[test]
+    fn an_unknown_envelope_kind_is_a_parse_error() {
+        let json = r#"[[2, {"tweet_id":20,"date":"2006-03-21 20:50:14","content":"x"}],
+                       [99, {"something": "new"}]]"#;
+
+        assert!(matches!(
+            parse_timeline(json),
+            Err(AdapterError::Parse { .. })
+        ));
     }
 
     #[test]

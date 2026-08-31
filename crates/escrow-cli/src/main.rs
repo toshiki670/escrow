@@ -9,7 +9,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context as _, Result, bail};
 use clap::{Parser, Subcommand};
 
-use escrow_core::adapter::{Resolver, Tool, whisper::Whisper, ytdlp::YtDlp};
+use escrow_core::adapter::{
+    Adapters, Resolver, Tool, gallerydl::GalleryDl, whisper::Whisper, ytdlp::YtDlp,
+};
 use escrow_core::config::{Config, Dirs, Paths};
 use escrow_core::content::ContentType;
 use escrow_core::handover;
@@ -154,6 +156,15 @@ impl App {
         })
     }
 
+    /// 使えるツールを揃える。どれをいつ使うかは #5 の対応表（`Adapters`）が決める。
+    fn adapters(&self) -> Result<Adapters> {
+        let browser = self.config.auth.cookies_from;
+        Ok(Adapters::new(
+            YtDlp::new(self.tool(Tool::YtDlp)?, browser),
+            GalleryDl::new(self.tool(Tool::GalleryDl)?, browser),
+        ))
+    }
+
     fn tool(&self, tool: Tool) -> Result<PathBuf> {
         self.resolver
             .resolve(tool)
@@ -261,12 +272,13 @@ impl App {
             ),
         };
 
-        let Some(media_type) = content_type.media_type() else {
-            bail!("{content_type} の登録は X のアダプタが要る（Phase 3 の残り）");
+        // 中身を取るツールも #5 の対応表が決める。
+        let adapters = self.adapters()?;
+        let found = match content_type.media_type() {
+            Some(media_type) => adapters.ytdlp.describe(&url, media_type).await?,
+            // `Post` 側は `x_post` だけ。本文と繋がりは gallery-dl が返す。
+            None => adapters.gallerydl.describe(&url).await?,
         };
-
-        let ytdlp = YtDlp::new(self.tool(Tool::YtDlp)?);
-        let found = ytdlp.describe(&url, media_type).await?;
 
         let id = self
             .store
@@ -297,7 +309,9 @@ impl App {
             .await?
             .context("配信元が無い")?;
 
-        let ytdlp = YtDlp::new(self.tool(Tool::YtDlp)?);
+        let adapters = self.adapters()?;
+        // #5 の対応表が、この種別を取るのがどのツールかを決める。
+        let acquirer = adapters.acquirer(item.content_type());
         let whisper = Whisper::new(
             self.tool(Tool::WhisperCli)?,
             self.tool(Tool::Ffmpeg)?,
@@ -305,7 +319,7 @@ impl App {
             self.config.transcribe.language.clone(),
         );
 
-        let state = Pipeline::new(&self.store, &self.paths.media_dir, &ytdlp, &whisper)
+        let state = Pipeline::new(&self.store, &self.paths.media_dir, &acquirer, &whisper)
             .run(id, source.hold_policy())
             .await?;
 

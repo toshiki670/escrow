@@ -35,6 +35,14 @@ impl ContentType {
         }
     }
 
+    /// どのプラットフォームのものか。値がプラットフォーム名を含むので一意に決まる。
+    pub const fn platform(self) -> Platform {
+        match self {
+            Self::YoutubeShorts | Self::YoutubeVideo | Self::YoutubeLive => Platform::Youtube,
+            Self::XPost | Self::XSpace | Self::XBroadcast => Platform::X,
+        }
+    }
+
     /// subtype が `Media` ならその種別。`Post` 側（`x_post`）は `None`。
     pub const fn media_type(self) -> Option<MediaType> {
         match self {
@@ -55,6 +63,16 @@ impl ContentType {
         Self::XSpace,
         Self::XBroadcast,
     ];
+}
+
+/// escrow が扱うプラットフォーム。
+///
+/// #1 のとおり DB には持たない（`url` から判別できるため）。#5 の対応表が
+/// 「どのツールを使うか」をこれで引く。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Platform {
+    Youtube,
+    X,
 }
 
 /// subtype が `Media` になる種別。#1 の表で `Media` 側の5つ。

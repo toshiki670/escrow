@@ -51,12 +51,14 @@ pub const SUPPORTED_BROWSERS: &[Browser] = &[
 
 pub struct YtDlp {
     program: PathBuf,
+    browser: Browser,
 }
 
 impl YtDlp {
-    pub fn new(program: impl Into<PathBuf>) -> Self {
+    pub fn new(program: impl Into<PathBuf>, browser: Browser) -> Self {
         Self {
             program: program.into(),
+            browser,
         }
     }
 }
@@ -112,31 +114,44 @@ impl Tab {
 // すべて純関数。テストはプロセスを起動せず argv を突き合わせるだけで済むので、
 // ツールのフラグが変わったときに落ちるのはこの層だけになる。
 
-/// タブに並んでいるものを挙げる。
-pub fn list_argv(program: &Path, source_url: &NormalizedUrl, tab: Tab) -> Invocation {
+/// 共通で渡すもの。
+///
+/// cookie は #2 の1つの設定から来る。メン限や年齢制限は一覧の時点で見えなく
+/// なるので、取得だけでなく検知にも渡す。
+fn base(program: &Path, browser: Browser) -> Invocation {
     Invocation::new(program)
+        // 利用者の設定ファイルに引きずられない。出力形式を変えられていると、
+        // 読み取りの層が理由なく落ちる。
         .arg("--ignore-config")
         .arg("--no-warnings")
+        .arg("--cookies-from-browser")
+        .arg(browser.as_str())
+}
+
+/// タブに並んでいるものを挙げる。
+pub fn list_argv(
+    program: &Path,
+    source_url: &NormalizedUrl,
+    tab: Tab,
+    browser: Browser,
+) -> Invocation {
+    base(program, browser)
         .arg("--flat-playlist")
         .arg("--dump-json")
         .arg(format!("{}/{}", source_url.as_str(), tab.path()))
 }
 
 /// 1件の中身を取る。
-pub fn describe_argv(program: &Path, url: &NormalizedUrl) -> Invocation {
-    Invocation::new(program)
-        .arg("--ignore-config")
-        .arg("--no-warnings")
+pub fn describe_argv(program: &Path, url: &NormalizedUrl, browser: Browser) -> Invocation {
+    base(program, browser)
         .arg("--skip-download")
         .arg("--dump-json")
         .arg(url.as_str())
 }
 
 /// 配信元にまだ在るかを確かめる。
-pub fn probe_argv(program: &Path, url: &NormalizedUrl) -> Invocation {
-    Invocation::new(program)
-        .arg("--ignore-config")
-        .arg("--no-warnings")
+pub fn probe_argv(program: &Path, url: &NormalizedUrl, browser: Browser) -> Invocation {
+    base(program, browser)
         .arg("--simulate")
         .arg("--quiet")
         .args(["--print", "%(availability)s"])
@@ -149,10 +164,13 @@ pub fn probe_argv(program: &Path, url: &NormalizedUrl) -> Invocation {
 /// こちらは stem だけ指定して、落ちたものを後から走査する。
 ///
 /// 配信は `--live-from-start` で頭から録る。予約枠を待つことはしない（#5）。
-pub fn download_argv(program: &Path, url: &NormalizedUrl, into: &Path) -> Invocation {
-    Invocation::new(program)
-        .arg("--ignore-config")
-        .arg("--no-warnings")
+pub fn download_argv(
+    program: &Path,
+    url: &NormalizedUrl,
+    into: &Path,
+    browser: Browser,
+) -> Invocation {
+    base(program, browser)
         .arg("--no-playlist")
         .arg("--live-from-start")
         .arg("--paths")
@@ -252,13 +270,20 @@ fn says_gone(stderr: &str) -> bool {
     GONE.iter().any(|marker| stderr.contains(marker))
 }
 
-fn says_auth_expired(stderr: &str) -> bool {
-    const AUTH: [&str; 3] = [
+/// cookie を使えないと言っているか。
+///
+/// 「入っていないブラウザを設定した」も入れる。実測すると、その場合は認証の
+/// 要らない公開のものまで exit 1 で落ちるので、一時的な失敗として扱うと
+/// 何を直せばよいか分からないまま止まり続ける。
+fn says_unauthenticated(stderr: &str) -> bool {
+    const MARKERS: [&str; 5] = [
         "Sign in to confirm",
         "cookies are no longer valid",
         "This video is private",
+        "could not find",
+        "cookies database",
     ];
-    AUTH.iter().any(|marker| stderr.contains(marker))
+    MARKERS.iter().any(|marker| stderr.contains(marker))
 }
 
 fn epoch_seconds(seconds: i64) -> Result<Timestamp, AdapterError> {
@@ -276,8 +301,10 @@ fn parse_error(detail: &dyn std::fmt::Display) -> AdapterError {
 
 /// 失敗した呼び出しを、壊れ方で分ける。
 fn classify(completed: &Completed, url: &NormalizedUrl) -> AdapterError {
-    if says_auth_expired(&completed.stderr) {
-        AdapterError::AuthExpired
+    if says_unauthenticated(&completed.stderr) {
+        AdapterError::Unauthenticated {
+            detail: completed.stderr_tail(),
+        }
     } else if says_gone(&completed.stderr) {
         AdapterError::Unavailable {
             url: url.as_str().to_owned(),
@@ -302,7 +329,7 @@ impl YtDlp {
         source_url: &NormalizedUrl,
         tab: Tab,
     ) -> Result<Vec<Listed>, AdapterError> {
-        let invocation = list_argv(&self.program, source_url, tab);
+        let invocation = list_argv(&self.program, source_url, tab, self.browser);
         let completed = run(&invocation, None).await?;
 
         if !completed.success {
@@ -317,7 +344,7 @@ impl YtDlp {
         url: &NormalizedUrl,
         media_type: MediaType,
     ) -> Result<Found, AdapterError> {
-        let invocation = describe_argv(&self.program, url);
+        let invocation = describe_argv(&self.program, url, self.browser);
         let completed = run(&invocation, None).await?;
 
         if !completed.success {
@@ -365,7 +392,7 @@ impl Acquire for YtDlp {
             source,
         })?;
 
-        let invocation = download_argv(&self.program, url, into);
+        let invocation = download_argv(&self.program, url, into, self.browser);
         let completed = run(&invocation, None).await?;
 
         if !completed.success {
@@ -390,7 +417,7 @@ impl Acquire for YtDlp {
 
 impl Probe for YtDlp {
     async fn probe(&self, url: &NormalizedUrl) -> Result<Presence, AdapterError> {
-        let invocation = probe_argv(&self.program, url);
+        let invocation = probe_argv(&self.program, url, self.browser);
         let completed = run(&invocation, None).await?;
 
         Ok(parse_probe(&completed))
@@ -419,7 +446,7 @@ mod tests {
 
     #[test]
     fn the_listing_call_asks_for_a_flat_json_listing() {
-        let invocation = list_argv(&program(), &channel(), Tab::Streams);
+        let invocation = list_argv(&program(), &channel(), Tab::Streams, Browser::Firefox);
 
         assert_eq!(invocation.program_name(), "yt-dlp");
         assert_eq!(
@@ -427,6 +454,10 @@ mod tests {
             [
                 "--ignore-config",
                 "--no-warnings",
+                // cookie は #2 の1つの設定から来る。メン限や年齢制限は一覧の
+                // 時点で見えなくなるので、取得だけでなく検知にも渡す。
+                "--cookies-from-browser",
+                "firefox",
                 "--flat-playlist",
                 "--dump-json",
                 "https://www.youtube.com/channel/UCBR8-60-B28hp2BmDPdntcQ/streams",
@@ -434,15 +465,38 @@ mod tests {
         );
     }
 
+    /// cookie は #2 の1つの設定から来て、**全部の呼び出しに渡る**。
+    ///
+    /// 検知にも渡すのは、メン限や年齢制限が一覧の時点で見えなくなるため。
+    /// gallery-dl だけ認証が効いて yt-dlp が落ちる、という非対称を作らない。
+    #[test]
+    fn every_call_carries_the_configured_browser() {
+        for invocation in [
+            list_argv(&program(), &channel(), Tab::Videos, Browser::Safari),
+            describe_argv(&program(), &video(), Browser::Safari),
+            probe_argv(&program(), &video(), Browser::Safari),
+            download_argv(&program(), &video(), Path::new("/tmp/42"), Browser::Safari),
+        ] {
+            assert!(
+                invocation
+                    .args_as_str()
+                    .unwrap()
+                    .windows(2)
+                    .any(|w| w == ["--cookies-from-browser", "safari"]),
+                "{invocation:?}"
+            );
+        }
+    }
+
     /// 利用者の設定ファイルに引きずられないこと。手元の `~/.config/yt-dlp` が
     /// 出力形式を変えていると、読み取りの層が理由なく落ちる。
     #[test]
     fn every_call_ignores_the_users_own_config() {
         for invocation in [
-            list_argv(&program(), &channel(), Tab::Videos),
-            describe_argv(&program(), &video()),
-            probe_argv(&program(), &video()),
-            download_argv(&program(), &video(), Path::new("/tmp/42")),
+            list_argv(&program(), &channel(), Tab::Videos, Browser::Firefox),
+            describe_argv(&program(), &video(), Browser::Firefox),
+            probe_argv(&program(), &video(), Browser::Firefox),
+            download_argv(&program(), &video(), Path::new("/tmp/42"), Browser::Firefox),
         ] {
             assert!(
                 invocation
@@ -456,7 +510,12 @@ mod tests {
 
     #[test]
     fn the_download_call_records_from_the_start_and_names_the_output() {
-        let invocation = download_argv(&program(), &video(), Path::new("/Movies/escrow/42"));
+        let invocation = download_argv(
+            &program(),
+            &video(),
+            Path::new("/Movies/escrow/42"),
+            Browser::Firefox,
+        );
         let args = invocation.args_as_str().unwrap();
 
         // #5「配信は --live-from-start で頭から録る。予約枠は待たない」
@@ -605,19 +664,31 @@ mod tests {
         assert_eq!(parse_probe(&empty), Presence::Unknown);
     }
 
-    /// cookie の失効はプラットフォーム全体の問題。項目の `error` にしない（#5）。
+    /// cookie を使えないのはプラットフォーム全体の問題。項目の `error` にしない（#5）。
+    ///
+    /// 設定したブラウザが入っていない場合も同じ扱いにする。実測すると、その場合は
+    /// 認証の要らない公開のものまで落ちるので、一時的な失敗として扱うと何を直せば
+    /// よいか分からないまま止まり続ける。
     #[test]
-    fn expired_cookies_are_their_own_failure() {
-        let completed = Completed {
-            success: false,
-            stdout: String::new(),
-            stderr: "ERROR: Sign in to confirm you're not a bot".to_owned(),
-        };
+    fn unusable_cookies_are_their_own_failure() {
+        for stderr in [
+            "ERROR: Sign in to confirm you're not a bot",
+            "ERROR: could not find opera cookies database in \"/Users/t/Library/…\"",
+        ] {
+            let completed = Completed {
+                success: false,
+                stdout: String::new(),
+                stderr: stderr.to_owned(),
+            };
 
-        let error = classify(&completed, &video());
-        assert!(matches!(error, AdapterError::AuthExpired));
-        // 生存確認から見れば判定保留。消えたわけではない。
-        assert_eq!(error.presence(), Presence::Unknown);
+            let error = classify(&completed, &video());
+            assert!(
+                matches!(error, AdapterError::Unauthenticated { .. }),
+                "{stderr}"
+            );
+            // 生存確認から見れば判定保留。消えたわけではない。
+            assert_eq!(error.presence(), Presence::Unknown);
+        }
     }
 
     #[test]

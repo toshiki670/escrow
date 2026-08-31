@@ -26,6 +26,7 @@
 
 pub mod gallerydl;
 pub mod invocation;
+pub mod route;
 pub mod tools;
 pub mod whisper;
 pub mod ytdlp;
@@ -42,6 +43,7 @@ use crate::timestamp::Timestamp;
 use crate::url::NormalizedUrl;
 
 pub use invocation::{Completed, Invocation, run};
+pub use route::{Acquirer, Adapters, Discoverer};
 pub use tools::{Resolution, Resolver, Tool};
 
 /// 外部ツールが期待どおりに働かなかったとき。
@@ -65,12 +67,14 @@ pub enum AdapterError {
     /// 配信元から消えたと断定できた。
     #[error("配信元に無い: {url}")]
     Unavailable { url: String },
-    /// cookie が失効した。
+    /// cookie を使えない。
     ///
-    /// 個別の項目ではなくプラットフォーム全体の問題なので、`error` を並べず
-    /// 取得を止めて人に知らせる（#5）。
-    #[error("認証が切れている")]
-    AuthExpired,
+    /// 失効しているか、設定した取り出し元のブラウザが入っていないか。後者だと
+    /// **認証の要らない公開のものまで落ちる**ので、区別せず「設定を確かめる」へ
+    /// 導く。どちらも個別の項目ではなくプラットフォーム全体の問題なので、
+    /// `error` を並べず取得を止めて人に知らせる（#5）。
+    #[error("cookie を使えない（設定の auth.cookies_from を確かめる）: {detail}")]
+    Unauthenticated { detail: String },
     /// 一時的な失敗。次の回でやり直す。
     #[error("一時的に失敗した: {detail}")]
     Transient { program: String, detail: String },
@@ -86,7 +90,7 @@ impl AdapterError {
             Self::Unavailable { .. } => Presence::Gone,
             Self::Launch { .. }
             | Self::Parse { .. }
-            | Self::AuthExpired
+            | Self::Unauthenticated { .. }
             | Self::Transient { .. } => Presence::Unknown,
         }
     }
@@ -171,7 +175,10 @@ mod tests {
     /// 落ちる。アダプタを足すときは、ここへ1行足して同じことを確かめる。
     #[test]
     fn every_configurable_browser_works_with_every_adapter() {
-        let adapters: [(&str, &[Browser]); 1] = [("yt-dlp", super::ytdlp::SUPPORTED_BROWSERS)];
+        let adapters: [(&str, &[Browser]); 2] = [
+            ("yt-dlp", super::ytdlp::SUPPORTED_BROWSERS),
+            ("gallery-dl", super::gallerydl::SUPPORTED_BROWSERS),
+        ];
 
         for browser in Browser::ALL {
             for (name, supported) in adapters {

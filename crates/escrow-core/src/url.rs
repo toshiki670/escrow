@@ -9,7 +9,7 @@
 use thiserror::Error;
 use url::Url;
 
-use crate::content::ContentType;
+use crate::content::{ContentType, Platform};
 
 /// 正規化を通った URL。
 ///
@@ -93,6 +93,16 @@ pub fn normalize_source(input: &str) -> Result<NormalizedUrl, UrlError> {
             host: "youtu.be".to_owned(),
             input: input.to_owned(),
         }),
+    }
+}
+
+/// 正規化した配信元 URL が、どのプラットフォームのものか。
+pub fn platform_of_source(url: &NormalizedUrl) -> Option<Platform> {
+    let parsed = Url::parse(url.as_str()).ok()?;
+    match host_kind(&parsed)? {
+        Host::Youtube => Some(Platform::Youtube),
+        Host::X => Some(Platform::X),
+        Host::YoutubeShort => None,
     }
 }
 
