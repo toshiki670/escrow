@@ -413,7 +413,7 @@ impl Store {
 
     /// 事象を1つ適用する。
     ///
-    /// 次の状態は [`crate::state::next`] が決める。**次の状態を直接渡す口は無い**ので、
+    /// 次の状態は [`crate::state::next`] が決める。**次の状態を直接渡す引数は無い**ので、
     /// 図に無い遷移を DB へ書くことができない。
     ///
     /// 書き込みは compare-and-swap で、`from` が今も DB の状態と一致するときだけ通る。
@@ -1005,7 +1005,7 @@ mod tests {
         assert_eq!(store.item(id).await.unwrap().unwrap().state, State::Kept);
     }
 
-    /// 図に無い遷移は DB まで届かない。次の状態を直接渡す口が無いため。
+    /// 図に無い遷移は DB まで届かない。次の状態を直接渡す引数が無いため。
     #[tokio::test]
     async fn an_illegal_transition_never_reaches_the_database() {
         let (store, source) = seeded().await;

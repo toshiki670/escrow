@@ -87,7 +87,8 @@ impl Adapters {
     }
 }
 
-/// エンジンが外の世界へ触れる口。#5 の対応表を通すのはここだけ。
+/// [`Ports`] の実装。エンジンが外の世界へ触れるのはここだけで、
+/// #5 の対応表もここを通る。
 impl Ports for Adapters {
     fn discoverer(&self, source: &Source) -> Result<impl Discover, AdapterError> {
         Self::discoverer(self, source)

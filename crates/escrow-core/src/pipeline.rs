@@ -223,7 +223,7 @@ mod tests {
     use std::num::NonZeroU32;
     use std::sync::Mutex;
 
-    /// 落ちるものを置く代わりの取得。アダプタの口だけを満たす。
+    /// 落ちるものを置く代わりの取得。[`Acquire`] だけを満たす。
     struct FakeAcquire {
         files: Vec<&'static str>,
         calls: Mutex<usize>,

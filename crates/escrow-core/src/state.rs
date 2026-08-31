@@ -10,7 +10,7 @@ use crate::liveness::PresenceConfirmed;
 /// `release_reference` は `Released` だけが持つ。DB では平らなカラムだが、
 /// 「状態と対でしか意味を持たない値」を対にするのはここ（#1）。
 ///
-/// 文字列から作る口はここに置かない。`state` と `release_reference` の2列を
+/// 文字列から作る変換はここに置かない。`state` と `release_reference` の2列を
 /// 揃えて初めて決まるので、片方だけ見る `FromStr` は黙って `Released { reference: None }`
 /// を作ってしまう。読み戻しは行を丸ごと見る parse 層の仕事で、名前だけが要る
 /// 場面には [`StateName`] がある。
