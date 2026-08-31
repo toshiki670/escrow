@@ -76,9 +76,11 @@ pub struct Acquire {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Transcribe {
-    /// whisper.cpp のモデルファイル。
+    /// 文字起こしに使うモデルファイル。
     ///
     /// 同梱せずパスで指す。数GBあり、配布物に含めると Cask が肥大するため（#2）。
+    /// 既定値は #2 の項目表のとおり。中身を解釈するのは文字起こしのアダプタで、
+    /// ここは場所を持つだけ。
     pub model: String,
     pub language: Language,
 }
@@ -109,7 +111,7 @@ pub struct Tools {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub enum Language {
-    /// whisper に判定させる。
+    /// 文字起こし側に判定させる。
     Auto,
     /// 言語コードを指定する。
     Code(String),
@@ -124,7 +126,7 @@ impl TryFrom<String> for Language {
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
         // 前後の空白と `auto` の綴り揺れだけ吸収する。言語コードそのものは
-        // whisper が解釈するので、escrow は畳まない。
+        // 文字起こし側が解釈するので、escrow は畳まない。
         let trimmed = value.trim();
 
         if trimmed.is_empty() {
@@ -157,14 +159,14 @@ impl fmt::Display for Language {
 
 /// cookie の取り出し元。
 ///
-/// 綴りを自由にすると、外部ツールが受け付けない値を設定できてしまう。
+/// #2 が「認証の取得元はプラットフォームごとに分けない」と決めているので、
+/// この1つの値が**すべてのアダプタへ渡る**。したがってここに並ぶのは、
+/// どのアダプタでも使えるものだけ。
 ///
-/// 値は **yt-dlp と gallery-dl の両方が受け付けるものだけ**に絞ってある。#2 が
-/// 「認証の取得元はプラットフォームごとに分けない」と決めており、1つの値が両方へ
-/// 渡るため。片方しか知らない綴りを許すと、YouTube は通って X だけ落ちる。
-///
-/// 入らなかったもの: `whale`（yt-dlp のみ）、`floorp` / `librewolf` / `orion` /
-/// `thorium` / `zen`（gallery-dl のみ）。
+/// どのアダプタが何を受けるかは、それぞれのアダプタが持つ
+/// （`adapter::<tool>::SUPPORTED_BROWSERS`）。ここが部分集合であることは
+/// `adapter` のテストが確かめる。綴りを自由にすると、渡した先で初めて
+/// 落ちる値を設定できてしまうので enum にしてある。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Browser {
@@ -530,7 +532,7 @@ interval_hours = 0
             assert_eq!(config.auth.cookies_from, browser);
         }
 
-        // 片方のツールしか知らない綴りは、共通設定として使えないので入れていない。
+        // 一部のアダプタしか知らない綴りは、共通設定として使えないので入れていない。
         for only_one_tool in ["whale", "librewolf", "zen", "netscape"] {
             let toml = format!("[auth]\ncookies_from = \"{only_one_tool}\"\n");
             assert!(Config::from_toml(&toml).is_err(), "{only_one_tool}");

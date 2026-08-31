@@ -23,6 +23,7 @@ use serde::Deserialize;
 use super::invocation::{Completed, Invocation, run};
 use super::{Acquire, AdapterError, Discover, Found, Probe};
 use crate::asset::{self, Asset, AssetKind};
+use crate::config::Browser;
 use crate::content::{Content, ContentType, MediaType};
 use crate::liveness::Presence;
 use crate::source::Source;
@@ -31,6 +32,22 @@ use crate::timestamp::Timestamp;
 use crate::url::{self, NormalizedUrl};
 
 const PROGRAM: &str = "yt-dlp";
+
+/// このアダプタが cookie を取り出せるブラウザ。
+///
+/// `--cookies-from-browser` が挙げるもの。escrow の [`Browser`] がこの部分集合で
+/// あることは `adapter` のテストが確かめる。yt-dlp は `whale` も受けるが、
+/// 他のアダプタが受けないので [`Browser`] には入っていない。
+pub const SUPPORTED_BROWSERS: &[Browser] = &[
+    Browser::Brave,
+    Browser::Chrome,
+    Browser::Chromium,
+    Browser::Edge,
+    Browser::Firefox,
+    Browser::Opera,
+    Browser::Safari,
+    Browser::Vivaldi,
+];
 
 pub struct YtDlp {
     program: PathBuf,

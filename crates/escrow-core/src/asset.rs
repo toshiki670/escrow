@@ -57,7 +57,7 @@ pub struct Asset {
     pub kind: AssetKind,
     /// 1 から始まる通し番号。ライブが切れた断片は 2, 3 と増える。
     pub ordinal: NonZeroU32,
-    /// 拡張子。yt-dlp が実際に何を書くかで変わる（mp4 / webm など）ので、
+    /// 拡張子。取得する側が実際に何を書くかで変わる（mp4 / webm など）ので、
     /// 種類からは決めない。読む側は来たものを受け取る。`.` は含まない。
     pub extension: String,
 }
@@ -81,10 +81,10 @@ impl Asset {
 
     /// ファイル名から読み戻す。規則に合わないものは `None`。
     ///
-    /// ディレクトリには yt-dlp の中間ファイルなど規則外のものも落ちうるので、
+    /// ディレクトリには取得中の中間ファイルなど規則外のものも落ちうるので、
     /// この関数はどんな文字列を渡されても落ちない。
     pub fn parse_file_name(file_name: &str) -> Option<Self> {
-        // ちょうど3つ。`video.1.mp4.part` のような yt-dlp の中間ファイルは、
+        // ちょうど3つ。`video.1.mp4.part` のように途中で増えた中間ファイルは
         // 4つに割れるのでここで落ちる。まだ取得中のものを実体として数えない。
         let [kind, ordinal_text, extension] =
             <[&str; 3]>::try_from(file_name.split('.').collect::<Vec<_>>()).ok()?;
@@ -163,7 +163,7 @@ mod tests {
         }
     }
 
-    /// 拡張子は種類から決めない。yt-dlp が webm を書けば webm で持つ。
+    /// 拡張子は種類から決めない。webm が書かれれば webm で持つ。
     #[test]
     fn extension_comes_from_the_file_not_the_kind() {
         let webm = Asset::parse_file_name("video.1.webm").unwrap();
@@ -183,7 +183,7 @@ mod tests {
             "video.01.mp4", // 往復しない形は受けない
             "video.-1.mp4",
             "movie.1.mp4",
-            "video.1.mp4.part", // yt-dlp の中間ファイル
+            "video.1.mp4.part", // 取得中の中間ファイル
             "transcript.1.ja.vtt",
             ".hidden",
         ] {
@@ -227,7 +227,7 @@ mod tests {
             "video.2.mp4",
             "transcript.1.vtt",
             "video.1.mp4",
-            "yt-dlp.log",       // 規則外
+            "download.log",     // 規則外
             "video.3.mp4.part", // 取得中の中間ファイル
         ] {
             fs::write(dir.join(name), b"").unwrap();

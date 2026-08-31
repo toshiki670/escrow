@@ -25,6 +25,7 @@
 //! 項目を見つける」。ツールを入れ替えても、呼ぶ側は動かない。
 
 pub mod invocation;
+pub mod tools;
 pub mod ytdlp;
 
 use std::path::Path;
@@ -39,6 +40,7 @@ use crate::timestamp::Timestamp;
 use crate::url::NormalizedUrl;
 
 pub use invocation::{Completed, Invocation, run};
+pub use tools::{Resolution, Resolver, Tool};
 
 /// 外部ツールが期待どおりに働かなかったとき。
 ///
@@ -154,4 +156,28 @@ pub trait Probe {
         &self,
         url: &NormalizedUrl,
     ) -> impl Future<Output = Result<Presence, AdapterError>> + Send;
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::config::Browser;
+
+    /// 設定に並ぶブラウザは、**すべてのアダプタが受けられる**こと。
+    ///
+    /// #2 が「認証の取得元はプラットフォームごとに分けない」と決めたので、1つの値が
+    /// 全アダプタへ渡る。どれか1つでも受けないものが混ざると、そのプラットフォームだけ
+    /// 落ちる。アダプタを足すときは、ここへ1行足して同じことを確かめる。
+    #[test]
+    fn every_configurable_browser_works_with_every_adapter() {
+        let adapters: [(&str, &[Browser]); 1] = [("yt-dlp", super::ytdlp::SUPPORTED_BROWSERS)];
+
+        for browser in Browser::ALL {
+            for (name, supported) in adapters {
+                assert!(
+                    supported.contains(&browser),
+                    "{name} は {browser} を受けないので、共通設定に置けない"
+                );
+            }
+        }
+    }
 }

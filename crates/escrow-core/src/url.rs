@@ -207,8 +207,8 @@ fn x_source(url: &Url, input: &str) -> Result<NormalizedUrl, UrlError> {
         input: input.to_owned(),
     };
 
-    // gallery-dl の TwitterUserExtractor が受ける2つの形。どちらも数値の
-    // ユーザー ID を持ち、内部では `id:<id>` として解決される。
+    // X が数値のユーザー ID で人を指す2つの形。プロフィールへの直接リンクと、
+    // フォロー導線が使う intent。どちらもハンドルを含まない。
     let id = match segments(url).as_slice() {
         ["i", "user", id] => (*id).to_owned(),
         ["intent", "user"] => query_value(url, "user_id")
@@ -257,7 +257,6 @@ mod tests {
     use super::*;
 
     /// 同じ動画へ辿り着く入口は、どれも1つの正規形へ潰れる。
-    /// 期待値は yt-dlp の `webpage_url` をオラクルにして取った。
     #[test]
     fn youtube_entrances_collapse_to_one_form() {
         const WATCH: &str = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
@@ -364,8 +363,7 @@ mod tests {
         ));
     }
 
-    /// X の配信元も不変 ID へ寄せる。形は gallery-dl の TwitterUserExtractor が
-    /// 受けるものに合わせてある（`x.com/i/user/<id>` と `intent/user?user_id=`）。
+    /// X の配信元も不変 ID へ寄せる。X がハンドル抜きで人を指す2つの形を受ける。
     #[test]
     fn x_sources_must_arrive_as_numeric_ids() {
         const CANONICAL: &str = "https://x.com/i/user/12";
