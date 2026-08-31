@@ -7,8 +7,7 @@
 use std::io;
 use std::path::Path;
 
-/// 1GB。設定は GB で書き、比較はバイトで行う。
-const GB: u64 = 1024 * 1024 * 1024;
+use bytesize::ByteSize;
 
 /// 空き容量を見た結果。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -16,21 +15,34 @@ pub enum Room {
     /// 取得を始めてよい。
     Enough,
     /// 足りない。人が消すか設定を下げるまで、取得は始まらない。
-    Short { available: u64, required: u64 },
+    Short {
+        available: ByteSize,
+        required: ByteSize,
+    },
 }
 
 impl Room {
     /// 実測値と設定を突き合わせる。
     ///
-    /// 判定はここだけ。GB とバイトの変換を各所でやると、片方だけ直し損ねる。
+    /// 判定はここだけ。単位の換算を各所でやると、片方だけ直し損ねる。
+    ///
+    /// **`min_free_gb` は 2 進の GiB として読む。** `bytesize` が
+    /// [`bytesize::GB`]（10 進、10^9）と [`bytesize::GIB`]（2 進、2^30）を
+    /// 別の定数で持つので、どちらのつもりかを書かずに済ませられない。7% 違う。
+    /// 厳しい側を採るのは、間違える向きを片側へ寄せるため — 多く空けさせて
+    /// 損をするのは待ち時間だけだが、足りないまま始めると取得が途中で死ぬ。
+    ///
+    /// 掛け算を [`ByteSize::gib`] に任せないのは、あれが素の `*` で桁あふれに
+    /// 落ちるため。設定は人が書く値で上限が無いので、飽和はこちらで持つ。
     pub const fn decide(available: u64, min_free_gb: u64) -> Self {
-        let required = min_free_gb.saturating_mul(GB);
+        let required = min_free_gb.saturating_mul(bytesize::GIB);
+
         if available >= required {
             Self::Enough
         } else {
             Self::Short {
-                available,
-                required,
+                available: ByteSize(available),
+                required: ByteSize(required),
             }
         }
     }
@@ -44,15 +56,12 @@ impl std::fmt::Display for Room {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Enough => f.write_str("空きは足りている"),
+            // `ByteSize` の既定は 2 進表記なので、`GiB` と出る。判定に使った
+            // 単位がそのまま人へ出るので、表示と実際がずれない。
             Self::Short {
                 available,
                 required,
-            } => write!(
-                f,
-                "空きが足りない（{:.1}GB / {:.1}GB 必要）",
-                *available as f64 / GB as f64,
-                *required as f64 / GB as f64
-            ),
+            } => write!(f, "空きが足りない（{available} / {required} 必要）"),
         }
     }
 }
@@ -74,15 +83,34 @@ mod tests {
 
     #[test]
     fn the_gate_opens_at_exactly_the_configured_amount() {
-        assert_eq!(Room::decide(20 * GB, 20), Room::Enough);
+        let twenty = ByteSize::gib(20).as_u64();
+
+        assert_eq!(Room::decide(twenty, 20), Room::Enough);
         assert_eq!(
-            Room::decide(20 * GB - 1, 20),
+            Room::decide(twenty - 1, 20),
             Room::Short {
-                available: 20 * GB - 1,
-                required: 20 * GB,
+                available: ByteSize(twenty - 1),
+                required: ByteSize(twenty),
             }
         );
-        assert_eq!(Room::decide(21 * GB, 20), Room::Enough);
+        assert_eq!(Room::decide(twenty + 1, 20), Room::Enough);
+    }
+
+    /// 設定は 2 進の GiB。10 進の GB と取り違えると 7% ずれる。
+    #[test]
+    fn the_unit_is_binary_not_decimal() {
+        assert_eq!(bytesize::GIB, 1_073_741_824);
+        assert_eq!(bytesize::GB, 1_000_000_000);
+
+        // 20GB ちょうどでは 20GiB に届かない。
+        assert!(!Room::decide(ByteSize::gb(20).as_u64(), 20).is_enough());
+    }
+
+    /// 出る単位と、判定に使った単位が同じであること。
+    #[test]
+    fn the_message_names_the_unit_it_judged_by() {
+        let short = Room::decide(0, 20);
+        assert!(short.to_string().contains("20.0 GiB"), "{short}");
     }
 
     /// 0 なら門を置かない。

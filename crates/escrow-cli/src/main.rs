@@ -151,7 +151,7 @@ struct Announcer {
 
 impl Announcer {
     /// 直っていない知らせを、もう一度出すまでの間。
-    const REPEAT_AFTER: Duration = Duration::from_secs(3600);
+    const REPEAT_AFTER: Duration = Duration::from_hours(1);
 
     fn new() -> Self {
         Self {
@@ -403,9 +403,8 @@ impl App {
 
         // 番かどうかは `Source` ごとの間隔が決めるので、こちらは短く一定に打つ。
         // 起きるだけで何もしない周が普通。
-        let heartbeat = Duration::from_secs(60);
-        let check_every =
-            Duration::from_secs(3600 * u64::from(self.config.check.interval_hours.get()));
+        let heartbeat = Duration::from_mins(1);
+        let check_every = Duration::from_hours(u64::from(self.config.check.interval_hours.get()));
         // 生存確認は起動直後に1回。落ちていた間に期限を過ぎたものがある。
         let mut next_check = Instant::now();
         let mut announcer = Announcer::new();

@@ -14,6 +14,7 @@ escrow-core = { path = "crates/escrow-core" }
 clap = { version = "4.6", features = ["derive"] }
 anyhow = "1.0"
 chrono = "0.4"
+bytesize = "2.7"
 directories = "6.0"
 fs4 = "1.1"
 serde = { version = "1.0", features = ["derive"] }
