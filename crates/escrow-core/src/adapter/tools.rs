@@ -15,8 +15,9 @@ use std::path::{Path, PathBuf};
 /// escrow が呼ぶ外部ツール。
 ///
 /// 一覧の出所は #5 の対応表。#2 の設定画面と #3 の `depends_on` もそこから来る。
-/// `ffmpeg` は yt-dlp が内部で呼ぶので escrow は直接叩かないが、入っていないと
-/// 取得が失敗するので、見つかるかどうかは確かめる。
+///
+/// `ffmpeg` は #5 が「yt-dlp が内部で呼ぶので escrow は直接叩かない」としていたが、
+/// 文字起こしのアダプタが直接使う。`whisper-cli` が WAV しか読めないため。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Tool {
     YtDlp,

@@ -26,6 +26,7 @@
 
 pub mod invocation;
 pub mod tools;
+pub mod whisper;
 pub mod ytdlp;
 
 use std::path::Path;
