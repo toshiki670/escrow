@@ -1,7 +1,7 @@
 //! escrow の CLI。
 //!
-//! 外部向けは #4 の契約どおり `list` と `release` の2つ。それ以外は管理面で、
-//! GUI（Phase 6）ができるまで手で回すための口。
+//! 外部向けは #4 の契約どおり `list` と `release` の2つ。`run` はエンジンを
+//! 常駐させる。残りは管理用で、GUI（Phase 6）ができるまで人が直接叩くためのもの。
 
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
