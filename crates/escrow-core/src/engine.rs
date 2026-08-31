@@ -154,6 +154,25 @@ pub struct Report {
 }
 
 impl Report {
+    /// 別の周ぶんを足し込む。
+    ///
+    /// `escrow run` は1回の目覚めで [`Engine::tick`] と
+    /// [`Engine::check_liveness`] の両方を呼ぶことがある。人へ出すのは
+    /// 目覚め1回につき1度でいいので、出す前にここでまとめる。
+    pub fn absorb(&mut self, other: Self) {
+        self.discovered += other.discovered;
+        self.advanced += other.advanced;
+        self.failed += other.failed;
+        self.kept += other.kept;
+        self.discarded += other.discarded;
+        self.notices.extend(other.notices);
+    }
+
+    /// この周で何かが動いたか。
+    pub const fn moved(&self) -> usize {
+        self.discovered + self.advanced + self.failed + self.kept + self.discarded
+    }
+
     /// そのプラットフォームを、この周ではもう触らないか。
     ///
     /// 一度 cookie で断られたら、同じ周の残りは全部同じ理由で断られる。
@@ -982,6 +1001,36 @@ mod tests {
 
         assert_eq!(*world.acquire_calls.lock().unwrap(), 1, "1件で止める");
         assert_eq!(report.notices.len(), 1, "知らせも1つ");
+    }
+
+    /// 検知で止めたら、同じ周の取得も止まる。段をまたいで効くこと。
+    #[tokio::test]
+    async fn halting_during_discovery_also_stops_acquisition() {
+        let store = Store::open_in_memory().await.unwrap();
+        let source = source_with(&store, None).await;
+        let id = item_at(
+            &store,
+            source,
+            State::Waiting,
+            at("2026-03-01T20:00:00+09:00"),
+        )
+        .await;
+        let media = tempfile::tempdir().unwrap();
+
+        let world = World {
+            discovery: Outcome::Unauthenticated,
+            // 取得そのものは通るはずの設定。それでも触らない。
+            acquisition: Outcome::Files(vec!["video.1.mp4"]),
+            ..World::default()
+        };
+        let report = Engine::new(&store, &world, media.path(), limits(3))
+            .tick(at("2026-03-01T21:00:00+09:00"))
+            .await
+            .unwrap();
+
+        assert_eq!(*world.acquire_calls.lock().unwrap(), 0);
+        assert_eq!(report.notices.len(), 1, "知らせも段ごとに増えない");
+        assert_eq!(state_of(&store, id).await, State::Waiting);
     }
 
     /// ツールの仕様が変わった疑いも `error` にしない（#5）。

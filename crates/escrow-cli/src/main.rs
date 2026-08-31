@@ -15,7 +15,7 @@ use escrow_core::adapter::{
 };
 use escrow_core::config::{Config, Dirs, Paths};
 use escrow_core::content::ContentType;
-use escrow_core::engine::{Engine, Limits, Report};
+use escrow_core::engine::{Engine, Limits, Notice, Report};
 use escrow_core::handover;
 use escrow_core::item::ItemId;
 use escrow_core::pipeline::Pipeline;
@@ -137,23 +137,52 @@ async fn main() -> Result<()> {
 /// 1周の経過を人へ出す。
 ///
 /// **知らせは黙って捨てない。** cookie の失効も、外部ツールの仕様変更も、
-/// 台帳には残らない（#5）ので、ここへ出さないと誰も気づかないまま
-/// 取得が止まり続ける。
-fn announce(report: &Report) {
-    for notice in &report.notices {
-        eprintln!("  ⚠ {notice}");
+/// 台帳には残らない（#5）ので、ここへ出さないと誰も気づかないまま取得が
+/// 止まり続ける。
+///
+/// ただし**同じ知らせを毎周は並べない**。cookie が失効している間、巡回は
+/// 目覚めるたびに同じ理由で断られる。そのまま出すと画面が同じ行で埋まり、
+/// 他の知らせが流れて見えなくなる。出すのは変わったときと、しばらく直らない
+/// ときにもう一度。
+struct Announcer {
+    said: Vec<Notice>,
+    said_at: Instant,
+}
+
+impl Announcer {
+    /// 直っていない知らせを、もう一度出すまでの間。
+    const REPEAT_AFTER: Duration = Duration::from_secs(3600);
+
+    fn new() -> Self {
+        Self {
+            said: Vec::new(),
+            said_at: Instant::now(),
+        }
     }
 
-    let moved =
-        report.discovered + report.advanced + report.failed + report.kept + report.discarded;
-    if moved == 0 {
-        return;
-    }
+    fn announce(&mut self, report: &Report) {
+        let repeat = self.said_at.elapsed() >= Self::REPEAT_AFTER;
+        if repeat {
+            self.said_at = Instant::now();
+        }
 
-    println!(
-        "  見つけた {} / 進めた {} / 諦めた {} / 残した {} / 捨てた {}",
-        report.discovered, report.advanced, report.failed, report.kept, report.discarded
-    );
+        for notice in &report.notices {
+            if repeat || !self.said.contains(notice) {
+                eprintln!("  ⚠ {notice}");
+            }
+        }
+        // 直った知らせは覚えておかない。また出れば、そのときまた出す。
+        self.said.clone_from(&report.notices);
+
+        if report.moved() == 0 {
+            return;
+        }
+
+        println!(
+            "  見つけた {} / 進めた {} / 諦めた {} / 残した {} / 捨てた {}",
+            report.discovered, report.advanced, report.failed, report.kept, report.discarded
+        );
+    }
 }
 
 /// 設定と置き場所を解決した状態。
@@ -379,26 +408,30 @@ impl App {
             Duration::from_secs(3600 * u64::from(self.config.check.interval_hours.get()));
         // 生存確認は起動直後に1回。落ちていた間に期限を過ぎたものがある。
         let mut next_check = Instant::now();
+        let mut announcer = Announcer::new();
 
         println!("巡回を始めます（Ctrl-C で止まります）");
 
         loop {
             let now = Timestamp::now();
+            let mut round = Report::default();
 
             // 1周落ちても止めない。常駐が1回の失敗で消えると、そのぶん
             // 配信元から消えたものを取り逃す。
             match engine.tick(now).await {
-                Ok(report) => announce(&report),
+                Ok(report) => round.absorb(report),
                 Err(e) => eprintln!("巡回で落ちました: {e:#}"),
             }
 
             if Instant::now() >= next_check {
                 match engine.check_liveness(now).await {
-                    Ok(report) => announce(&report),
+                    Ok(report) => round.absorb(report),
                     Err(e) => eprintln!("生存確認で落ちました: {e:#}"),
                 }
                 next_check = Instant::now() + check_every;
             }
+
+            announcer.announce(&round);
 
             tokio::select! {
                 _ = tokio::signal::ctrl_c() => {
