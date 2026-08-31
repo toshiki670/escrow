@@ -1,4 +1,4 @@
-//! 空き容量の門。#2 の `storage.min_free_gb`。
+//! 空き容量の門。#2 の `storage.min_free_gib`。
 //!
 //! 取得を**始める前**に見る。始めてから足りなくなると、途中まで書かれた実体と
 //! `acquiring` のまま止まった行が残る。門を閉じている間、項目は `waiting` に
@@ -26,16 +26,16 @@ impl Room {
     ///
     /// 判定はここだけ。単位の換算を各所でやると、片方だけ直し損ねる。
     ///
-    /// **`min_free_gb` は 2 進の GiB として読む。** `bytesize` が
-    /// [`bytesize::GB`]（10 進、10^9）と [`bytesize::GIB`]（2 進、2^30）を
-    /// 別の定数で持つので、どちらのつもりかを書かずに済ませられない。7% 違う。
-    /// 厳しい側を採るのは、間違える向きを片側へ寄せるため — 多く空けさせて
-    /// 損をするのは待ち時間だけだが、足りないまま始めると取得が途中で死ぬ。
+    /// 換算するのは、[`available_space`](fs4::available_space) がバイトを返し、
+    /// 設定が GiB の個数だからで、比べるには片方を相手の単位へ寄せるしかない。
+    /// **上へ寄せる。** 下へ寄せると整数の割り算で端数が落ち、`Short` として
+    /// 人へ出す実測値もバイトのままでは出せなくなる。
     ///
-    /// 掛け算を [`ByteSize::gib`] に任せないのは、あれが素の `*` で桁あふれに
-    /// 落ちるため。設定は人が書く値で上限が無いので、飽和はこちらで持つ。
-    pub const fn decide(available: u64, min_free_gb: u64) -> Self {
-        let required = min_free_gb.saturating_mul(bytesize::GIB);
+    /// 掛け算そのものは [`ByteSize::gib`] に任せる。設定が `u32` なので
+    /// **桁あふれる組み合わせが存在しない** — `u32::MAX` GiB でも `u64` に 3 倍の
+    /// 余裕で収まる。飽和も検査も要らず、この換算は全域関数になる。
+    pub const fn decide(available: u64, min_free_gib: u32) -> Self {
+        let required = ByteSize::gib(min_free_gib as u64).as_u64();
 
         if available >= required {
             Self::Enough
@@ -73,8 +73,8 @@ impl std::fmt::Display for Room {
 /// そのパスが属する区画を答えるものが `fs4` にあるので、それに任せる。
 ///
 /// `dir` が無いと空きを訊けないので、呼ぶ側が先に作る。
-pub fn room(dir: &Path, min_free_gb: u64) -> io::Result<Room> {
-    Ok(Room::decide(fs4::available_space(dir)?, min_free_gb))
+pub fn room(dir: &Path, min_free_gib: u32) -> io::Result<Room> {
+    Ok(Room::decide(fs4::available_space(dir)?, min_free_gib))
 }
 
 #[cfg(test)]
@@ -119,11 +119,17 @@ mod tests {
         assert_eq!(Room::decide(0, 0), Room::Enough);
     }
 
-    /// GB からバイトへの掛け算で回り込まない。回り込むと、巨大な設定が
-    /// 「空きは足りている」に化ける。
+    /// **設定できるどの値も、バイトへ直せること。**
+    ///
+    /// `u32` にしたのはこのため。回り込む組み合わせが存在しないので、
+    /// 「巨大な設定が『空きは足りている』に化ける」経路そのものが無い。
     #[test]
-    fn an_absurd_setting_closes_the_gate_instead_of_wrapping() {
-        assert!(!Room::decide(u64::MAX - 1, u64::MAX).is_enough());
+    fn every_setting_that_can_be_written_can_be_converted() {
+        let biggest = Room::decide(u64::MAX, u32::MAX);
+        // 1024 EiB 要求して 16 EiB しか無ければ足りない、が正しく出る。
+        assert!(!Room::decide(bytesize::EIB, u32::MAX).is_enough());
+        // 桁あふれていれば、ここが Short に化ける。
+        assert!(biggest.is_enough());
     }
 
     #[test]
@@ -131,7 +137,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         assert_eq!(room(dir.path(), 0).unwrap(), Room::Enough);
         // どの区画にもこれだけの空きは無い。
-        assert!(!room(dir.path(), u64::MAX).unwrap().is_enough());
+        assert!(!room(dir.path(), u32::MAX).unwrap().is_enough());
     }
 
     /// 場所が無ければ、空いているとは答えない。

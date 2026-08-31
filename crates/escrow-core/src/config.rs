@@ -53,8 +53,13 @@ pub struct Storage {
     pub media_dir: String,
     /// DB の場所。空なら Application Support 配下。
     pub db_path: String,
-    /// これを下回ったら取得を始めない。
-    pub min_free_gb: u64,
+    /// これを下回ったら取得を始めない。単位は GiB（2^30 バイト）。
+    ///
+    /// `u32` なのは、GiB として意味のある幅がそこまでだから。`u64` にすると
+    /// バイトへ直せない値（2^64 GiB）を設定できてしまい、換算する側が
+    /// 桁あふれの逃げ道を持つ羽目になる。`u32::MAX` GiB は 1024 EiB で、
+    /// バイトに直しても `u64` に 3 倍の余裕で収まる。
+    pub min_free_gib: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -219,7 +224,7 @@ impl Default for Storage {
         Self {
             media_dir: "~/Movies/escrow".to_owned(),
             db_path: String::new(),
-            min_free_gb: 20,
+            min_free_gib: 20,
         }
     }
 }
@@ -432,7 +437,7 @@ mod tests {
 [storage]
 media_dir = "~/Movies/escrow"
 db_path = ""
-min_free_gb = 20
+min_free_gib = 20
 
 [check]
 interval_hours = 24
@@ -481,7 +486,7 @@ extra_paths = []
         let path = dir.path().join("nested").join("config.toml");
 
         let mut config = Config::default();
-        config.storage.min_free_gb = 50;
+        config.storage.min_free_gib = 50;
         config.check.interval_hours = NonZeroU32::new(6).unwrap();
         config.transcribe.language = Language::Auto;
         config.auth.cookies_from = Browser::Safari;
@@ -499,6 +504,20 @@ extra_paths = []
 media_dirs = "~/Movies/escrow"
 "#;
         assert!(Config::from_toml(typo).is_err());
+    }
+
+    /// 旧名 `min_free_gb` は黙って既定へ落ちない。
+    ///
+    /// 名前が変わった設定は、`deny_unknown_fields` が読む時点で断る。
+    /// 受け流すと「20GiB 空けているつもり」の人が既定の 20 に戻ったことに
+    /// 気づけず、設定してあるつもりの値と実際が食い違ったまま動く。
+    #[test]
+    fn the_old_name_is_refused_not_ignored() {
+        let old_name = r#"
+[storage]
+min_free_gb = 50
+"#;
+        assert!(Config::from_toml(old_name).is_err());
     }
 
     /// 間隔に 0 は無い。`NonZeroU32` なので読む時点で落ちる。
@@ -630,11 +649,11 @@ interval_hours = 0
     fn a_partial_file_merges_with_the_defaults() {
         let partial = r#"
 [storage]
-min_free_gb = 50
+min_free_gib = 50
 "#;
         let config = Config::from_toml(partial).unwrap();
 
-        assert_eq!(config.storage.min_free_gb, 50);
+        assert_eq!(config.storage.min_free_gib, 50);
         // 同じセクションの他の項目も、別のセクションも既定のまま。
         assert_eq!(config.storage.media_dir, Storage::default().media_dir);
         assert_eq!(config.transcribe, Transcribe::default());
@@ -649,7 +668,7 @@ min_free_gb = 50
 
         Config::default().save(&path).unwrap();
         let mut config = Config::default();
-        config.storage.min_free_gb = 99;
+        config.storage.min_free_gib = 99;
         config.save(&path).unwrap();
 
         let left: Vec<_> = std::fs::read_dir(dir.path())
@@ -657,7 +676,7 @@ min_free_gb = 50
             .map(|e| e.unwrap().file_name())
             .collect();
         assert_eq!(left, ["config.toml"], "一時ファイルが残っていない");
-        assert_eq!(Config::load(&path).unwrap().storage.min_free_gb, 99);
+        assert_eq!(Config::load(&path).unwrap().storage.min_free_gib, 99);
     }
 
     /// `auto` の綴り揺れと前後の空白は吸収する。言語コードそのものは畳まない。

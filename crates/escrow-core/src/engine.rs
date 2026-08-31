@@ -61,8 +61,8 @@ pub enum EngineError {
 /// 設定が増えても巡回の判断に何が効くかが1か所で分かるため。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Limits {
-    /// これを下回ったら取得を始めない。
-    pub min_free_gb: u64,
+    /// これを下回ったら取得を始めない。単位は GiB。
+    pub min_free_gib: u32,
     /// これを超えて落ちたら `error`。
     pub max_retries: u32,
 }
@@ -70,7 +70,7 @@ pub struct Limits {
 impl From<&Config> for Limits {
     fn from(config: &Config) -> Self {
         Self {
-            min_free_gb: config.storage.min_free_gb,
+            min_free_gib: config.storage.min_free_gib,
             max_retries: config.acquire.max_retries,
         }
     }
@@ -528,7 +528,7 @@ impl<'a, P: Ports> Engine<'a, P> {
     }
 
     fn room(&self) -> Result<Room, EngineError> {
-        disk::room(self.media_dir, self.limits.min_free_gb).map_err(|source| EngineError::Io {
+        disk::room(self.media_dir, self.limits.min_free_gib).map_err(|source| EngineError::Io {
             path: self.media_dir.to_owned(),
             source,
         })
@@ -717,7 +717,7 @@ mod tests {
     fn limits(max_retries: u32) -> Limits {
         Limits {
             // 門を開けたままにする。閉じた側は専用の試験で見る。
-            min_free_gb: 0,
+            min_free_gib: 0,
             max_retries,
         }
     }
@@ -1144,8 +1144,8 @@ mod tests {
 
         let world = World::default();
         let closed = Limits {
-            // どの区画にもこれだけの空きは無い。
-            min_free_gb: u64::MAX,
+            // どの区画にもこれだけの空きは無い（1024 EiB）。
+            min_free_gib: u32::MAX,
             max_retries: 0,
         };
         let report = Engine::new(&store, &world, media.path(), closed)
