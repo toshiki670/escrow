@@ -289,7 +289,7 @@ impl App {
                 source_id: SourceId::new(source),
                 url: found.url,
                 published_at: found.published_at,
-                scheduled_start_at: None,
+                scheduled_start_at: found.scheduled_start_at,
                 state: State::initial(found.media),
                 state_since: Timestamp::now(),
                 content: found.content,

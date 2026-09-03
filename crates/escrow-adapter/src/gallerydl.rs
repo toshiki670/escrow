@@ -201,6 +201,8 @@ fn post(meta: &serde_json::Value) -> Result<Found, AdapterError> {
 
     Ok(Found {
         url,
+        // X に予約枠は無い。Space もライブ配信も、始まってから見つかる。
+        scheduled_start_at: None,
         published_at: naive_utc(&meta.date)?,
         content: Content::Post {
             body: meta.content,

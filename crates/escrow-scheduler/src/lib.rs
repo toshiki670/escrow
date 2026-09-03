@@ -14,6 +14,7 @@ use thiserror::Error;
 
 use escrow_adapter::gallerydl::GalleryDl;
 use escrow_adapter::route::Adapters;
+use escrow_adapter::rss::Rss;
 use escrow_adapter::whisper::Whisper;
 use escrow_adapter::ytdlp::YtDlp;
 use escrow_core::adapter::{Acquire, AdapterError, Found, Resolver, Tool, Transcribe};
@@ -44,6 +45,7 @@ impl Scheduler {
 
         Ok(Self {
             adapters: Adapters::new(
+                Rss::new(),
                 YtDlp::new(path(resolver, Tool::YtDlp)?, browser),
                 GalleryDl::new(path(resolver, Tool::GalleryDl)?, browser),
             ),

@@ -1,32 +1,31 @@
 //! yt-dlp のアダプタ。
 //!
-//! #5 の対応表では YouTube の検知と取得、X の Space とライブ配信の取得を持つ。
+//! #5 の対応表では YouTube の取得、X の Space とライブ配信の取得、それに
+//! YouTube の検知の**追加取得**を持つ。配信元に並んでいるものを挙げるのは
+//! [`crate::rss`] で、こちらはやらない。
 //!
-//! # 検知が2段になる理由
+//! # 認証は経路ごとに決まる
 //!
-//! `--flat-playlist` は URL と題は返すが **`timestamp` を返さない**（実測。全件 `None`）。
-//! #1 は `published_at` を必須にし、監視対象を `Source.created_at` 以降と決めているので、
-//! 一覧だけでは `Item` を作れない。
+//! #5 が「認証は人が明示した対象にしか掛からない」と決めたので、cookie は共通の
+//! 前置きから外し、要る呼び出しだけが足す。
 //!
-//! そこで口を2つに割る。
-//!
-//! 1. [`YtDlp::list`] — 並んでいる項目の URL を挙げる。安い
-//! 2. [`YtDlp::describe`] — 1件の中身を取る。1リクエスト
-//!
-//! 間に「台帳に在るか」の判定が入る。これは配信元ではなく escrow が持つ知識なので、
-//! アダプタには持たせない。どこまで遡るかの方針も呼ぶ側（Phase 4）が決める。
+//! | 呼び出し | 認証 | 理由 |
+//! |---|---|---|
+//! | [`schedule_argv`] | 無し | 検知の追加取得。繰り返し叩くので匿名に保つ |
+//! | [`describe_argv`] | cookie | 人が登録した URL。メン限がありうる |
+//! | [`probe_argv`] | cookie | 生存確認。匿名で足りるかは未検証（#5） |
+//! | [`download_argv`] | cookie | メン限の取得に要る |
 
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
 use crate::invocation::{Completed, Invocation, run};
-use escrow_core::adapter::{Acquire, AdapterError, Discover, Found, Probe};
+use escrow_core::adapter::{Acquire, AdapterError, Found, Probe};
 use escrow_core::asset::{self, Asset, AssetKind};
 use escrow_core::config::Browser;
 use escrow_core::content::{Content, ContentType, MediaType};
 use escrow_core::liveness::Presence;
-use escrow_core::source::Source;
 use escrow_core::state::MediaPresence;
 use escrow_core::timestamp::Timestamp;
 use escrow_core::url::{self, NormalizedUrl};
@@ -63,50 +62,13 @@ impl YtDlp {
     }
 }
 
-/// 配信元に並んでいる項目1件。まだ中身は取っていない。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Listed {
-    pub url: NormalizedUrl,
-    /// どのタブから見つけたかで決まる（#1 の「種別は正規化する前の入口から決める」）。
-    pub content_type: ContentType,
-}
-
-/// チャンネルのどのタブを見るか。#5 の `/videos` `/streams` `/shorts`。
-///
-/// タブと種別が1対1なので、ここで種別が決まる。
+/// 追加取得で分かること。フィードに無いのはこの2つだけ（#5）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Tab {
-    Videos,
-    Streams,
-    Shorts,
-}
-
-impl Tab {
-    pub const ALL: [Self; 3] = [Self::Videos, Self::Streams, Self::Shorts];
-
-    const fn path(self) -> &'static str {
-        match self {
-            Self::Videos => "videos",
-            Self::Streams => "streams",
-            Self::Shorts => "shorts",
-        }
-    }
-
-    const fn content_type(self) -> ContentType {
-        match self {
-            Self::Videos => ContentType::YoutubeVideo,
-            Self::Streams => ContentType::YoutubeLive,
-            Self::Shorts => ContentType::YoutubeShorts,
-        }
-    }
-
-    const fn media_type(self) -> MediaType {
-        match self {
-            Self::Videos => MediaType::YoutubeVideo,
-            Self::Streams => MediaType::YoutubeLive,
-            Self::Shorts => MediaType::YoutubeShorts,
-        }
-    }
+pub struct Schedule {
+    /// 動画か配信か。`live_status` が決める。
+    pub media_type: MediaType,
+    /// 予約枠なら開始予定時刻。始まってしまった配信には入らない。
+    pub scheduled_start_at: Option<Timestamp>,
 }
 
 // ------------------------------------------------------------ 引数の組み立て
@@ -114,36 +76,36 @@ impl Tab {
 // すべて純関数。テストはプロセスを起動せず argv を突き合わせるだけで済むので、
 // ツールのフラグが変わったときに落ちるのはこの層だけになる。
 
-/// 共通で渡すもの。
-///
-/// cookie は #2 の1つの設定から来る。メン限や年齢制限は一覧の時点で見えなく
-/// なるので、取得だけでなく検知にも渡す。
-fn base(program: &Path, browser: Browser) -> Invocation {
+/// どの呼び出しにも渡すもの。**cookie はここに入れない。**
+fn base(program: &Path) -> Invocation {
     Invocation::new(program)
         // 利用者の設定ファイルに引きずられない。出力形式を変えられていると、
         // 読み取りの層が理由なく落ちる。
         .arg("--ignore-config")
         .arg("--no-warnings")
+}
+
+/// cookie を足す。取り出し元は #2 の1つの設定から来る。
+fn with_cookies(invocation: Invocation, browser: Browser) -> Invocation {
+    invocation
         .arg("--cookies-from-browser")
         .arg(browser.as_str())
 }
 
-/// タブに並んでいるものを挙げる。
-pub fn list_argv(
-    program: &Path,
-    source_url: &NormalizedUrl,
-    tab: Tab,
-    browser: Browser,
-) -> Invocation {
-    base(program, browser)
-        .arg("--flat-playlist")
+/// 検知の追加取得。**cookie を渡さない**（#5）。
+///
+/// フィードは動画か配信かを語らず、開始時刻も持たないので、そこだけをここで埋める。
+/// 引数は [`describe_argv`] と同じで、違うのは cookie の有無だけ。
+pub fn schedule_argv(program: &Path, url: &NormalizedUrl) -> Invocation {
+    base(program)
+        .arg("--skip-download")
         .arg("--dump-json")
-        .arg(format!("{}/{}", source_url.as_str(), tab.path()))
+        .arg(url.as_str())
 }
 
-/// 1件の中身を取る。
+/// 人が登録した1件の中身を取る。
 pub fn describe_argv(program: &Path, url: &NormalizedUrl, browser: Browser) -> Invocation {
-    base(program, browser)
+    with_cookies(base(program), browser)
         .arg("--skip-download")
         .arg("--dump-json")
         .arg(url.as_str())
@@ -151,7 +113,7 @@ pub fn describe_argv(program: &Path, url: &NormalizedUrl, browser: Browser) -> I
 
 /// 配信元にまだ在るかを確かめる。
 pub fn probe_argv(program: &Path, url: &NormalizedUrl, browser: Browser) -> Invocation {
-    base(program, browser)
+    with_cookies(base(program), browser)
         .arg("--simulate")
         .arg("--quiet")
         .args(["--print", "%(availability)s"])
@@ -170,7 +132,7 @@ pub fn download_argv(
     into: &Path,
     browser: Browser,
 ) -> Invocation {
-    base(program, browser)
+    with_cookies(base(program), browser)
         .arg("--no-playlist")
         .arg("--live-from-start")
         .arg("--paths")
@@ -185,12 +147,6 @@ pub fn download_argv(
 // こちらも純関数。fixture で offline にテストできるので、ツールの出力形式が
 // 変わったときに落ちるのはこの層だけになる。
 
-/// `--flat-playlist --dump-json` は1行に1件を書く。
-#[derive(Debug, Deserialize)]
-struct FlatEntry {
-    url: String,
-}
-
 /// `--dump-json` の、escrow が使う項目だけ。
 ///
 /// 知らないキーは無視する。yt-dlp は項目を足すので、`deny_unknown_fields` に
@@ -203,21 +159,49 @@ struct VideoMetadata {
     timestamp: Option<i64>,
     /// 配信の予定時刻。予約枠にはこちらしか無いことがある。
     release_timestamp: Option<i64>,
+    /// 配信かどうかと、いまどの段階か。
+    live_status: Option<String>,
 }
 
-pub fn parse_list(stdout: &str, tab: Tab) -> Result<Vec<Listed>, AdapterError> {
-    stdout
-        .lines()
-        .filter(|line| !line.trim().is_empty())
-        .map(|line| {
-            let entry: FlatEntry = serde_json::from_str(line).map_err(|e| parse_error(&e))?;
-            let (url, _) = url::normalize_item(&entry.url).map_err(|e| parse_error(&e))?;
-            Ok(Listed {
-                url,
-                content_type: tab.content_type(),
-            })
-        })
-        .collect()
+impl VideoMetadata {
+    /// `live_status` を #1 の種別へ写す。
+    ///
+    /// ショートはここでは決まらない — 正規形が動画と同じ `/watch?v=` なので、
+    /// yt-dlp から見て両者は区別が付かない。決めるのはフィードの `link`（#1）。
+    ///
+    /// アーカイブも配信中も `youtube_live`。#1 の「配信中かアーカイブかは種別
+    /// ではない」。
+    fn media_type(&self) -> Result<MediaType, AdapterError> {
+        match self.live_status.as_deref() {
+            Some("is_upcoming" | "is_live" | "post_live" | "was_live") => {
+                Ok(MediaType::YoutubeLive)
+            }
+            // 配信でないもの。値が無い場合も含む（古い yt-dlp、抽出できなかった）。
+            Some("not_live") | None => Ok(MediaType::YoutubeVideo),
+            Some(unknown) => Err(parse_error(&format!("知らない live_status `{unknown}`"))),
+        }
+    }
+
+    /// 予約枠の開始予定時刻。
+    ///
+    /// **`is_upcoming` のときだけ。** 始まってしまえば予約枠ではないので、
+    /// #1 の `scheduled_start_at` は空になる（NULL の意味は「予約枠ではない」）。
+    fn scheduled_start_at(&self) -> Result<Option<Timestamp>, AdapterError> {
+        if self.live_status.as_deref() != Some("is_upcoming") {
+            return Ok(None);
+        }
+        self.release_timestamp.map(epoch_seconds).transpose()
+    }
+}
+
+/// 検知の追加取得の読み取り。フィードに無い2つだけを返す。
+pub fn parse_schedule(stdout: &str) -> Result<Schedule, AdapterError> {
+    let meta: VideoMetadata = serde_json::from_str(stdout.trim()).map_err(|e| parse_error(&e))?;
+
+    Ok(Schedule {
+        media_type: meta.media_type()?,
+        scheduled_start_at: meta.scheduled_start_at()?,
+    })
 }
 
 pub fn parse_describe(stdout: &str, media_type: MediaType) -> Result<Found, AdapterError> {
@@ -229,10 +213,12 @@ pub fn parse_describe(stdout: &str, media_type: MediaType) -> Result<Found, Adap
         .or(meta.release_timestamp)
         .ok_or_else(|| parse_error(&"timestamp も release_timestamp も無い"))?;
     let published_at = epoch_seconds(seconds)?;
+    let scheduled_start_at = meta.scheduled_start_at()?;
 
     Ok(Found {
         url,
         published_at,
+        scheduled_start_at,
         content: Content::Media {
             media_type,
             title: meta.title,
@@ -320,25 +306,20 @@ fn classify(completed: &Completed, url: &NormalizedUrl) -> AdapterError {
 // ------------------------------------------------------------------ 実行
 
 impl YtDlp {
-    /// タブに並んでいるものを、配信元が返す順で挙げる。
+    /// 検知の追加取得。フィードに無い2つを取る（#5）。
     ///
-    /// YouTube のタブは新しい順に並ぶ。どこまで遡るかは呼ぶ側が決める — 一覧には
-    /// 日時が載らないので、遡る判断には [`YtDlp::describe`] が要る。
-    pub async fn list(
-        &self,
-        source_url: &NormalizedUrl,
-        tab: Tab,
-    ) -> Result<Vec<Listed>, AdapterError> {
-        let invocation = list_argv(&self.program, source_url, tab, self.browser);
+    /// **cookie を渡さない。** 検知は繰り返し叩く経路なので匿名に保つ。
+    pub async fn schedule(&self, url: &NormalizedUrl) -> Result<Schedule, AdapterError> {
+        let invocation = schedule_argv(&self.program, url);
         let completed = run(&invocation, None).await?;
 
         if !completed.success {
-            return Err(classify(&completed, source_url));
+            return Err(classify(&completed, url));
         }
-        parse_list(&completed.stdout, tab)
+        parse_schedule(&completed.stdout)
     }
 
-    /// 1件の中身を取る。
+    /// 人が登録した1件の中身を取る。
     pub async fn describe(
         &self,
         url: &NormalizedUrl,
@@ -351,32 +332,6 @@ impl YtDlp {
             return Err(classify(&completed, url));
         }
         parse_describe(&completed.stdout, media_type)
-    }
-}
-
-impl Discover for YtDlp {
-    /// 全タブを見て、`since` 以降のものを返す。
-    ///
-    /// 台帳との突き合わせをしないので、既に在るものも返る。取り除くのは呼ぶ側。
-    async fn discover(
-        &self,
-        source: &Source,
-        since: Timestamp,
-    ) -> Result<Vec<Found>, AdapterError> {
-        let mut found = Vec::new();
-
-        for tab in Tab::ALL {
-            for listed in self.list(&source.url, tab).await? {
-                let described = self.describe(&listed.url, tab.media_type()).await?;
-                // 配信元が新しい順に並べるので、古いものが出たらこのタブは終わり。
-                if described.published_at < since {
-                    break;
-                }
-                found.push(described);
-            }
-        }
-
-        Ok(found)
     }
 }
 
@@ -432,9 +387,7 @@ mod tests {
         PathBuf::from("/opt/homebrew/bin/yt-dlp")
     }
 
-    fn channel() -> NormalizedUrl {
-        url::normalize_source("https://www.youtube.com/channel/UCBR8-60-B28hp2BmDPdntcQ").unwrap()
-    }
+    const URL: &str = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
 
     fn video() -> NormalizedUrl {
         url::normalize_item("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
@@ -445,8 +398,8 @@ mod tests {
     // ---- 引数の組み立て。プロセスは起動しない ----
 
     #[test]
-    fn the_listing_call_asks_for_a_flat_json_listing() {
-        let invocation = list_argv(&program(), &channel(), Tab::Streams, Browser::Firefox);
+    fn the_follow_up_call_asks_for_one_items_json() {
+        let invocation = schedule_argv(&program(), &video());
 
         assert_eq!(invocation.program_name(), "yt-dlp");
         assert_eq!(
@@ -454,25 +407,36 @@ mod tests {
             [
                 "--ignore-config",
                 "--no-warnings",
-                // cookie は #2 の1つの設定から来る。メン限や年齢制限は一覧の
-                // 時点で見えなくなるので、取得だけでなく検知にも渡す。
-                "--cookies-from-browser",
-                "firefox",
-                "--flat-playlist",
+                "--skip-download",
                 "--dump-json",
-                "https://www.youtube.com/channel/UCBR8-60-B28hp2BmDPdntcQ/streams",
+                "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
             ]
         );
     }
 
-    /// cookie は #2 の1つの設定から来て、**全部の呼び出しに渡る**。
+    /// **検知は cookie を渡さない**（#5）。
     ///
-    /// 検知にも渡すのは、メン限や年齢制限が一覧の時点で見えなくなるため。
+    /// 繰り返し叩くのはこの経路なので、匿名に保つことで賭けているものが
+    /// アカウントではなくなる。引数が1つでも増えたら落ちるよう、無いことを
+    /// 直接見る。
+    #[test]
+    fn discovery_never_sends_cookies() {
+        let args = schedule_argv(&program(), &video());
+        let args = args.args_as_str().unwrap();
+
+        assert!(
+            !args.contains(&"--cookies-from-browser"),
+            "検知に cookie が混ざっている: {args:?}"
+        );
+        assert!(!args.iter().any(|a| a.contains("cookie")), "{args:?}");
+    }
+
+    /// 認証が要る経路は、#2 の1つの設定から来たブラウザを渡す。
+    ///
     /// gallery-dl だけ認証が効いて yt-dlp が落ちる、という非対称を作らない。
     #[test]
-    fn every_call_carries_the_configured_browser() {
+    fn authenticated_routes_carry_the_configured_browser() {
         for invocation in [
-            list_argv(&program(), &channel(), Tab::Videos, Browser::Safari),
             describe_argv(&program(), &video(), Browser::Safari),
             probe_argv(&program(), &video(), Browser::Safari),
             download_argv(&program(), &video(), Path::new("/tmp/42"), Browser::Safari),
@@ -493,7 +457,7 @@ mod tests {
     #[test]
     fn every_call_ignores_the_users_own_config() {
         for invocation in [
-            list_argv(&program(), &channel(), Tab::Videos, Browser::Firefox),
+            schedule_argv(&program(), &video()),
             describe_argv(&program(), &video(), Browser::Firefox),
             probe_argv(&program(), &video(), Browser::Firefox),
             download_argv(&program(), &video(), Path::new("/tmp/42"), Browser::Firefox),
@@ -528,35 +492,61 @@ mod tests {
 
     // ---- 出力の読み取り。実物の fixture で ----
 
-    const FLAT_PLAYLIST: &str = include_str!("../tests/fixtures/ytdlp/flat-playlist.jsonl");
-
+    /// `live_status` が動画と配信を分ける。実測した値をそのまま並べる。
+    ///
+    /// アーカイブ（`was_live`）も配信中（`is_live`）も `youtube_live`。#1 の
+    /// 「配信中かアーカイブかは種別ではない」。
     #[test]
-    fn reads_a_real_flat_listing() {
-        let listed = parse_list(FLAT_PLAYLIST, Tab::Videos).unwrap();
-
-        assert_eq!(listed.len(), 3);
-        for entry in &listed {
-            assert_eq!(entry.content_type, ContentType::YoutubeVideo);
-            assert!(
-                entry
-                    .url
-                    .as_str()
-                    .starts_with("https://www.youtube.com/watch?v=")
+    fn live_status_decides_video_or_stream() {
+        for (status, expected) in [
+            ("not_live", MediaType::YoutubeVideo),
+            ("is_upcoming", MediaType::YoutubeLive),
+            ("is_live", MediaType::YoutubeLive),
+            ("post_live", MediaType::YoutubeLive),
+            ("was_live", MediaType::YoutubeLive),
+        ] {
+            let json = format!(r#"{{"webpage_url":"{URL}","title":"t","live_status":"{status}"}}"#);
+            assert_eq!(
+                parse_schedule(&json).unwrap().media_type,
+                expected,
+                "{status}"
             );
         }
     }
 
-    /// タブが種別を決める。正規化した URL からは分からない（#1）。
+    /// 知らない `live_status` は読み取りの層で落とす。**ツールの仕様が変わった
+    /// 疑い**なので、勝手に動画へ寄せない。
     #[test]
-    fn the_tab_decides_the_type() {
-        for (tab, expected) in [
-            (Tab::Videos, ContentType::YoutubeVideo),
-            (Tab::Streams, ContentType::YoutubeLive),
-            (Tab::Shorts, ContentType::YoutubeShorts),
-        ] {
-            let listed = parse_list(FLAT_PLAYLIST, tab).unwrap();
-            assert_eq!(listed[0].content_type, expected);
-        }
+    fn an_unknown_live_status_is_a_parse_error() {
+        let json = format!(r#"{{"webpage_url":"{URL}","title":"t","live_status":"is_premiere"}}"#);
+
+        assert!(matches!(
+            parse_schedule(&json),
+            Err(AdapterError::Parse { .. })
+        ));
+    }
+
+    /// 開始予定時刻が入るのは**予約枠のときだけ**。
+    ///
+    /// 始まってしまえば予約枠ではないので空になる（#1 の `NULL` の意味）。
+    /// 過ぎた時刻を入れると、#13 がその時刻に取得を予約しても意味が無い。
+    #[test]
+    fn only_an_upcoming_slot_carries_a_start_time() {
+        let upcoming = format!(
+            r#"{{"webpage_url":"{URL}","title":"t",
+                 "live_status":"is_upcoming","release_timestamp":1788455896}}"#
+        );
+        assert_eq!(
+            parse_schedule(&upcoming).unwrap().scheduled_start_at,
+            Some(Timestamp::parse("2026-09-03T17:18:16+00:00").unwrap())
+        );
+
+        // 配信中。release_timestamp は入っているが、もう予約枠ではない。
+        let live = format!(
+            r#"{{"webpage_url":"{URL}","title":"t",
+                 "live_status":"is_live","release_timestamp":1788455896}}"#
+        );
+        assert_eq!(parse_schedule(&live).unwrap().scheduled_start_at, None);
     }
 
     #[test]

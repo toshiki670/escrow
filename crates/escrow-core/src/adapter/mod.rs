@@ -82,6 +82,11 @@ impl AdapterError {
 pub struct Found {
     pub url: NormalizedUrl,
     pub published_at: Timestamp,
+    /// 配信の開始予定時刻。予約枠でなければ空（#1）。
+    ///
+    /// 始まってしまった配信には入らない。#13 がこの時刻に取得を予約するので、
+    /// 過ぎた時刻を入れると待つ意味が無くなる。
+    pub scheduled_start_at: Option<Timestamp>,
     pub content: Content,
     /// 取得する実体があるか。無ければ [`crate::state::State::initial`] で
     /// そのまま `kept` になる（#1）。

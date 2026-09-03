@@ -26,6 +26,7 @@
 pub mod gallerydl;
 pub mod invocation;
 pub mod route;
+pub mod rss;
 pub mod whisper;
 pub mod ytdlp;
 

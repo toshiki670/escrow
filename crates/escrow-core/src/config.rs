@@ -167,12 +167,13 @@ impl fmt::Display for Language {
 /// cookie の取り出し元。
 ///
 /// #2 が「認証の取得元はプラットフォームごとに分けない」と決めているので、
-/// この1つの値が**すべてのアダプタへ渡る**。したがってここに並ぶのは、
-/// どのアダプタでも使えるものだけ。
+/// この1つの値が**認証の要る呼び出しすべてへ渡る**。したがってここに並ぶのは、
+/// どのアダプタでも使えるものだけ。渡らない先もある — YouTube の検知は匿名で、
+/// cookie を受け取る手段を持たない（#5）。
 ///
 /// どのアダプタが何を受けるかは、それぞれのアダプタが持つ
-/// （`adapter::<tool>::SUPPORTED_BROWSERS`）。ここが部分集合であることは
-/// `adapter` のテストが確かめる。綴りを自由にすると、渡した先で初めて
+/// （`escrow_adapter::<tool>::SUPPORTED_BROWSERS`）。ここが部分集合であることは
+/// `escrow-adapter` のテストが確かめる。綴りを自由にすると、渡した先で初めて
 /// 落ちる値を設定できてしまうので enum にしてある。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
