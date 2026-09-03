@@ -398,12 +398,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "escrow-adapter"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "escrow-core",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "toml",
+ "which",
+]
+
+[[package]]
 name = "escrow-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
  "escrow-core",
+ "escrow-scheduler",
  "serde_json",
  "tokio",
 ]
@@ -430,6 +445,15 @@ name = "escrow-gui"
 version = "0.1.0"
 dependencies = [
  "escrow-core",
+]
+
+[[package]]
+name = "escrow-scheduler"
+version = "0.1.0"
+dependencies = [
+ "escrow-adapter",
+ "escrow-core",
+ "thiserror",
 ]
 
 [[package]]

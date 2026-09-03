@@ -15,10 +15,10 @@
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 
-use super::invocation::{Invocation, run};
-use super::{AdapterError, Transcribe};
-use crate::asset::{Asset, AssetKind};
-use crate::config::Language;
+use crate::invocation::{Invocation, run};
+use escrow_core::adapter::{AdapterError, Transcribe};
+use escrow_core::asset::{Asset, AssetKind};
+use escrow_core::config::Language;
 
 const WHISPER: &str = "whisper-cli";
 const FFMPEG: &str = "ffmpeg";

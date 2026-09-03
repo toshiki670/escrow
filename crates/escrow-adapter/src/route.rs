@@ -14,14 +14,14 @@
 
 use std::path::Path;
 
-use super::gallerydl::GalleryDl;
-use super::ytdlp::YtDlp;
-use super::{Acquire, AdapterError, Discover, Found};
-use crate::asset::Asset;
-use crate::content::{ContentType, Platform};
-use crate::source::Source;
-use crate::timestamp::Timestamp;
-use crate::url::{self, NormalizedUrl};
+use crate::gallerydl::GalleryDl;
+use crate::ytdlp::YtDlp;
+use escrow_core::adapter::{Acquire, AdapterError, Discover, Found};
+use escrow_core::asset::Asset;
+use escrow_core::content::{ContentType, Platform};
+use escrow_core::source::Source;
+use escrow_core::timestamp::Timestamp;
+use escrow_core::url::{self, NormalizedUrl};
 
 /// 使えるツールを揃えたもの。
 pub struct Adapters {
@@ -59,6 +59,21 @@ impl Adapters {
                 program: "escrow".to_owned(),
                 detail: format!("どのプラットフォームの配信元か決められない: {}", source.url),
             }),
+        }
+    }
+
+    /// 1件のメタデータを取る。
+    ///
+    /// 分かれ目は subtype。`Media` は yt-dlp、`Post` は gallery-dl。本文と
+    /// 繋がりの URL を返せるのが gallery-dl だけだから（#5）。
+    pub async fn describe(
+        &self,
+        url: &NormalizedUrl,
+        content_type: ContentType,
+    ) -> Result<Found, AdapterError> {
+        match content_type.media_type() {
+            Some(media_type) => self.ytdlp.describe(url, media_type).await,
+            None => self.gallerydl.describe(url).await,
         }
     }
 }
@@ -105,8 +120,8 @@ impl Discover for Discoverer<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Browser;
-    use crate::source::{PersonId, SourceId};
+    use escrow_core::config::Browser;
+    use escrow_core::source::{PersonId, SourceId};
     use std::num::NonZeroU32;
 
     fn adapters() -> Adapters {

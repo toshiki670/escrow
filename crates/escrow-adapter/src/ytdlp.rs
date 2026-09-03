@@ -20,16 +20,16 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-use super::invocation::{Completed, Invocation, run};
-use super::{Acquire, AdapterError, Discover, Found, Probe};
-use crate::asset::{self, Asset, AssetKind};
-use crate::config::Browser;
-use crate::content::{Content, ContentType, MediaType};
-use crate::liveness::Presence;
-use crate::source::Source;
-use crate::state::MediaPresence;
-use crate::timestamp::Timestamp;
-use crate::url::{self, NormalizedUrl};
+use crate::invocation::{Completed, Invocation, run};
+use escrow_core::adapter::{Acquire, AdapterError, Discover, Found, Probe};
+use escrow_core::asset::{self, Asset, AssetKind};
+use escrow_core::config::Browser;
+use escrow_core::content::{Content, ContentType, MediaType};
+use escrow_core::liveness::Presence;
+use escrow_core::source::Source;
+use escrow_core::state::MediaPresence;
+use escrow_core::timestamp::Timestamp;
+use escrow_core::url::{self, NormalizedUrl};
 
 const PROGRAM: &str = "yt-dlp";
 
@@ -528,7 +528,7 @@ mod tests {
 
     // ---- 出力の読み取り。実物の fixture で ----
 
-    const FLAT_PLAYLIST: &str = include_str!("../../tests/fixtures/ytdlp/flat-playlist.jsonl");
+    const FLAT_PLAYLIST: &str = include_str!("../tests/fixtures/ytdlp/flat-playlist.jsonl");
 
     #[test]
     fn reads_a_real_flat_listing() {

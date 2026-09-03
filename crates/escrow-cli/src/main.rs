@@ -4,14 +4,11 @@
 //! GUI（Phase 6）ができるまで手で回すための口。
 
 use std::num::NonZeroU32;
-use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, bail};
 use clap::{Parser, Subcommand};
 
-use escrow_core::adapter::{
-    Adapters, Resolver, Tool, gallerydl::GalleryDl, whisper::Whisper, ytdlp::YtDlp,
-};
+use escrow_core::adapter::{Resolution, Resolver};
 use escrow_core::config::{Config, Dirs, Paths};
 use escrow_core::content::ContentType;
 use escrow_core::handover;
@@ -22,6 +19,7 @@ use escrow_core::state::{ReleaseReference, State, StateName};
 use escrow_core::store::{NewItem, NewSource, Store};
 use escrow_core::timestamp::Timestamp;
 use escrow_core::url::{self, TypeHint};
+use escrow_scheduler::Scheduler;
 
 /// 配信元から失われうるものを取り込み、手元に預かる。
 #[derive(Debug, Parser)]
@@ -156,21 +154,10 @@ impl App {
         })
     }
 
-    /// 使えるツールを揃える。どれをいつ使うかは #5 の対応表（`Adapters`）が決める。
-    fn adapters(&self) -> Result<Adapters> {
-        let browser = self.config.auth.cookies_from;
-        Ok(Adapters::new(
-            YtDlp::new(self.tool(Tool::YtDlp)?, browser),
-            GalleryDl::new(self.tool(Tool::GalleryDl)?, browser),
-        ))
-    }
-
-    fn tool(&self, tool: Tool) -> Result<PathBuf> {
-        self.resolver
-            .resolve(tool)
-            .path()
-            .map(Path::to_path_buf)
-            .ok_or_else(|| anyhow::anyhow!("{tool} が見つからない。`escrow doctor` で確かめる"))
+    /// 外部アクセスの受付。外へ出る呼び出しはすべてここを通る（#13）。
+    fn scheduler(&self) -> Result<Scheduler> {
+        Scheduler::new(&self.config, &self.paths, &self.resolver)
+            .map_err(|missing| anyhow::anyhow!("{missing}。`escrow doctor` で確かめる"))
     }
 
     async fn list(&self, state: Option<String>, id: Option<i64>, json: bool) -> Result<()> {
@@ -273,12 +260,7 @@ impl App {
         };
 
         // 中身を取るツールも #5 の対応表が決める。
-        let adapters = self.adapters()?;
-        let found = match content_type.media_type() {
-            Some(media_type) => adapters.ytdlp.describe(&url, media_type).await?,
-            // `Post` 側は `x_post` だけ。本文と繋がりは gallery-dl が返す。
-            None => adapters.gallerydl.describe(&url).await?,
-        };
+        let found = self.scheduler()?.describe(&url, content_type).await?;
 
         let id = self
             .store
@@ -309,19 +291,18 @@ impl App {
             .await?
             .context("配信元が無い")?;
 
-        let adapters = self.adapters()?;
+        let scheduler = self.scheduler()?;
         // #5 の対応表が、この種別を取るのがどのツールかを決める。
-        let acquirer = adapters.acquirer(item.content_type());
-        let whisper = Whisper::new(
-            self.tool(Tool::WhisperCli)?,
-            self.tool(Tool::Ffmpeg)?,
-            &self.paths.transcribe_model,
-            self.config.transcribe.language.clone(),
-        );
+        let acquirer = scheduler.acquirer(item.content_type());
 
-        let state = Pipeline::new(&self.store, &self.paths.media_dir, &acquirer, &whisper)
-            .run(id, source.hold_policy())
-            .await?;
+        let state = Pipeline::new(
+            &self.store,
+            &self.paths.media_dir,
+            &acquirer,
+            scheduler.transcriber(),
+        )
+        .run(id, source.hold_policy())
+        .await?;
 
         println!("{id} -> {state}", state = state.as_str());
         Ok(())
@@ -335,7 +316,7 @@ impl App {
             }
         }
 
-        let model = escrow_core::adapter::Resolution::of_file(&self.paths.transcribe_model);
+        let model = Resolution::of_file(&self.paths.transcribe_model);
         match model.path() {
             Some(path) => println!("\n  文字起こしモデル  {}  ✓", path.display()),
             None => println!(

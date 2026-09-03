@@ -1,6 +1,12 @@
 [workspace]
 resolver = "3"
-members = ["crates/escrow-core", "crates/escrow-cli", "crates/escrow-gui"]
+members = [
+    "crates/escrow-core",
+    "crates/escrow-adapter",
+    "crates/escrow-scheduler",
+    "crates/escrow-cli",
+    "crates/escrow-gui",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -11,6 +17,8 @@ repository = "https://github.com/toshiki670/escrow"
 
 [workspace.dependencies]
 escrow-core = { path = "crates/escrow-core" }
+escrow-adapter = { path = "crates/escrow-adapter" }
+escrow-scheduler = { path = "crates/escrow-scheduler" }
 clap = { version = "4.6", features = ["derive"] }
 anyhow = "1.0"
 chrono = "0.4"
