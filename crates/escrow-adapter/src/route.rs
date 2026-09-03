@@ -26,10 +26,14 @@ use escrow_core::timestamp::Timestamp;
 use escrow_core::url::{self, NormalizedUrl, TypeHint};
 
 /// 使えるツールを揃えたもの。
+///
+/// **中のツールを外へ見せない。** 見せると呼ぶ側が対応表を迂回して
+/// `adapters.ytdlp` を直に叩けてしまい、「この対応をコードの1か所に置く」が
+/// 約束にしかならない。外から呼べるのは下の3つだけ。
 pub struct Adapters {
-    pub rss: Rss,
-    pub ytdlp: YtDlp,
-    pub gallerydl: GalleryDl,
+    rss: Rss,
+    ytdlp: YtDlp,
+    gallerydl: GalleryDl,
 }
 
 impl Adapters {

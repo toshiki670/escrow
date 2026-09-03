@@ -115,18 +115,18 @@ mod tests {
     #[test]
     fn builds_an_argument_list_without_running_anything() {
         let invocation = Invocation::new("/opt/homebrew/bin/yt-dlp")
-            .arg("--flat-playlist")
-            .args(["--print", "%(id)s"])
-            .arg("https://www.youtube.com/channel/UCxxx/videos");
+            .arg("--simulate")
+            .args(["--print", "%(availability)s"])
+            .arg("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
 
         assert_eq!(invocation.program_name(), "yt-dlp");
         assert_eq!(
             invocation.args_as_str().unwrap(),
             [
-                "--flat-playlist",
+                "--simulate",
                 "--print",
-                "%(id)s",
-                "https://www.youtube.com/channel/UCxxx/videos"
+                "%(availability)s",
+                "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
             ]
         );
     }
