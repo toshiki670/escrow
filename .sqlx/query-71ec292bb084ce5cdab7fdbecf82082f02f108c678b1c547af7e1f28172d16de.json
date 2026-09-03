@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "INSERT INTO source (person_id, url, enabled, created_at, hold_days, discover_interval_minutes) VALUES (?, ?, ?, ?, ?, ?) RETURNING id AS \"id!\"",
+  "query": "INSERT INTO source (person_id, url, enabled, created_at, priority, hold_days, monitor_from, monitor_until) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id AS \"id!\"",
   "describe": {
     "columns": [
       {
@@ -16,11 +16,11 @@
       }
     ],
     "parameters": {
-      "Right": 6
+      "Right": 8
     },
     "nullable": [
       null
     ]
   },
-  "hash": "9a9437db17a7cbfd8543065ee423d30db5639e458cd634b035c4e1f7a3ea98b3"
+  "hash": "71ec292bb084ce5cdab7fdbecf82082f02f108c678b1c547af7e1f28172d16de"
 }

@@ -14,7 +14,7 @@ use escrow_core::content::ContentType;
 use escrow_core::handover;
 use escrow_core::item::ItemId;
 use escrow_core::pipeline::Pipeline;
-use escrow_core::source::{PersonId, SourceId};
+use escrow_core::source::{Monitoring, PersonId, SourceId};
 use escrow_core::state::{ReleaseReference, State, StateName};
 use escrow_core::store::{NewItem, NewSource, Store};
 use escrow_core::timestamp::Timestamp;
@@ -77,9 +77,15 @@ enum SourceCommand {
         person: i64,
         /// 不変 ID へ解決済みの URL。
         url: String,
-        /// 新規投稿とライブ開始を確認する間隔。
+        /// 検知の重み。大きいほど予算の分け前が増える（#13）。
+        #[arg(long, default_value = "1")]
+        priority: u32,
+        /// 監視を始める日時。--monitor-until と対で指定する。
         #[arg(long)]
-        discover_interval_minutes: u32,
+        monitor_from: Option<String>,
+        /// 監視を終える日時。両方省くと区切らず監視する。
+        #[arg(long)]
+        monitor_until: Option<String>,
         /// 預かる日数。省くと捨てない。
         #[arg(long)]
         hold_days: Option<u32>,
@@ -111,11 +117,20 @@ async fn main() -> Result<()> {
         Command::Source(SourceCommand::Add {
             person,
             url,
-            discover_interval_minutes,
+            priority,
+            monitor_from,
+            monitor_until,
             hold_days,
         }) => {
-            app.add_source(person, &url, discover_interval_minutes, hold_days)
-                .await
+            app.add_source(
+                person,
+                &url,
+                priority,
+                monitor_from.as_deref(),
+                monitor_until.as_deref(),
+                hold_days,
+            )
+            .await
         }
         Command::Item(ItemCommand::Add {
             source,
@@ -221,14 +236,19 @@ impl App {
         &self,
         person: i64,
         raw_url: &str,
-        interval: u32,
+        priority: u32,
+        monitor_from: Option<&str>,
+        monitor_until: Option<&str>,
         hold_days: Option<u32>,
     ) -> Result<()> {
         let url = url::normalize_source(raw_url)?;
-        let interval = NonZeroU32::new(interval).context("確認の間隔は1分以上")?;
+        let priority = NonZeroU32::new(priority).context("重みは1以上")?;
         let hold_days = hold_days
             .map(|d| NonZeroU32::new(d).context("預かる日数は1日以上"))
             .transpose()?;
+
+        let at = |text: Option<&str>| text.map(Timestamp::parse).transpose();
+        let monitoring = Monitoring::new(at(monitor_from)?, at(monitor_until)?)?;
 
         let id = self
             .store
@@ -237,8 +257,9 @@ impl App {
                 url,
                 enabled: true,
                 created_at: Timestamp::now(),
+                priority,
+                monitoring,
                 hold_days,
-                discover_interval_minutes: interval,
             })
             .await?;
 
@@ -268,6 +289,7 @@ impl App {
                 source_id: SourceId::new(source),
                 url: found.url,
                 published_at: found.published_at,
+                scheduled_start_at: None,
                 state: State::initial(found.media),
                 state_since: Timestamp::now(),
                 content: found.content,

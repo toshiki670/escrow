@@ -21,7 +21,9 @@ use thiserror::Error;
 
 use crate::content::{Content, ContentType};
 use crate::item::{Item, ItemId};
-use crate::source::{Exclude, ExcludeId, Person, PersonId, Source, SourceId};
+use crate::source::{
+    Exclude, ExcludeId, Monitoring, MonitoringError, Person, PersonId, Source, SourceId,
+};
 use crate::state::{self, Event, IllegalTransition, ReleaseReference, State, StateName};
 use crate::timestamp::Timestamp;
 use crate::url::{self, NormalizedUrl};
@@ -79,8 +81,18 @@ pub enum RowError {
     },
     #[error("source {id}: url が正規形でない `{value}`")]
     UnnormalizedSourceUrl { id: i64, value: String },
-    #[error("source {id}: created_at を日時として読めない `{value}`")]
-    BadSourceTimestamp { id: i64, value: String },
+    #[error("source {id}: {column} を日時として読めない `{value}`")]
+    BadSourceTimestamp {
+        id: i64,
+        column: &'static str,
+        value: String,
+    },
+    #[error("source {id}: {source}")]
+    BadMonitoring {
+        id: i64,
+        #[source]
+        source: MonitoringError,
+    },
     #[error("{table} {id}: {column} が範囲外 `{value}`")]
     OutOfRange {
         table: &'static str,
@@ -179,7 +191,8 @@ pub struct NewSource {
     pub enabled: bool,
     pub created_at: Timestamp,
     pub hold_days: Option<NonZeroU32>,
-    pub discover_interval_minutes: NonZeroU32,
+    pub priority: NonZeroU32,
+    pub monitoring: Monitoring,
 }
 
 impl Store {
@@ -189,17 +202,23 @@ impl Store {
         let enabled = i64::from(source.enabled);
         let created_at = source.created_at.to_text();
         let hold_days = source.hold_days.map(|d| i64::from(d.get()));
-        let interval = i64::from(source.discover_interval_minutes.get());
+        let priority = i64::from(source.priority.get());
+        let (monitor_from, monitor_until) = source.monitoring.columns();
+        let monitor_from = monitor_from.map(Timestamp::to_text);
+        let monitor_until = monitor_until.map(Timestamp::to_text);
 
         let id = sqlx::query!(
-            "INSERT INTO source (person_id, url, enabled, created_at, hold_days, \
-             discover_interval_minutes) VALUES (?, ?, ?, ?, ?, ?) RETURNING id AS \"id!\"",
+            "INSERT INTO source (person_id, url, enabled, created_at, priority, hold_days, \
+             monitor_from, monitor_until) VALUES (?, ?, ?, ?, ?, ?, ?, ?) \
+             RETURNING id AS \"id!\"",
             person_id,
             url,
             enabled,
             created_at,
+            priority,
             hold_days,
-            interval,
+            monitor_from,
+            monitor_until,
         )
         .fetch_one(&self.pool)
         .await?
@@ -211,8 +230,8 @@ impl Store {
     pub async fn source(&self, id: SourceId) -> Result<Option<Source>, StoreError> {
         let key = id.get();
         let row = sqlx::query!(
-            r#"SELECT id AS "id!", person_id, url, enabled AS "enabled: bool", created_at, hold_days,
-                      discover_interval_minutes
+            r#"SELECT id AS "id!", person_id, url, enabled AS "enabled: bool", created_at,
+                      priority, hold_days, monitor_from, monitor_until
                FROM source WHERE id = ?"#,
             key
         )
@@ -234,25 +253,22 @@ impl Store {
             person_id: PersonId::new(row.person_id),
             url,
             enabled: row.enabled,
-            created_at: Timestamp::parse(&row.created_at).map_err(|_| {
-                RowError::BadSourceTimestamp {
-                    id: row.id,
-                    value: row.created_at.clone(),
-                }
-            })?,
+            created_at: source_timestamp(row.id, "created_at", Some(&row.created_at))?
+                .expect("created_at は NOT NULL"),
             hold_days: positive(row.hold_days, "source", row.id, "hold_days")?,
-            discover_interval_minutes: positive(
-                Some(row.discover_interval_minutes),
-                "source",
-                row.id,
-                "discover_interval_minutes",
-            )?
-            .ok_or(RowError::OutOfRange {
-                table: "source",
-                id: row.id,
-                column: "discover_interval_minutes",
-                value: row.discover_interval_minutes,
-            })?,
+            priority: positive(Some(row.priority), "source", row.id, "priority")?.ok_or(
+                RowError::OutOfRange {
+                    table: "source",
+                    id: row.id,
+                    column: "priority",
+                    value: row.priority,
+                },
+            )?,
+            monitoring: Monitoring::new(
+                source_timestamp(row.id, "monitor_from", row.monitor_from.as_deref())?,
+                source_timestamp(row.id, "monitor_until", row.monitor_until.as_deref())?,
+            )
+            .map_err(|source| RowError::BadMonitoring { id: row.id, source })?,
         }))
     }
 
@@ -314,6 +330,7 @@ pub struct NewItem {
     pub source_id: SourceId,
     pub url: NormalizedUrl,
     pub published_at: Timestamp,
+    pub scheduled_start_at: Option<Timestamp>,
     pub state: State,
     pub state_since: Timestamp,
     pub content: Content,
@@ -327,17 +344,19 @@ impl Store {
         let url = item.url.as_str();
         let content_type = item.content.content_type().as_str();
         let published_at = item.published_at.to_text();
+        let scheduled_start_at = item.scheduled_start_at.map(Timestamp::to_text);
         let state = item.state.as_str();
         let state_since = item.state_since.to_text();
 
         let id = sqlx::query!(
-            "INSERT INTO item (source_id, url, content_type, published_at, state, state_since, \
-             title, body, in_reply_to_url, quoted_url, release_reference) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id AS \"id!\"",
+            "INSERT INTO item (source_id, url, content_type, published_at, scheduled_start_at, \
+             state, state_since, title, body, in_reply_to_url, quoted_url, release_reference) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id AS \"id!\"",
             source_id,
             url,
             content_type,
             published_at,
+            scheduled_start_at,
             state,
             state_since,
             columns.title,
@@ -357,8 +376,9 @@ impl Store {
         let key = id.get();
         let row = sqlx::query_as!(
             ItemRow,
-            r#"SELECT id AS "id!", source_id, url, content_type, published_at, state,
-                      state_since, title, body, in_reply_to_url, quoted_url, release_reference
+            r#"SELECT id AS "id!", source_id, url, content_type, published_at,
+                      scheduled_start_at, state, state_since, title, body, in_reply_to_url,
+                      quoted_url, release_reference
                FROM item WHERE id = ?"#,
             key
         )
@@ -373,8 +393,9 @@ impl Store {
         let key = url.as_str();
         let row = sqlx::query_as!(
             ItemRow,
-            r#"SELECT id AS "id!", source_id, url, content_type, published_at, state,
-                      state_since, title, body, in_reply_to_url, quoted_url, release_reference
+            r#"SELECT id AS "id!", source_id, url, content_type, published_at,
+                      scheduled_start_at, state, state_since, title, body, in_reply_to_url,
+                      quoted_url, release_reference
                FROM item WHERE url = ?"#,
             key
         )
@@ -389,8 +410,9 @@ impl Store {
         let key = state.as_str();
         let rows = sqlx::query_as!(
             ItemRow,
-            r#"SELECT id AS "id!", source_id, url, content_type, published_at, state,
-                      state_since, title, body, in_reply_to_url, quoted_url, release_reference
+            r#"SELECT id AS "id!", source_id, url, content_type, published_at,
+                      scheduled_start_at, state, state_since, title, body, in_reply_to_url,
+                      quoted_url, release_reference
                FROM item WHERE state = ? ORDER BY id"#,
             key
         )
@@ -468,6 +490,7 @@ struct ItemRow {
     url: String,
     content_type: String,
     published_at: String,
+    scheduled_start_at: Option<String>,
     state: String,
     state_since: String,
     title: Option<String>,
@@ -534,6 +557,11 @@ impl TryFrom<ItemRow> for Item {
             source_id: SourceId::new(row.source_id),
             url: normalized(id, "url", &row.url)?,
             published_at: timestamp(id, "published_at", &row.published_at)?,
+            scheduled_start_at: row
+                .scheduled_start_at
+                .as_deref()
+                .map(|text| timestamp(id, "scheduled_start_at", text))
+                .transpose()?,
             state,
             state_since: timestamp(id, "state_since", &row.state_since)?,
             content,
@@ -647,6 +675,22 @@ fn timestamp(id: i64, column: &'static str, value: &str) -> Result<Timestamp, Ro
     })
 }
 
+/// `source` の日時の列。`NULL` はそのまま空として返す。
+fn source_timestamp(
+    id: i64,
+    column: &'static str,
+    text: Option<&str>,
+) -> Result<Option<Timestamp>, RowError> {
+    text.map(|text| {
+        Timestamp::parse(text).map_err(|_| RowError::BadSourceTimestamp {
+            id,
+            column,
+            value: text.to_owned(),
+        })
+    })
+    .transpose()
+}
+
 fn positive(
     value: Option<i64>,
     table: &'static str,
@@ -696,7 +740,8 @@ mod tests {
                 enabled: true,
                 created_at: at("2026-01-01T00:00:00+09:00"),
                 hold_days: NonZeroU32::new(7),
-                discover_interval_minutes: NonZeroU32::new(15).unwrap(),
+                priority: NonZeroU32::new(1).unwrap(),
+                monitoring: Monitoring::Continuous,
             })
             .await
             .unwrap();
@@ -708,6 +753,7 @@ mod tests {
             source_id,
             url: url("https://www.youtube.com/watch?v=dQw4w9WgXcQ"),
             published_at: at("2026-03-01T20:00:00+09:00"),
+            scheduled_start_at: None,
             state,
             state_since: at("2026-03-01T22:30:00+09:00"),
             content: Content::Media {
@@ -722,6 +768,7 @@ mod tests {
             source_id,
             url: url("https://x.com/jack/status/20"),
             published_at: at("2026-03-01T12:00:00+09:00"),
+            scheduled_start_at: None,
             state: State::Kept,
             state_since: at("2026-03-01T12:01:00+09:00"),
             content: Content::Post {
@@ -947,7 +994,8 @@ mod tests {
                 enabled: true,
                 created_at: at("2026-02-01T00:00:00+09:00"),
                 hold_days: None,
-                discover_interval_minutes: NonZeroU32::new(5).unwrap(),
+                priority: NonZeroU32::new(1).unwrap(),
+                monitoring: Monitoring::Continuous,
             })
             .await;
 
@@ -988,7 +1036,8 @@ mod tests {
                 enabled: true,
                 created_at: at("2026-01-01T00:00:00+09:00"),
                 hold_days: None,
-                discover_interval_minutes: NonZeroU32::new(15).unwrap(),
+                priority: NonZeroU32::new(1).unwrap(),
+                monitoring: Monitoring::Continuous,
             })
             .await;
 
@@ -1001,7 +1050,8 @@ mod tests {
         let source = store.source(source_id).await.unwrap().unwrap();
 
         assert_eq!(source.hold_days, NonZeroU32::new(7));
-        assert_eq!(source.discover_interval_minutes.get(), 15);
+        assert_eq!(source.priority.get(), 1);
+        assert_eq!(source.monitoring, Monitoring::Continuous);
         assert!(source.enabled);
         assert_eq!(source.hold_policy(), crate::state::HoldPolicy::Hold);
     }
@@ -1058,6 +1108,15 @@ mod tests {
                     e,
                     RowError::BadTimestamp {
                         column: "published_at",
+                        ..
+                    }
+                )
+            }),
+            ("UPDATE item SET scheduled_start_at = 'あした'", |e| {
+                matches!(
+                    e,
+                    RowError::BadTimestamp {
+                        column: "scheduled_start_at",
                         ..
                     }
                 )
@@ -1127,6 +1186,90 @@ mod tests {
             Err(StoreError::Migrate(sqlx::migrate::MigrateError::VersionMissing(999))) => {}
             other => panic!("降格を止めなかった: {other:?}"),
         }
+    }
+
+    /// 監視の期間が2列を往復すること（#1）。
+    #[tokio::test]
+    async fn round_trips_a_monitoring_period() {
+        let store = Store::open_in_memory().await.unwrap();
+        let person = store.add_person("○○").await.unwrap();
+        let from = at("2026-09-01T00:00:00+09:00");
+        let until = at("2026-09-08T00:00:00+09:00");
+
+        let id = store
+            .add_source(&NewSource {
+                person_id: person,
+                url: url::normalize_source("https://x.com/i/user/12").unwrap(),
+                enabled: true,
+                created_at: at("2026-01-01T00:00:00+09:00"),
+                hold_days: None,
+                priority: NonZeroU32::new(3).unwrap(),
+                monitoring: Monitoring::new(Some(from), Some(until)).unwrap(),
+            })
+            .await
+            .unwrap();
+
+        let source = store.source(id).await.unwrap().unwrap();
+        assert_eq!(source.priority.get(), 3);
+        assert_eq!(source.monitoring, Monitoring::Period { from, until });
+    }
+
+    /// 片方だけ埋まった行は、意味が決まっていないので読み出しが撥ねる。
+    ///
+    /// DB は2列に分かれているが、写した先の [`Monitoring`] は「両方空」か
+    /// 「両方埋まっている」しか持てない。その差をここで受け止める。
+    #[tokio::test]
+    async fn refuses_half_of_a_monitoring_period() {
+        for corruption in [
+            "UPDATE source SET monitor_from = '2026-09-01T00:00:00+09:00'",
+            "UPDATE source SET monitor_until = '2026-09-01T00:00:00+09:00'",
+        ] {
+            let (store, id) = seeded().await;
+            sqlx::query(corruption).execute(store.pool()).await.unwrap();
+
+            match store.source(id).await {
+                Err(StoreError::Row(RowError::BadMonitoring {
+                    source: MonitoringError::HalfOpen,
+                    ..
+                })) => {}
+                other => panic!("{corruption} が通ってしまった: {other:?}"),
+            }
+        }
+    }
+
+    /// 終わりが先に来る期間も撥ねる。
+    #[tokio::test]
+    async fn refuses_a_monitoring_period_that_ends_before_it_starts() {
+        let (store, id) = seeded().await;
+        sqlx::query(
+            "UPDATE source SET monitor_from = '2026-09-08T00:00:00+09:00', \
+             monitor_until = '2026-09-01T00:00:00+09:00'",
+        )
+        .execute(store.pool())
+        .await
+        .unwrap();
+
+        assert!(matches!(
+            store.source(id).await,
+            Err(StoreError::Row(RowError::BadMonitoring {
+                source: MonitoringError::NotOrdered,
+                ..
+            }))
+        ));
+    }
+
+    /// 配信の開始予定時刻が往復すること（#1）。
+    #[tokio::test]
+    async fn round_trips_a_scheduled_start() {
+        let (store, source) = seeded().await;
+        let scheduled = at("2026-09-03T20:00:00+09:00");
+
+        let mut new = media_item(source, State::Waiting);
+        new.scheduled_start_at = Some(scheduled);
+        let id = store.add_item(&new).await.unwrap();
+
+        let item = store.item(id).await.unwrap().unwrap();
+        assert_eq!(item.scheduled_start_at, Some(scheduled));
     }
 
     #[tokio::test]

@@ -62,7 +62,8 @@ pub struct Storage {
 pub struct Check {
     /// `holding` の項目をまとめて確認する間隔。
     ///
-    /// 検知（`Source.discover_interval_minutes`）とは別の概念なので、こちらは共通設定（#1）。
+    /// 検知（`Source.priority` と #13 の予算）とは別の概念なので、こちらは共通設定（#1）。
+    /// ディスクが逼迫したら詰める（#7 Phase 4）。
     pub interval_hours: NonZeroU32,
 }
 

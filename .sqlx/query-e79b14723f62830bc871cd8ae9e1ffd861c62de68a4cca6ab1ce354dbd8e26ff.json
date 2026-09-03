@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id AS \"id!\", person_id, url, enabled AS \"enabled: bool\", created_at, hold_days,\n                      discover_interval_minutes\n               FROM source WHERE id = ?",
+  "query": "SELECT id AS \"id!\", person_id, url, enabled AS \"enabled: bool\", created_at,\n                      priority, hold_days, monitor_from, monitor_until\n               FROM source WHERE id = ?",
   "describe": {
     "columns": [
       {
@@ -59,8 +59,19 @@
         }
       },
       {
-        "name": "hold_days",
+        "name": "priority",
         "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "source",
+            "name": "priority"
+          }
+        }
+      },
+      {
+        "name": "hold_days",
+        "ordinal": 6,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -70,13 +81,24 @@
         }
       },
       {
-        "name": "discover_interval_minutes",
-        "ordinal": 6,
-        "type_info": "Integer",
+        "name": "monitor_from",
+        "ordinal": 7,
+        "type_info": "Text",
         "origin": {
           "Table": {
             "table": "source",
-            "name": "discover_interval_minutes"
+            "name": "monitor_from"
+          }
+        }
+      },
+      {
+        "name": "monitor_until",
+        "ordinal": 8,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "source",
+            "name": "monitor_until"
           }
         }
       }
@@ -90,9 +112,11 @@
       false,
       false,
       false,
+      false,
       true,
-      false
+      true,
+      true
     ]
   },
-  "hash": "e6019f0520f8172a8ba364a67b048fffb53e8be146780895dd371d283d9cbd65"
+  "hash": "e79b14723f62830bc871cd8ae9e1ffd861c62de68a4cca6ab1ce354dbd8e26ff"
 }

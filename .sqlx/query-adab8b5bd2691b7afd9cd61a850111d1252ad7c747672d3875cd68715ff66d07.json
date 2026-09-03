@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id AS \"id!\", source_id, url, content_type, published_at, state,\n                      state_since, title, body, in_reply_to_url, quoted_url, release_reference\n               FROM item WHERE url = ?",
+  "query": "SELECT id AS \"id!\", source_id, url, content_type, published_at,\n                      scheduled_start_at, state, state_since, title, body, in_reply_to_url,\n                      quoted_url, release_reference\n               FROM item WHERE state = ? ORDER BY id",
   "describe": {
     "columns": [
       {
@@ -59,8 +59,19 @@
         }
       },
       {
-        "name": "state",
+        "name": "scheduled_start_at",
         "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "item",
+            "name": "scheduled_start_at"
+          }
+        }
+      },
+      {
+        "name": "state",
+        "ordinal": 6,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -71,7 +82,7 @@
       },
       {
         "name": "state_since",
-        "ordinal": 6,
+        "ordinal": 7,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -82,7 +93,7 @@
       },
       {
         "name": "title",
-        "ordinal": 7,
+        "ordinal": 8,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -93,7 +104,7 @@
       },
       {
         "name": "body",
-        "ordinal": 8,
+        "ordinal": 9,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -104,7 +115,7 @@
       },
       {
         "name": "in_reply_to_url",
-        "ordinal": 9,
+        "ordinal": 10,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -115,7 +126,7 @@
       },
       {
         "name": "quoted_url",
-        "ordinal": 10,
+        "ordinal": 11,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -126,7 +137,7 @@
       },
       {
         "name": "release_reference",
-        "ordinal": 11,
+        "ordinal": 12,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -145,6 +156,7 @@
       false,
       false,
       false,
+      true,
       false,
       false,
       true,
@@ -154,5 +166,5 @@
       true
     ]
   },
-  "hash": "436571582118d332b5652ecbcba5cbfaaa4b5e8ba8cb7d2bca609169887e7e07"
+  "hash": "adab8b5bd2691b7afd9cd61a850111d1252ad7c747672d3875cd68715ff66d07"
 }

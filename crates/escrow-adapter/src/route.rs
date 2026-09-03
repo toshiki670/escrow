@@ -121,7 +121,7 @@ impl Discover for Discoverer<'_> {
 mod tests {
     use super::*;
     use escrow_core::config::Browser;
-    use escrow_core::source::{PersonId, SourceId};
+    use escrow_core::source::{Monitoring, PersonId, SourceId};
     use std::num::NonZeroU32;
 
     fn adapters() -> Adapters {
@@ -139,7 +139,8 @@ mod tests {
             enabled: true,
             created_at: Timestamp::parse("2026-01-01T00:00:00+09:00").unwrap(),
             hold_days: None,
-            discover_interval_minutes: NonZeroU32::new(15).unwrap(),
+            priority: NonZeroU32::new(1).unwrap(),
+            monitoring: Monitoring::Continuous,
         }
     }
 
