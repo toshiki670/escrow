@@ -10,4 +10,3 @@ pub mod adapter;
 pub mod config;
 pub mod handover;
 pub mod pipeline;
-pub mod store;

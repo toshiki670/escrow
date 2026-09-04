@@ -3,9 +3,11 @@
 #
 # 既に DATABASE_URL が環境にあればそちらが優先される（force を付けていないため）。
 #
-# クローン直後の一度だけ、DB の実体を作る:
+# クローン直後の一度だけ、DB の実体を作る。移行に**投影は入らない**ので、
+# projections/item.sql を別に流す（#15）:
 #   DATABASE_URL=sqlite://target/escrow-dev.db \
-#     cargo sqlx database setup --source crates/escrow-core/migrations
+#     cargo sqlx database setup --source crates/escrow-ledger/migrations
+#   sqlite3 target/escrow-dev.db < crates/escrow-ledger/projections/item.sql
 #
 # SQL を変えたら .sqlx/ を取り直す:
 #   DATABASE_URL=sqlite://target/escrow-dev.db cargo sqlx prepare --workspace

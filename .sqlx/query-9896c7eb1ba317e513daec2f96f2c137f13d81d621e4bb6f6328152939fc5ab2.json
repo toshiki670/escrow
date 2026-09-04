@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id AS \"id!\", source_id, url, content_type, published_at,\n                      scheduled_start_at, state, state_since, title, body, in_reply_to_url,\n                      quoted_url, release_reference\n               FROM item WHERE url = ?",
+  "query": "SELECT i.id AS \"id!\", i.source_id, i.url, i.content_type, i.published_at,\n                      i.scheduled_start_at, i.hold_until, i.state, i.state_since,\n                      i.title, i.body, i.in_reply_to_url, i.quoted_url, i.release_reference,\n                      (SELECT MAX(e.seq) FROM item_event e WHERE e.item_id = i.id) AS \"seq!: i64\"\n               FROM item i WHERE i.url = ?",
   "describe": {
     "columns": [
       {
@@ -70,8 +70,19 @@
         }
       },
       {
-        "name": "state",
+        "name": "hold_until",
         "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "item",
+            "name": "hold_until"
+          }
+        }
+      },
+      {
+        "name": "state",
+        "ordinal": 7,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -82,7 +93,7 @@
       },
       {
         "name": "state_since",
-        "ordinal": 7,
+        "ordinal": 8,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -93,7 +104,7 @@
       },
       {
         "name": "title",
-        "ordinal": 8,
+        "ordinal": 9,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -104,7 +115,7 @@
       },
       {
         "name": "body",
-        "ordinal": 9,
+        "ordinal": 10,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -115,7 +126,7 @@
       },
       {
         "name": "in_reply_to_url",
-        "ordinal": 10,
+        "ordinal": 11,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -126,7 +137,7 @@
       },
       {
         "name": "quoted_url",
-        "ordinal": 11,
+        "ordinal": 12,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -137,7 +148,7 @@
       },
       {
         "name": "release_reference",
-        "ordinal": 12,
+        "ordinal": 13,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -145,6 +156,12 @@
             "name": "release_reference"
           }
         }
+      },
+      {
+        "name": "seq!: i64",
+        "ordinal": 14,
+        "type_info": "Integer",
+        "origin": "Expression"
       }
     ],
     "parameters": {
@@ -157,8 +174,10 @@
       false,
       false,
       true,
+      true,
       false,
       false,
+      true,
       true,
       true,
       true,
@@ -166,5 +185,5 @@
       true
     ]
   },
-  "hash": "ec8947e67c3d1f45f515fb690ee5c340f9fa175c8a9c3a31c40887c5f58a6fe5"
+  "hash": "9896c7eb1ba317e513daec2f96f2c137f13d81d621e4bb6f6328152939fc5ab2"
 }

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO item (id, source_id, url, content_type, published_at, state, state_since, scheduled_start_at, hold_until, title, body, in_reply_to_url, quoted_url, release_reference) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 14
+    },
+    "nullable": []
+  },
+  "hash": "4572bfc10af07ce4878f8b9c60546bbc93c28f7489931f58f478146be2383ee4"
+}

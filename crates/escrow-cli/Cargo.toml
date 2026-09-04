@@ -13,6 +13,8 @@ name = "escrow"
 path = "src/main.rs"
 
 [dependencies]
+escrow-domain.workspace = true
+escrow-ledger.workspace = true
 escrow-core.workspace = true
 escrow-scheduler.workspace = true
 anyhow.workspace = true

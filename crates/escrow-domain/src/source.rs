@@ -6,7 +6,7 @@ use thiserror::Error;
 
 use crate::content::ContentType;
 use crate::id::id_type;
-use crate::state::HoldPolicy;
+use crate::state::Hold;
 use crate::timestamp::Timestamp;
 use crate::url::NormalizedUrl;
 
@@ -100,15 +100,30 @@ impl Monitoring {
     }
 }
 
+/// 預かる日数が大きすぎて、期限が日時にならないとき。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+#[error("{days} 日先は暦の外")]
+pub struct HoldTooFar {
+    pub days: NonZeroU32,
+}
+
 impl Source {
-    /// 取得が終わった項目が `holding` を通るかどうか。
+    /// 取得が終わった時点で確定する、預かりの期限（#1）。
     ///
-    /// `hold_days` が空なら捨てないので、そのまま `kept` になる（#1）。
-    pub const fn hold_policy(&self) -> HoldPolicy {
-        match self.hold_days {
-            Some(_) => HoldPolicy::Hold,
-            None => HoldPolicy::NoHold,
-        }
+    /// `hold_days` は「これから取得するものを何日預かるか」の**既定値**で、ここで
+    /// 1つの日時になったあとは `Item` が持つ。後から日数を変えても、進行中の
+    /// 預かりは動かない。
+    ///
+    /// 空を返さないのは、`Hold::None`（期限なし＝捨てない）と、日数が表せる範囲を
+    /// 超えたこととが**意味の反転した2つ**だから。片方をもう片方に化けさせない。
+    pub fn hold_from(&self, acquired_at: Timestamp) -> Result<Hold, HoldTooFar> {
+        let Some(days) = self.hold_days else {
+            return Ok(Hold::None);
+        };
+        acquired_at
+            .plus_days(days)
+            .map(Hold::Until)
+            .ok_or(HoldTooFar { days })
     }
 }
 
@@ -204,11 +219,26 @@ mod tests {
         );
     }
 
-    /// #1 の「`hold_days` が空なら捨てない」。
+    /// #1 の「`hold_days` が空なら捨てない」と、期限が取得時に確定すること。
     #[test]
-    fn hold_policy_follows_hold_days() {
-        assert_eq!(source(Some(7)).hold_policy(), HoldPolicy::Hold);
-        assert_eq!(source(None).hold_policy(), HoldPolicy::NoHold);
+    fn the_deadline_is_fixed_at_the_moment_of_acquisition() {
+        let at = Timestamp::parse("2026-03-01T22:30:00+09:00").unwrap();
+
+        assert_eq!(
+            source(Some(7)).hold_from(at).unwrap(),
+            Hold::Until(Timestamp::parse("2026-03-08T22:30:00+09:00").unwrap()),
+        );
+        assert_eq!(source(None).hold_from(at).unwrap(), Hold::None);
+    }
+
+    /// 期限なしと、暦の外は別のこと。握りつぶすと「捨てない」に化ける。
+    #[test]
+    fn a_span_outside_the_calendar_is_not_the_same_as_no_deadline() {
+        let at = Timestamp::parse("2026-03-01T22:30:00+09:00").unwrap();
+        let mut absurd = source(Some(7));
+        absurd.hold_days = Some(NonZeroU32::MAX);
+
+        assert!(absurd.hold_from(at).is_err());
     }
 
     #[test]

@@ -507,6 +507,8 @@ dependencies = [
  "anyhow",
  "clap",
  "escrow-core",
+ "escrow-domain",
+ "escrow-ledger",
  "escrow-scheduler",
  "serde_json",
  "tokio",
@@ -518,6 +520,7 @@ version = "0.1.0"
 dependencies = [
  "directories",
  "escrow-domain",
+ "escrow-ledger",
  "serde",
  "serde_json",
  "sqlx",
@@ -544,6 +547,17 @@ name = "escrow-gui"
 version = "0.1.0"
 dependencies = [
  "escrow-core",
+]
+
+[[package]]
+name = "escrow-ledger"
+version = "0.1.0"
+dependencies = [
+ "escrow-domain",
+ "sqlx",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
 ]
 
 [[package]]

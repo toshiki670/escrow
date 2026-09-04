@@ -2,7 +2,9 @@
 
 use std::fmt;
 
-use chrono::{DateTime, FixedOffset, Local, SecondsFormat, SubsecRound};
+use std::num::NonZeroU32;
+
+use chrono::{DateTime, Days, FixedOffset, Local, SecondsFormat, SubsecRound};
 use thiserror::Error;
 
 /// 時差を保つ日時。秒までで丸める。
@@ -38,6 +40,16 @@ impl Timestamp {
     pub const fn inner(self) -> DateTime<FixedOffset> {
         self.0
     }
+
+    /// この日時から日数を進める。暦を跨ぐので、加算は `chrono` に任せる。
+    ///
+    /// 表せる範囲を超えたら空。`u32` の日数は 1,100 万年ぶんまで書けるので、
+    /// 起こりうる。
+    pub fn plus_days(self, days: NonZeroU32) -> Option<Self> {
+        self.0
+            .checked_add_days(Days::new(u64::from(days.get())))
+            .map(Self::from)
+    }
 }
 
 impl From<DateTime<FixedOffset>> for Timestamp {
@@ -55,6 +67,26 @@ impl fmt::Display for Timestamp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn adds_days_across_the_calendar() {
+        let at = Timestamp::parse("2026-02-27T22:10:00+09:00").unwrap();
+        let days = |n: u32| at.plus_days(NonZeroU32::new(n).unwrap()).unwrap();
+
+        // 2026 は閏年ではないので、2/27 の2日後は 3/1。
+        assert_eq!(
+            days(2),
+            Timestamp::parse("2026-03-01T22:10:00+09:00").unwrap()
+        );
+        // 時差は保たれる。
+        assert_eq!(days(30).to_text(), "2026-03-29T22:10:00+09:00");
+    }
+
+    #[test]
+    fn refuses_a_span_that_leaves_the_calendar() {
+        let at = Timestamp::parse("2026-02-27T22:10:00+09:00").unwrap();
+        assert!(at.plus_days(NonZeroU32::MAX).is_none());
+    }
 
     #[test]
     fn round_trips_through_text() {

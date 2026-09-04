@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO item_event (item_id, source_id, seq, kind, occurred_at, transcript_needed, hold_until, release_reference, failure_reason) SELECT ?, i.source_id, ?, ?, ?, ?, ?, ?, ? FROM item i WHERE i.id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 9
+    },
+    "nullable": []
+  },
+  "hash": "cf2d2b541d2d0c8c76b73fc82650d587e899d44b7a1d27ce7530fffe53988f50"
+}

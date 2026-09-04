@@ -1,33 +1,31 @@
 //! 見つけた項目を、引き渡せる状態まで運ぶ。
 //!
-//! 状態を決めるのは [`crate::state::next`]、書くのは [`Store::apply`] で、ここは
-//! **どの事象をいつ起こすか**だけを持つ。外の世界（アダプタ）と台帳（store）を
-//! 繋ぐ場所。
+//! 状態を決めるのは [`crate::state::next`]、書くのは [`Ledger::append`] で、ここは
+//! **どの事象をいつ起こすか**だけを持つ。外の世界（アダプタ）と台帳を繋ぐ場所。
 //!
-//! 巡回・待ち行列・リトライ・空き容量の門は Phase 4（#7）。ここは1件を1回運ぶだけ。
+//! 巡回・待ち行列・リトライ・空き容量の門は Phase 6（#7）。ここは1件を1回運ぶだけ。
 
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
+use escrow_ledger::{Ledger, LedgerError, Projected};
+
 use crate::adapter::{Acquire, AdapterError, Transcribe};
 use crate::asset::{self, Asset, AssetKind};
 use crate::item::{Item, ItemId};
-use crate::state::{Event, HoldPolicy, State, TranscriptNeed};
-use crate::store::{Applied, Store, StoreError};
+use crate::state::{Event, Hold, State, TranscriptNeed};
 use crate::timestamp::Timestamp;
 
 #[derive(Debug, Error)]
 pub enum PipelineError {
     #[error(transparent)]
-    Store(#[from] StoreError),
+    Ledger(#[from] LedgerError),
     #[error(transparent)]
     Adapter(#[from] AdapterError),
     #[error("項目 {0} が無い")]
     NoSuchItem(ItemId),
-    #[error("読んだときから状態が動いている。読み直してやり直す")]
-    Superseded,
     #[error("手元の実体を扱えない: {path}")]
     Io {
         path: PathBuf,
@@ -37,16 +35,16 @@ pub enum PipelineError {
 }
 
 pub struct Pipeline<'a, A, T> {
-    store: &'a Store,
+    ledger: &'a Ledger,
     media_dir: &'a Path,
     acquire: &'a A,
     transcribe: &'a T,
 }
 
 impl<'a, A: Acquire, T: Transcribe> Pipeline<'a, A, T> {
-    pub fn new(store: &'a Store, media_dir: &'a Path, acquire: &'a A, transcribe: &'a T) -> Self {
+    pub fn new(ledger: &'a Ledger, media_dir: &'a Path, acquire: &'a A, transcribe: &'a T) -> Self {
         Self {
-            store,
+            ledger,
             media_dir,
             acquire,
             transcribe,
@@ -57,45 +55,46 @@ impl<'a, A: Acquire, T: Transcribe> Pipeline<'a, A, T> {
     ///
     /// 途中の状態は都度 DB へ書く。落ちたときにどこまで進んだかが台帳に残り、
     /// #6 のダッシュボードが「いま動いているもの」を読める。
-    pub async fn run(&self, id: ItemId, hold: HoldPolicy) -> Result<State, PipelineError> {
-        let item = self.load(id).await?;
+    pub async fn run(&self, id: ItemId, hold: Hold) -> Result<State, PipelineError> {
+        let current = self.load(id).await?;
 
-        let item = self.step(&item, &Event::AcquisitionStarted).await?;
-        let assets = self.download(&item).await?;
+        let current = self.step(current, &Event::AcquisitionStarted).await?;
+        let assets = self.download(&current.item).await?;
 
         let transcript = transcript_need(&assets);
-        let item = self
-            .step(&item, &Event::Acquired { transcript, hold })
+        let current = self
+            .step(current, &Event::Acquired { transcript, hold })
             .await?;
 
-        let item = match transcript {
+        let current = match transcript {
             TranscriptNeed::Needed => {
-                self.write_transcripts(&item, &assets).await?;
-                self.step(&item, &Event::Transcribed { hold }).await?
+                self.write_transcripts(&current.item, &assets).await?;
+                // 期限は `Acquired` で確定していて、状態が運んでいる（#1）。
+                self.step(current, &Event::Transcribed).await?
             }
-            TranscriptNeed::NotNeeded => item,
+            TranscriptNeed::NotNeeded => current,
         };
 
-        Ok(item.state)
+        Ok(current.item.state)
     }
 
-    async fn load(&self, id: ItemId) -> Result<Item, PipelineError> {
-        self.store
+    async fn load(&self, id: ItemId) -> Result<Projected, PipelineError> {
+        self.ledger
             .item(id)
             .await?
             .ok_or(PipelineError::NoSuchItem(id))
     }
 
-    /// 事象を1つ適用し、書けた項目を読み直す。
-    async fn step(&self, item: &Item, event: &Event) -> Result<Item, PipelineError> {
-        match self
-            .store
-            .apply(item.id, &item.state, event, Timestamp::now())
-            .await?
-        {
-            Applied::Written(_) => self.load(item.id).await,
-            Applied::Superseded => Err(PipelineError::Superseded),
-        }
+    /// 事象を1つ追記し、書けた項目を読み直す。
+    ///
+    /// 読んだときの `seq` をそのまま渡すので、途中で誰かが動かしていれば
+    /// [`LedgerError::Superseded`] で落ちる（#15）。
+    async fn step(&self, current: Projected, event: &Event) -> Result<Projected, PipelineError> {
+        let id = current.item.id;
+        self.ledger
+            .append(id, current.seq, event, Timestamp::now())
+            .await?;
+        self.load(id).await
     }
 
     async fn download(&self, item: &Item) -> Result<Vec<Asset>, PipelineError> {
@@ -145,8 +144,10 @@ mod tests {
     use crate::content::{Content, ContentType, MediaType};
     use crate::source::Monitoring;
     use crate::source::SourceId;
-    use crate::store::{NewItem, NewSource};
+    use crate::state::MediaPresence;
     use crate::url::{self, NormalizedUrl};
+    use escrow_domain::item::Discovered;
+    use escrow_ledger::{NewSource, Seq};
     use std::sync::Mutex;
 
     /// 落ちるものを置く代わりの取得。アダプタの口だけを満たす。
@@ -209,9 +210,9 @@ mod tests {
         }
     }
 
-    async fn waiting_item(store: &Store) -> (SourceId, ItemId) {
-        let person = store.add_person("○○").await.unwrap();
-        let source = store
+    async fn waiting_item(ledger: &Ledger) -> (SourceId, ItemId) {
+        let person = ledger.add_person("○○").await.unwrap();
+        let source = ledger
             .add_source(&NewSource {
                 person_id: person,
                 url: url::normalize_source(
@@ -227,31 +228,37 @@ mod tests {
             .await
             .unwrap();
 
-        let id = store
-            .add_item(&NewItem {
-                source_id: source,
-                url: url::normalize_item("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
-                    .unwrap()
-                    .0,
-                published_at: Timestamp::parse("2026-03-01T20:00:00+09:00").unwrap(),
-                scheduled_start_at: None,
-                state: State::Waiting,
-                state_since: Timestamp::parse("2026-03-01T20:00:00+09:00").unwrap(),
-                content: Content::Media {
-                    media_type: MediaType::YoutubeVideo,
-                    title: "○○の雑談配信".to_owned(),
+        let id = ledger
+            .discover(
+                &Discovered {
+                    source_id: source,
+                    url: url::normalize_item("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+                        .unwrap()
+                        .0,
+                    published_at: Timestamp::parse("2026-03-01T20:00:00+09:00").unwrap(),
+                    scheduled_start_at: None,
+                    content: Content::Media {
+                        media_type: MediaType::YoutubeVideo,
+                        title: "○○の雑談配信".to_owned(),
+                    },
+                    media: MediaPresence::Present,
                 },
-            })
+                Timestamp::parse("2026-03-01T20:00:00+09:00").unwrap(),
+            )
             .await
             .unwrap();
         (source, id)
     }
 
+    fn deadline() -> Timestamp {
+        Timestamp::parse("2026-03-09T00:30:00+09:00").unwrap()
+    }
+
     /// #1 の図の経路そのもの。`hold_days` が無いので `holding` を飛ばす。
     #[tokio::test]
     async fn carries_a_waiting_item_to_kept() {
-        let store = Store::open_in_memory().await.unwrap();
-        let (_, id) = waiting_item(&store).await;
+        let ledger = Ledger::open_in_memory().await.unwrap();
+        let (_, id) = waiting_item(&ledger).await;
         let media = tempfile::tempdir().unwrap();
 
         let acquire = FakeAcquire {
@@ -262,26 +269,29 @@ mod tests {
             calls: Mutex::new(Vec::new()),
         };
 
-        let state = Pipeline::new(&store, media.path(), &acquire, &transcribe)
-            .run(id, HoldPolicy::NoHold)
+        let state = Pipeline::new(&ledger, media.path(), &acquire, &transcribe)
+            .run(id, Hold::None)
             .await
             .unwrap();
 
         assert_eq!(state, State::Kept);
         assert_eq!(*acquire.calls.lock().unwrap(), 1);
         assert_eq!(transcribe.calls.lock().unwrap().as_slice(), ["video.1.mp4"]);
-        assert_eq!(store.item(id).await.unwrap().unwrap().state, State::Kept);
+        assert_eq!(
+            ledger.item(id).await.unwrap().unwrap().item.state,
+            State::Kept
+        );
     }
 
     /// `hold_days` があれば `holding` を通る（#1）。
     #[tokio::test]
     async fn a_holding_source_stops_at_holding() {
-        let store = Store::open_in_memory().await.unwrap();
-        let (_, id) = waiting_item(&store).await;
+        let ledger = Ledger::open_in_memory().await.unwrap();
+        let (_, id) = waiting_item(&ledger).await;
         let media = tempfile::tempdir().unwrap();
 
         let state = Pipeline::new(
-            &store,
+            &ledger,
             media.path(),
             &FakeAcquire {
                 files: vec!["video.1.mp4"],
@@ -291,25 +301,25 @@ mod tests {
                 calls: Mutex::new(Vec::new()),
             },
         )
-        .run(id, HoldPolicy::Hold)
+        .run(id, Hold::Until(deadline()))
         .await
         .unwrap();
 
-        assert_eq!(state, State::Holding);
+        assert_eq!(state, State::Holding { until: deadline() });
     }
 
     /// 画像だけなら文字起こしを飛ばして `kept` へ（#1 のスイッチ表）。
     #[tokio::test]
     async fn images_alone_skip_transcription() {
-        let store = Store::open_in_memory().await.unwrap();
-        let (_, id) = waiting_item(&store).await;
+        let ledger = Ledger::open_in_memory().await.unwrap();
+        let (_, id) = waiting_item(&ledger).await;
         let media = tempfile::tempdir().unwrap();
 
         let transcribe = FakeTranscribe {
             calls: Mutex::new(Vec::new()),
         };
         let state = Pipeline::new(
-            &store,
+            &ledger,
             media.path(),
             &FakeAcquire {
                 files: vec!["image.1.jpg", "image.2.jpg"],
@@ -317,7 +327,7 @@ mod tests {
             },
             &transcribe,
         )
-        .run(id, HoldPolicy::NoHold)
+        .run(id, Hold::None)
         .await
         .unwrap();
 
@@ -328,15 +338,15 @@ mod tests {
     /// 断片ごとに1本（#1）。
     #[tokio::test]
     async fn each_fragment_gets_its_own_transcript() {
-        let store = Store::open_in_memory().await.unwrap();
-        let (_, id) = waiting_item(&store).await;
+        let ledger = Ledger::open_in_memory().await.unwrap();
+        let (_, id) = waiting_item(&ledger).await;
         let media = tempfile::tempdir().unwrap();
 
         let transcribe = FakeTranscribe {
             calls: Mutex::new(Vec::new()),
         };
         Pipeline::new(
-            &store,
+            &ledger,
             media.path(),
             &FakeAcquire {
                 files: vec!["video.1.mp4", "video.2.mp4", "video.3.mp4"],
@@ -344,7 +354,7 @@ mod tests {
             },
             &transcribe,
         )
-        .run(id, HoldPolicy::NoHold)
+        .run(id, Hold::None)
         .await
         .unwrap();
 
@@ -367,24 +377,24 @@ mod tests {
     /// リトライと `error` への遷移は Phase 4 の担当（#7）。
     #[tokio::test]
     async fn a_failed_download_leaves_the_item_where_it_stopped() {
-        let store = Store::open_in_memory().await.unwrap();
-        let (_, id) = waiting_item(&store).await;
+        let ledger = Ledger::open_in_memory().await.unwrap();
+        let (_, id) = waiting_item(&ledger).await;
         let media = tempfile::tempdir().unwrap();
 
         let result = Pipeline::new(
-            &store,
+            &ledger,
             media.path(),
             &Failing,
             &FakeTranscribe {
                 calls: Mutex::new(Vec::new()),
             },
         )
-        .run(id, HoldPolicy::NoHold)
+        .run(id, Hold::None)
         .await;
 
         assert!(matches!(result, Err(PipelineError::Adapter(_))));
         assert_eq!(
-            store.item(id).await.unwrap().unwrap().state,
+            ledger.item(id).await.unwrap().unwrap().item.state,
             State::Acquiring
         );
     }
@@ -392,16 +402,16 @@ mod tests {
     /// 図に無い出発点からは動かない。
     #[tokio::test]
     async fn only_a_waiting_item_can_start() {
-        let store = Store::open_in_memory().await.unwrap();
-        let (_, id) = waiting_item(&store).await;
+        let ledger = Ledger::open_in_memory().await.unwrap();
+        let (_, id) = waiting_item(&ledger).await;
         let media = tempfile::tempdir().unwrap();
-        store
-            .apply(id, &State::Waiting, &Event::Deleted, Timestamp::now())
+        ledger
+            .append(id, Seq::FIRST, &Event::Deleted, Timestamp::now())
             .await
             .unwrap();
 
         let result = Pipeline::new(
-            &store,
+            &ledger,
             media.path(),
             &FakeAcquire {
                 files: vec!["video.1.mp4"],
@@ -411,12 +421,12 @@ mod tests {
                 calls: Mutex::new(Vec::new()),
             },
         )
-        .run(id, HoldPolicy::NoHold)
+        .run(id, Hold::None)
         .await;
 
         assert!(matches!(
             result,
-            Err(PipelineError::Store(StoreError::IllegalTransition(_)))
+            Err(PipelineError::Ledger(LedgerError::IllegalTransition(_)))
         ));
     }
 }

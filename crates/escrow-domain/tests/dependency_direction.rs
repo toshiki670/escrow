@@ -19,19 +19,38 @@ use std::path::{Path, PathBuf};
 /// 生えたら落ちる。
 const ALLOWED: &[(&str, &[&str])] = &[
     ("escrow-domain", &[]),
-    ("escrow-core", &["escrow-domain"]),
-    ("escrow-adapter", &["escrow-domain", "escrow-core"]),
+    ("escrow-ledger", &["escrow-domain"]),
+    ("escrow-core", &["escrow-domain", "escrow-ledger"]),
+    (
+        "escrow-adapter",
+        &["escrow-domain", "escrow-ledger", "escrow-core"],
+    ),
     (
         "escrow-scheduler",
-        &["escrow-domain", "escrow-core", "escrow-adapter"],
+        &[
+            "escrow-domain",
+            "escrow-ledger",
+            "escrow-core",
+            "escrow-adapter",
+        ],
     ),
     (
         "escrow-cli",
-        &["escrow-domain", "escrow-core", "escrow-scheduler"],
+        &[
+            "escrow-domain",
+            "escrow-ledger",
+            "escrow-core",
+            "escrow-scheduler",
+        ],
     ),
     (
         "escrow-gui",
-        &["escrow-domain", "escrow-core", "escrow-scheduler"],
+        &[
+            "escrow-domain",
+            "escrow-ledger",
+            "escrow-core",
+            "escrow-scheduler",
+        ],
     ),
 ];
 

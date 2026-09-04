@@ -8,22 +8,21 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use thiserror::Error;
 
+use escrow_ledger::{Ledger, LedgerError};
+
 use crate::asset::{self, AssetKind};
 use crate::item::{Item, ItemId};
 use crate::state::{Event, ReleaseReference, State, StateName};
-use crate::store::{Applied, Store, StoreError};
 use crate::timestamp::Timestamp;
 
 #[derive(Debug, Error)]
 pub enum HandoverError {
     #[error(transparent)]
-    Store(#[from] StoreError),
+    Ledger(#[from] LedgerError),
     #[error("項目 {0} が無い")]
     NoSuchItem(ItemId),
     #[error("項目 {id} は {state} なので引き渡せない")]
     NotReleasable { id: ItemId, state: StateName },
-    #[error("読んだときから状態が動いている。やり直す")]
-    Superseded,
     #[error("手元の実体を扱えない: {path}")]
     Io {
         path: PathBuf,
@@ -100,38 +99,37 @@ pub fn handover(item: &Item, media_dir: &Path) -> Result<Handover, HandoverError
 /// ある」という契約が破れる。DB を先にすれば、残るのは行と対応しない孤児ファイル
 /// だけで、これは掃除できる。
 pub async fn release(
-    store: &Store,
+    ledger: &Ledger,
     media_dir: &Path,
     id: ItemId,
     reference: Option<ReleaseReference>,
 ) -> Result<Handover, HandoverError> {
-    let item = store.item(id).await?.ok_or(HandoverError::NoSuchItem(id))?;
+    let projected = ledger
+        .item(id)
+        .await?
+        .ok_or(HandoverError::NoSuchItem(id))?;
 
     // #4 の「`holding` の項目も `list` に出るが、この場合 `release` は使えない」。
     // 遷移として弾かれるが、外へ返す理由をはっきりさせるためにここでも見る。
-    if item.state != State::Kept {
+    if projected.item.state != State::Kept {
         return Err(HandoverError::NotReleasable {
             id,
-            state: item.state.name(),
+            state: projected.item.state.name(),
         });
     }
 
     // 引き渡す中身は、消す前の姿で返す。受け取る側が何を持って行ったか分かる。
-    let handed = handover(&item, media_dir)?;
+    let handed = handover(&projected.item, media_dir)?;
 
-    let applied = store
-        .apply(
+    // 読んだときの番号をそのまま渡す。動いていれば追記が弾かれる（#15）。
+    ledger
+        .append(
             id,
-            &item.state,
+            projected.seq,
             &Event::Released { reference },
             Timestamp::now(),
         )
         .await?;
-
-    match applied {
-        Applied::Written(_) => {}
-        Applied::Superseded => return Err(HandoverError::Superseded),
-    }
 
     // ここから先で落ちても、残るのは孤児ファイルだけ。
     let dir = asset::item_dir(media_dir, id);
@@ -148,48 +146,89 @@ pub async fn release(
 mod tests {
     use super::*;
     use crate::content::{Content, MediaType};
-    use crate::source::Monitoring;
-    use crate::source::{PersonId, SourceId};
-    use crate::store::{NewItem, NewSource};
-    use crate::url;
+    use crate::source::{Monitoring, SourceId};
+    use crate::state::{Hold, MediaPresence, TranscriptNeed};
+    use escrow_domain::item::Discovered;
+    use escrow_ledger::{NewSource, Seq};
     use std::num::NonZeroU32;
 
-    async fn seeded() -> (Store, SourceId) {
-        let store = Store::open_in_memory().await.unwrap();
-        let person: PersonId = store.add_person("○○").await.unwrap();
-        let source = store
+    fn at(text: &str) -> Timestamp {
+        Timestamp::parse(text).expect(text)
+    }
+
+    async fn seeded() -> (Ledger, SourceId) {
+        let ledger = Ledger::open_in_memory().await.unwrap();
+        let person = ledger.add_person("○○").await.unwrap();
+        let source = ledger
             .add_source(&NewSource {
                 person_id: person,
-                url: url::normalize_source(
+                url: crate::url::normalize_source(
                     "https://www.youtube.com/channel/UCBR8-60-B28hp2BmDPdntcQ",
                 )
                 .unwrap(),
                 enabled: true,
-                created_at: Timestamp::parse("2026-01-01T00:00:00+09:00").unwrap(),
+                created_at: at("2026-01-01T00:00:00+09:00"),
                 hold_days: None,
-                priority: NonZeroU32::new(1).unwrap(),
+                priority: NonZeroU32::MIN,
                 monitoring: Monitoring::Continuous,
             })
             .await
             .unwrap();
-        (store, source)
+        (ledger, source)
     }
 
-    fn kept_item(source_id: SourceId) -> NewItem {
-        NewItem {
+    fn a_live(source_id: SourceId) -> Discovered {
+        Discovered {
             source_id,
-            url: url::normalize_item("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+            url: crate::url::normalize_item("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
                 .unwrap()
                 .0,
-            published_at: Timestamp::parse("2026-03-01T20:00:00+09:00").unwrap(),
+            published_at: at("2026-03-01T20:00:00+09:00"),
             scheduled_start_at: None,
-            state: State::Kept,
-            state_since: Timestamp::parse("2026-03-01T22:30:00+09:00").unwrap(),
             content: Content::Media {
                 media_type: MediaType::YoutubeLive,
                 title: "○○の雑談配信".to_owned(),
             },
+            media: MediaPresence::Present,
         }
+    }
+
+    /// 取得を1周させて `kept` か `holding` まで運ぶ。行き先を決めるのは期限だけ。
+    async fn carried_to(ledger: &Ledger, source: SourceId, hold: Hold) -> ItemId {
+        let id = ledger
+            .discover(&a_live(source), at("2026-03-01T20:05:00+09:00"))
+            .await
+            .unwrap();
+        let seq = ledger
+            .append(
+                id,
+                Seq::FIRST,
+                &Event::AcquisitionStarted,
+                at("2026-03-01T20:10:00+09:00"),
+            )
+            .await
+            .unwrap();
+        ledger
+            .append(
+                id,
+                seq,
+                &Event::Acquired {
+                    transcript: TranscriptNeed::NotNeeded,
+                    hold,
+                },
+                at("2026-03-02T00:30:00+09:00"),
+            )
+            .await
+            .unwrap();
+        id
+    }
+
+    async fn kept(ledger: &Ledger, source: SourceId) -> ItemId {
+        carried_to(ledger, source, Hold::None).await
+    }
+
+    async fn item_of(ledger: &Ledger, id: ItemId) -> Item {
+        ledger.item(id).await.unwrap().unwrap().item
     }
 
     fn put(dir: &Path, name: &str) {
@@ -199,12 +238,11 @@ mod tests {
 
     #[tokio::test]
     async fn the_handover_has_exactly_the_nine_fields() {
-        let (store, source) = seeded().await;
-        let id = store.add_item(&kept_item(source)).await.unwrap();
+        let (ledger, source) = seeded().await;
+        let id = kept(&ledger, source).await;
         let media = tempfile::tempdir().unwrap();
 
-        let item = store.item(id).await.unwrap().unwrap();
-        let handed = handover(&item, media.path()).unwrap();
+        let handed = handover(&item_of(&ledger, id).await, media.path()).unwrap();
         let json: serde_json::Value = serde_json::to_value(&handed).unwrap();
 
         let mut keys: Vec<_> = json.as_object().unwrap().keys().cloned().collect();
@@ -230,35 +268,44 @@ mod tests {
     /// `Media` は `body` が `null`、`Post` は `title` が `null`（#4）。
     #[tokio::test]
     async fn the_shape_decides_which_field_is_null() {
-        let (store, source) = seeded().await;
+        let (ledger, source) = seeded().await;
         let media = tempfile::tempdir().unwrap();
 
-        let id = store.add_item(&kept_item(source)).await.unwrap();
-        let item = store.item(id).await.unwrap().unwrap();
-        let handed = handover(&item, media.path()).unwrap();
+        let id = kept(&ledger, source).await;
+        let handed = handover(&item_of(&ledger, id).await, media.path()).unwrap();
         assert_eq!(handed.title.as_deref(), Some("○○の雑談配信"));
         assert_eq!(handed.body, None);
 
-        let mut post = kept_item(source);
-        post.url = url::normalize_item("https://x.com/jack/status/20")
-            .unwrap()
-            .0;
-        post.content = Content::Post {
-            body: "明日の配信は21時から。".to_owned(),
-            in_reply_to: None,
-            quoted: None,
-        };
-        let id = store.add_item(&post).await.unwrap();
-        let item = store.item(id).await.unwrap().unwrap();
-        let handed = handover(&item, media.path()).unwrap();
+        // 本文だけの投稿は、取るものが無いのでそのまま kept から始まる（#1）。
+        let id = ledger
+            .discover(
+                &Discovered {
+                    source_id: source,
+                    url: crate::url::normalize_item("https://x.com/jack/status/20")
+                        .unwrap()
+                        .0,
+                    published_at: at("2026-03-01T12:00:00+09:00"),
+                    scheduled_start_at: None,
+                    content: Content::Post {
+                        body: "明日の配信は21時から。".to_owned(),
+                        in_reply_to: None,
+                        quoted: None,
+                    },
+                    media: MediaPresence::Absent,
+                },
+                at("2026-03-01T12:01:00+09:00"),
+            )
+            .await
+            .unwrap();
+        let handed = handover(&item_of(&ledger, id).await, media.path()).unwrap();
         assert_eq!(handed.title, None);
         assert_eq!(handed.body.as_deref(), Some("明日の配信は21時から。"));
     }
 
     #[tokio::test]
     async fn paths_are_split_by_what_they_are() {
-        let (store, source) = seeded().await;
-        let id = store.add_item(&kept_item(source)).await.unwrap();
+        let (ledger, source) = seeded().await;
+        let id = kept(&ledger, source).await;
         let media = tempfile::tempdir().unwrap();
         let dir = asset::item_dir(media.path(), id);
 
@@ -271,8 +318,7 @@ mod tests {
             put(&dir, name);
         }
 
-        let item = store.item(id).await.unwrap().unwrap();
-        let handed = handover(&item, media.path()).unwrap();
+        let handed = handover(&item_of(&ledger, id).await, media.path()).unwrap();
 
         assert_eq!(handed.media_paths.len(), 3, "動画2本と画像1枚");
         assert_eq!(handed.transcript_paths.len(), 1);
@@ -281,15 +327,15 @@ mod tests {
 
     #[tokio::test]
     async fn releasing_updates_the_ledger_then_removes_the_files() {
-        let (store, source) = seeded().await;
-        let id = store.add_item(&kept_item(source)).await.unwrap();
+        let (ledger, source) = seeded().await;
+        let id = kept(&ledger, source).await;
         let media = tempfile::tempdir().unwrap();
         let dir = asset::item_dir(media.path(), id);
         put(&dir, "video.1.mp4");
         put(&dir, "transcript.1.vtt");
 
         let handed = release(
-            &store,
+            &ledger,
             media.path(),
             id,
             Some(ReleaseReference::new("Attachments/2026-03-01 ○○.mp4")),
@@ -302,9 +348,8 @@ mod tests {
         assert_eq!(handed.transcript_paths.len(), 1);
 
         // 行は残り、参照が入る。
-        let item = store.item(id).await.unwrap().unwrap();
         assert_eq!(
-            item.state,
+            item_of(&ledger, id).await.state,
             State::Released {
                 reference: Some(ReleaseReference::new("Attachments/2026-03-01 ○○.mp4")),
             }
@@ -316,16 +361,19 @@ mod tests {
     /// #4 の決め事。`holding` は `list` に出るが `release` は使えない。
     #[tokio::test]
     async fn holding_cannot_be_released() {
-        let (store, source) = seeded().await;
-        let mut holding = kept_item(source);
-        holding.state = State::Holding;
-        let id = store.add_item(&holding).await.unwrap();
+        let (ledger, source) = seeded().await;
+        let id = carried_to(
+            &ledger,
+            source,
+            Hold::Until(at("2026-03-09T00:30:00+09:00")),
+        )
+        .await;
         let media = tempfile::tempdir().unwrap();
         let dir = asset::item_dir(media.path(), id);
         put(&dir, "video.1.mp4");
 
         assert!(matches!(
-            release(&store, media.path(), id, None).await,
+            release(&ledger, media.path(), id, None).await,
             Err(HandoverError::NotReleasable {
                 state: StateName::Holding,
                 ..
@@ -337,11 +385,11 @@ mod tests {
 
     #[tokio::test]
     async fn releasing_something_absent_is_refused() {
-        let (store, _) = seeded().await;
+        let (ledger, _) = seeded().await;
         let media = tempfile::tempdir().unwrap();
 
         assert!(matches!(
-            release(&store, media.path(), ItemId::new(999), None).await,
+            release(&ledger, media.path(), ItemId::new(999), None).await,
             Err(HandoverError::NoSuchItem(_))
         ));
     }
