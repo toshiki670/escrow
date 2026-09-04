@@ -14,10 +14,14 @@ path = "src/main.rs"
 
 [dependencies]
 escrow-domain.workspace = true
-escrow-config.workspace = true
 escrow-ledger.workspace = true
-escrow-core.workspace = true
+escrow-config.workspace = true
 escrow-scheduler.workspace = true
+escrow-discovery.workspace = true
+escrow-acquisition.workspace = true
+escrow-transcription.workspace = true
+escrow-custody.workspace = true
+escrow-handover.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 serde_json.workspace = true

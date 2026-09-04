@@ -1,5 +1,5 @@
 [package]
-name = "escrow-core"
+name = "escrow-transcription"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,17 +10,11 @@ repository.workspace = true
 escrow-domain.workspace = true
 escrow-ledger.workspace = true
 escrow-scheduler.workspace = true
-directories.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-sqlx.workspace = true
-tempfile.workspace = true
 thiserror.workspace = true
-tokio.workspace = true
-toml.workspace = true
-which.workspace = true
 
 [dev-dependencies]
+tempfile.workspace = true
+tokio.workspace = true
 
 [lints]
 workspace = true

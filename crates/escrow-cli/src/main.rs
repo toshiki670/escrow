@@ -8,9 +8,8 @@ use std::num::NonZeroU32;
 use anyhow::{Context as _, Result, bail};
 use clap::{Parser, Subcommand};
 
+use escrow_acquisition::Acquisition;
 use escrow_config::{Config, Dirs, Paths, Resolution, Resolver};
-use escrow_core::handover;
-use escrow_core::pipeline::Pipeline;
 use escrow_domain::content::ContentType;
 use escrow_domain::item::Discovered;
 use escrow_domain::item::ItemId;
@@ -18,8 +17,10 @@ use escrow_domain::source::{Monitoring, PersonId, SourceId};
 use escrow_domain::state::{ReleaseReference, StateName};
 use escrow_domain::timestamp::Timestamp;
 use escrow_domain::url::{self, TypeHint};
+use escrow_handover as handover;
 use escrow_ledger::{Ledger, NewSource};
 use escrow_scheduler::Scheduler;
+use escrow_transcription::Transcription;
 
 /// 配信元から失われうるものを取り込み、手元に預かる。
 #[derive(Debug, Parser)]
@@ -321,17 +322,20 @@ impl App {
         // #5 の対応表が、この種別を取るのがどのツールかを決める。
         let acquirer = scheduler.acquirer(item.content_type());
 
-        // 預かりの期限は、いま — 取得の時点 — で確定する（#1）。
-        let hold = source.hold_from(Timestamp::now())?;
+        // 期限を出すのは取得が終わった瞬間なので、渡すのは日数のまま（#1）。
+        let state = Acquisition::new(&self.ledger, &self.paths.media_dir, &acquirer)
+            .run(id, source.hold_days)
+            .await?;
 
-        let state = Pipeline::new(
-            &self.ledger,
-            &self.paths.media_dir,
-            &acquirer,
-            scheduler.transcriber(),
-        )
-        .run(id, hold)
-        .await?;
+        // スライスは互いを知らないので、**次に誰が拾うかは状態が決める**（#15）。
+        // 巡回するエンジンは Phase 6 なので、いまはここが状態を見て繋ぐ。
+        let state = if state.name() == StateName::Transcribing {
+            Transcription::new(&self.ledger, &self.paths.media_dir, scheduler.transcriber())
+                .run(id)
+                .await?
+        } else {
+            state
+        };
 
         println!("{id} -> {state}", state = state.as_str());
         Ok(())

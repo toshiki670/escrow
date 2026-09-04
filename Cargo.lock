@@ -485,16 +485,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "escrow-acquisition"
+version = "0.1.0"
+dependencies = [
+ "escrow-domain",
+ "escrow-ledger",
+ "escrow-scheduler",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
+]
+
+[[package]]
 name = "escrow-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "escrow-acquisition",
  "escrow-config",
- "escrow-core",
+ "escrow-custody",
+ "escrow-discovery",
  "escrow-domain",
+ "escrow-handover",
  "escrow-ledger",
  "escrow-scheduler",
+ "escrow-transcription",
  "serde_json",
  "tokio",
 ]
@@ -512,21 +528,27 @@ dependencies = [
 ]
 
 [[package]]
-name = "escrow-core"
+name = "escrow-custody"
 version = "0.1.0"
 dependencies = [
- "directories",
  "escrow-domain",
  "escrow-ledger",
  "escrow-scheduler",
- "serde",
- "serde_json",
- "sqlx",
  "tempfile",
  "thiserror 2.0.20",
  "tokio",
- "toml",
- "which",
+]
+
+[[package]]
+name = "escrow-discovery"
+version = "0.1.0"
+dependencies = [
+ "escrow-domain",
+ "escrow-ledger",
+ "escrow-scheduler",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
 ]
 
 [[package]]
@@ -561,8 +583,28 @@ dependencies = [
 name = "escrow-gui"
 version = "0.1.0"
 dependencies = [
- "escrow-core",
+ "escrow-acquisition",
+ "escrow-config",
+ "escrow-custody",
+ "escrow-discovery",
  "escrow-domain",
+ "escrow-handover",
+ "escrow-ledger",
+ "escrow-scheduler",
+ "escrow-transcription",
+]
+
+[[package]]
+name = "escrow-handover"
+version = "0.1.0"
+dependencies = [
+ "escrow-domain",
+ "escrow-ledger",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
 ]
 
 [[package]]
@@ -584,6 +626,18 @@ dependencies = [
  "escrow-domain",
  "escrow-external",
  "thiserror 2.0.20",
+]
+
+[[package]]
+name = "escrow-transcription"
+version = "0.1.0"
+dependencies = [
+ "escrow-domain",
+ "escrow-ledger",
+ "escrow-scheduler",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
 ]
 
 [[package]]

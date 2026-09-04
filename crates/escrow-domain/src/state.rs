@@ -209,6 +209,36 @@ pub enum Hold {
     None,
 }
 
+/// 預かる日数が大きすぎて、期限が日時にならないとき。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+#[error("{days} 日先は暦の外")]
+pub struct HoldTooFar {
+    pub days: std::num::NonZeroU32,
+}
+
+impl Hold {
+    /// 日数を1つの期限に変える。**渡す時刻は取得が終わった瞬間**（#1）。
+    ///
+    /// 数時間の録画では、始めた時刻と終わった時刻がその長さぶんずれる。#1 が
+    /// 「取得完了の時点で確定する」と書いているのはこの差のことなので、呼ぶ側は
+    /// `acquired` を書く直前の時刻を渡す。
+    ///
+    /// 空を返さないのは、[`Hold::None`]（期限なし＝捨てない）と、日数が表せる範囲を
+    /// 超えたこととが**意味の反転した2つ**だから。片方をもう片方に化けさせない。
+    pub fn from_days(
+        days: Option<std::num::NonZeroU32>,
+        acquired_at: Timestamp,
+    ) -> Result<Self, HoldTooFar> {
+        let Some(days) = days else {
+            return Ok(Self::None);
+        };
+        acquired_at
+            .plus_days(days)
+            .map(Self::Until)
+            .ok_or(HoldTooFar { days })
+    }
+}
+
 /// 外部が保存した先への参照。escrow は解釈せず保管する（#1）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReleaseReference(String);

@@ -1,5 +1,5 @@
 [package]
-name = "escrow-gui"
+name = "escrow-acquisition"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,13 +9,12 @@ repository.workspace = true
 [dependencies]
 escrow-domain.workspace = true
 escrow-ledger.workspace = true
-escrow-config.workspace = true
 escrow-scheduler.workspace = true
-escrow-discovery.workspace = true
-escrow-acquisition.workspace = true
-escrow-transcription.workspace = true
-escrow-custody.workspace = true
-escrow-handover.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio.workspace = true
 
 [lints]
 workspace = true

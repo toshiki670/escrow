@@ -11,7 +11,7 @@
 //! 依存しない仕組み — 接続・番号・行を読むときの失敗 — を置く。
 
 use std::num::NonZeroU32;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use escrow_domain::content::ContentType;
@@ -80,6 +80,12 @@ impl Seq {
 pub enum LedgerError {
     #[error("DB へアクセスできない")]
     Database(#[from] sqlx::Error),
+    #[error("DB の置き場所を作れない: {path}")]
+    Io {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
     #[error("DB の移行に失敗した")]
     Migrate(#[from] sqlx::migrate::MigrateError),
     #[error("DB の行を読めない")]
@@ -195,6 +201,15 @@ pub struct Ledger {
 impl Ledger {
     /// 既存の DB を開くか、無ければ作って移行を当てる。
     pub async fn open(path: &Path) -> Result<Self, LedgerError> {
+        // `create_if_missing` はファイルを作るが、ディレクトリは作らない。
+        // 初回起動では置き場所ごと無いので、ここで用意する。
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|source| LedgerError::Io {
+                path: parent.to_owned(),
+                source,
+            })?;
+        }
+
         let options = SqliteConnectOptions::new()
             .filename(path)
             .create_if_missing(true)
@@ -373,6 +388,24 @@ mod tests {
             Err(LedgerError::Migrate(sqlx::migrate::MigrateError::VersionMissing(999))) => {}
             other => panic!("降格を止めなかった: {other:?}"),
         }
+    }
+
+    /// 初回起動では置き場所ごと無い。ディレクトリから作ること。
+    #[tokio::test]
+    async fn opening_creates_the_directory_it_needs() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("Application Support/escrow/escrow.db");
+        assert!(!path.parent().unwrap().exists());
+
+        let ledger = Ledger::open(&path).await.unwrap();
+        assert!(path.is_file());
+        assert!(
+            ledger
+                .items_in_state(StateName::Kept)
+                .await
+                .unwrap()
+                .is_empty()
+        );
     }
 
     /// 番号は 1 から始まり、飛ばない。

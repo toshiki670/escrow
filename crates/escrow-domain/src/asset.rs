@@ -18,6 +18,7 @@ use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 
 use crate::item::ItemId;
+use crate::state::TranscriptNeed;
 
 /// 実体の種類。ファイル名の先頭に出る。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -48,6 +49,17 @@ impl AssetKind {
     ///
     /// 取得する側が自分の名前で書いたものを、#1 の命名規則へ移すときに使う。
     /// **名前を決めるのは escrow** なので、ツールが何と呼んだかは持ち込まない。
+    /// 音が入っているか。#1 の3つのスイッチのうち「文字起こしする実体があるか」。
+    ///
+    /// 画像だけの投稿は文字起こしできないので、取得の次は `holding` か `kept`
+    /// へ直行する（#1 のスイッチ表）。
+    pub const fn is_audible(self) -> bool {
+        match self {
+            Self::Video | Self::Audio => true,
+            Self::Image | Self::Transcript => false,
+        }
+    }
+
     pub fn of_extension(extension: &str) -> Option<Self> {
         let lower = extension.to_ascii_lowercase();
         match lower.as_str() {
@@ -151,6 +163,18 @@ pub fn scan_dir(dir: &Path) -> io::Result<Vec<Asset>> {
 
     assets.sort();
     Ok(assets)
+}
+
+/// 文字起こしする実体があるか。#1 の3つのスイッチの1つ。
+///
+/// 取得したものを見て決まるので、`Source` の設定でも種別でもない。動画付きの
+/// X 投稿は要り、画像だけの X 投稿は要らない。
+pub fn transcript_need(assets: &[Asset]) -> TranscriptNeed {
+    if assets.iter().any(|a| a.kind.is_audible()) {
+        TranscriptNeed::Needed
+    } else {
+        TranscriptNeed::NotNeeded
+    }
 }
 
 #[cfg(test)]

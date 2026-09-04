@@ -6,7 +6,7 @@ use thiserror::Error;
 
 use crate::content::ContentType;
 use crate::id::id_type;
-use crate::state::Hold;
+use crate::state::{Hold, HoldTooFar};
 use crate::timestamp::Timestamp;
 use crate::url::NormalizedUrl;
 
@@ -92,19 +92,23 @@ impl Monitoring {
     }
 
     /// 書き戻すときの2列。
+    /// その時刻が監視の中か。
+    ///
+    /// 期間を持たない配信元は常に中。期間を持つ配信元は、始まりを含み終わりを
+    /// 含まない半開区間で見る — 終わりの時刻に2回見る形にしないため。
+    pub fn covers(self, now: Timestamp) -> bool {
+        match self {
+            Self::Continuous => true,
+            Self::Period { from, until } => from <= now && now < until,
+        }
+    }
+
     pub const fn columns(self) -> (Option<Timestamp>, Option<Timestamp>) {
         match self {
             Self::Continuous => (None, None),
             Self::Period { from, until } => (Some(from), Some(until)),
         }
     }
-}
-
-/// 預かる日数が大きすぎて、期限が日時にならないとき。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
-#[error("{days} 日先は暦の外")]
-pub struct HoldTooFar {
-    pub days: NonZeroU32,
 }
 
 impl Source {
@@ -114,16 +118,10 @@ impl Source {
     /// 1つの日時になったあとは `Item` が持つ。後から日数を変えても、進行中の
     /// 預かりは動かない。
     ///
-    /// 空を返さないのは、`Hold::None`（期限なし＝捨てない）と、日数が表せる範囲を
-    /// 超えたこととが**意味の反転した2つ**だから。片方をもう片方に化けさせない。
+    /// **渡す時刻は取得が終わった瞬間。** 取得を始めるときに前もって出しておくと、
+    /// 数時間の録画ではその長さぶん期限が早まる。
     pub fn hold_from(&self, acquired_at: Timestamp) -> Result<Hold, HoldTooFar> {
-        let Some(days) = self.hold_days else {
-            return Ok(Hold::None);
-        };
-        acquired_at
-            .plus_days(days)
-            .map(Hold::Until)
-            .ok_or(HoldTooFar { days })
+        Hold::from_days(self.hold_days, acquired_at)
     }
 }
 
@@ -239,6 +237,21 @@ mod tests {
         absurd.hold_days = Some(NonZeroU32::MAX);
 
         assert!(absurd.hold_from(at).is_err());
+    }
+
+    /// 監視の期間の外では見ない（#1・#5）。
+    #[test]
+    fn a_period_is_half_open() {
+        let from = Timestamp::parse("2026-09-01T00:00:00+09:00").unwrap();
+        let until = Timestamp::parse("2026-09-08T00:00:00+09:00").unwrap();
+        let period = Monitoring::new(Some(from), Some(until)).unwrap();
+
+        assert!(period.covers(from), "始まりは中");
+        assert!(period.covers(Timestamp::parse("2026-09-07T23:59:59+09:00").unwrap()));
+        assert!(!period.covers(until), "終わりは外");
+        assert!(!period.covers(Timestamp::parse("2026-08-31T23:59:59+09:00").unwrap()));
+
+        assert!(Monitoring::Continuous.covers(from), "期間が無ければ常に中");
     }
 
     #[test]

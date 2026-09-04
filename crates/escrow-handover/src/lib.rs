@@ -10,10 +10,10 @@ use thiserror::Error;
 
 use escrow_ledger::{Ledger, LedgerError};
 
-use crate::asset::{self, AssetKind};
-use crate::item::{Item, ItemId};
-use crate::state::{Event, ReleaseReference, State, StateName};
-use crate::timestamp::Timestamp;
+use escrow_domain::asset::{self, AssetKind};
+use escrow_domain::item::{Item, ItemId};
+use escrow_domain::state::{Event, ReleaseReference, State, StateName};
+use escrow_domain::timestamp::Timestamp;
 
 #[derive(Debug, Error)]
 pub enum HandoverError {
@@ -75,8 +75,8 @@ pub fn handover(item: &Item, media_dir: &Path) -> Result<Handover, HandoverError
     };
 
     let (title, body) = match &item.content {
-        crate::content::Content::Media { title, .. } => (Some(title.clone()), None),
-        crate::content::Content::Post { body, .. } => (None, Some(body.clone())),
+        escrow_domain::content::Content::Media { title, .. } => (Some(title.clone()), None),
+        escrow_domain::content::Content::Post { body, .. } => (None, Some(body.clone())),
     };
 
     Ok(Handover {
@@ -145,10 +145,10 @@ pub async fn release(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::content::{Content, MediaType};
-    use crate::source::{Monitoring, SourceId};
-    use crate::state::{Hold, MediaPresence, TranscriptNeed};
+    use escrow_domain::content::{Content, MediaType};
     use escrow_domain::item::Discovered;
+    use escrow_domain::source::{Monitoring, SourceId};
+    use escrow_domain::state::{Hold, MediaPresence, TranscriptNeed};
     use escrow_ledger::{NewSource, Seq};
     use std::num::NonZeroU32;
 
@@ -162,7 +162,7 @@ mod tests {
         let source = ledger
             .add_source(&NewSource {
                 person_id: person,
-                url: crate::url::normalize_source(
+                url: escrow_domain::url::normalize_source(
                     "https://www.youtube.com/channel/UCBR8-60-B28hp2BmDPdntcQ",
                 )
                 .unwrap(),
@@ -180,7 +180,7 @@ mod tests {
     fn a_live(source_id: SourceId) -> Discovered {
         Discovered {
             source_id,
-            url: crate::url::normalize_item("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+            url: escrow_domain::url::normalize_item("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
                 .unwrap()
                 .0,
             published_at: at("2026-03-01T20:00:00+09:00"),
@@ -281,7 +281,7 @@ mod tests {
             .discover(
                 &Discovered {
                     source_id: source,
-                    url: crate::url::normalize_item("https://x.com/jack/status/20")
+                    url: escrow_domain::url::normalize_item("https://x.com/jack/status/20")
                         .unwrap()
                         .0,
                     published_at: at("2026-03-01T12:00:00+09:00"),

@@ -17,44 +17,45 @@ use std::path::{Path, PathBuf};
 ///
 /// 実際に使っているかは問わない（`escrow-gui` はまだ空）。ここに無い辺が
 /// 生えたら落ちる。
+/// スライスが依存してよいもの。互いの名前はここに無い。
+const SLICE: &[&str] = &["escrow-domain", "escrow-ledger", "escrow-scheduler"];
+
+/// 入口が依存してよいもの。**緩めて「全部」にしない** — 緩めた瞬間に段5 の検査が
+/// 消え、`escrow-external` を直接呼ぶ経路が生える。
+const ENTRY: &[&str] = &[
+    "escrow-domain",
+    "escrow-ledger",
+    "escrow-config",
+    "escrow-scheduler",
+    "escrow-discovery",
+    "escrow-acquisition",
+    "escrow-transcription",
+    "escrow-custody",
+    "escrow-handover",
+];
+
 const ALLOWED: &[(&str, &[&str])] = &[
     // 段1 — カーネル。誰にも依存しない。
     ("escrow-domain", &[]),
-    // 段2 — 設定・永続化・外部ツール。互いを知らない（config だけは external が読む）。
+    // 段2 — 設定・永続化・外部ツール。config だけは external と入口が読む。
     ("escrow-config", &[]),
     ("escrow-ledger", &["escrow-domain"]),
     ("escrow-external", &["escrow-domain", "escrow-config"]),
-    // 段3 — 外部アクセスの受付。external を依存に持つ唯一の crate。
+    // 段3 — 外部アクセスの受付。external を依存に持つ唯一の crate（#3）。
     (
         "escrow-scheduler",
         &["escrow-domain", "escrow-config", "escrow-external"],
     ),
-    // 段4 — スライス。互いを知らない。
-    (
-        "escrow-core",
-        &["escrow-domain", "escrow-ledger", "escrow-scheduler"],
-    ),
+    // 段4 — スライス。**同じ段の中も見えない**。handover だけは外へ出ないので
+    // スケジューラも要らない（#15）。
+    ("escrow-discovery", SLICE),
+    ("escrow-acquisition", SLICE),
+    ("escrow-transcription", SLICE),
+    ("escrow-custody", SLICE),
+    ("escrow-handover", &["escrow-domain", "escrow-ledger"]),
     // 段5 — 入口。すべてを組み立てるが、external だけは名前で知らない。
-    (
-        "escrow-cli",
-        &[
-            "escrow-domain",
-            "escrow-ledger",
-            "escrow-config",
-            "escrow-scheduler",
-            "escrow-core",
-        ],
-    ),
-    (
-        "escrow-gui",
-        &[
-            "escrow-domain",
-            "escrow-ledger",
-            "escrow-config",
-            "escrow-scheduler",
-            "escrow-core",
-        ],
-    ),
+    ("escrow-cli", ENTRY),
+    ("escrow-gui", ENTRY),
 ];
 
 /// 外部ツールを呼ぶ crate。`escrow-scheduler` 以外は名前も知ってはいけない（#3）。
