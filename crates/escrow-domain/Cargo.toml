@@ -1,0 +1,24 @@
+[package]
+name = "escrow-domain"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# 3つだけ。副作用を持つ便利関数を「入れない規律」ではなく「書けない状態」にする（#15）。
+# sqlx が無ければ DB ヘルパは書けず、tokio が無ければ async fn も書けない。
+# 増やすときは tests/kernel.rs の表も直すことになる。
+[dependencies]
+chrono.workspace = true
+thiserror.workspace = true
+url.workspace = true
+
+# 守りのテストが Cargo.toml を読むための toml と、asset の走査を試すための tempfile。
+# どちらも公開 API に出ないが、ここも表で縛る。
+[dev-dependencies]
+tempfile.workspace = true
+toml.workspace = true
+
+[lints]
+workspace = true

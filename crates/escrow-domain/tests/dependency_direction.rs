@@ -1,11 +1,14 @@
 //! 依存の向きが #3 の一方通行になっていること。
 //!
 //! #13 の「外部アクセスはすべて1か所を通す」を守らせているのは規約ではなく
-//! **crate の分け方**で、`escrow-adapter` を依存に持つのが `escrow-scheduler` だけ
+//! **crate の分け方**で、外部ツールの crate を依存に持つのが `escrow-scheduler` だけ
 //! である限り、迂回はコンパイルエラーになる。その前提をここで固定する。
 //!
 //! 見るのは `Cargo.toml` で、**dev-dependencies も含める**。テストの中でだけ
 //! 迂回できるなら、迂回路は在ることになる。
+//!
+//! 置き場所が `escrow-domain` なのは、この crate が誰にも依存されずに残る唯一の
+//! 段だから。表が見るのは他の `Cargo.toml` だけなので、ここに置いても依存は増えない。
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -15,12 +18,28 @@ use std::path::{Path, PathBuf};
 /// 実際に使っているかは問わない（`escrow-gui` はまだ空）。ここに無い辺が
 /// 生えたら落ちる。
 const ALLOWED: &[(&str, &[&str])] = &[
-    ("escrow-core", &[]),
-    ("escrow-adapter", &["escrow-core"]),
-    ("escrow-scheduler", &["escrow-core", "escrow-adapter"]),
-    ("escrow-cli", &["escrow-core", "escrow-scheduler"]),
-    ("escrow-gui", &["escrow-core", "escrow-scheduler"]),
+    ("escrow-domain", &[]),
+    ("escrow-core", &["escrow-domain"]),
+    ("escrow-adapter", &["escrow-domain", "escrow-core"]),
+    (
+        "escrow-scheduler",
+        &["escrow-domain", "escrow-core", "escrow-adapter"],
+    ),
+    (
+        "escrow-cli",
+        &["escrow-domain", "escrow-core", "escrow-scheduler"],
+    ),
+    (
+        "escrow-gui",
+        &["escrow-domain", "escrow-core", "escrow-scheduler"],
+    ),
 ];
+
+/// 外部ツールを呼ぶ crate。`escrow-scheduler` 以外は名前も知ってはいけない（#3）。
+///
+/// 定数で持つのは、crate を改名したときに次のテストが**黙って通る**のを防ぐため。
+/// 名前が実在することを先に確かめる。
+const EXTERNAL: &str = "escrow-adapter";
 
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -71,21 +90,26 @@ fn dependencies_follow_the_one_way_graph() {
 
 /// 外部ツールの名前を知ってよいのは `escrow-scheduler` だけ（#3）。
 #[test]
-fn only_the_scheduler_knows_the_adapter() {
+fn only_the_scheduler_knows_the_external_tools() {
+    assert!(
+        ALLOWED.iter().any(|(name, _)| *name == EXTERNAL),
+        "{EXTERNAL} がワークスペースに無い。改名したなら EXTERNAL も直す"
+    );
+
     for (crate_name, _) in ALLOWED {
-        let knows = escrow_dependencies_of(crate_name).contains("escrow-adapter");
+        let knows = escrow_dependencies_of(crate_name).contains(EXTERNAL);
 
         assert_eq!(
             knows,
             *crate_name == "escrow-scheduler",
-            "{crate_name} から escrow-adapter への依存"
+            "{crate_name} から {EXTERNAL} への依存"
         );
     }
 }
 
 /// 表がワークスペースの全 crate を覆っていること。
 ///
-/// 覆っていないと、6つ目の crate が誰にも見られずに迂回路を作れる。
+/// 覆っていないと、表に載らない crate が誰にも見られずに迂回路を作れる。
 #[test]
 fn the_graph_covers_every_crate_in_the_workspace() {
     let root = workspace_root();

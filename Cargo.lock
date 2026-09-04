@@ -516,8 +516,8 @@ dependencies = [
 name = "escrow-core"
 version = "0.1.0"
 dependencies = [
- "chrono",
  "directories",
+ "escrow-domain",
  "serde",
  "serde_json",
  "sqlx",
@@ -525,8 +525,18 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "toml",
- "url",
  "which",
+]
+
+[[package]]
+name = "escrow-domain"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "tempfile",
+ "thiserror 2.0.20",
+ "toml",
+ "url",
 ]
 
 [[package]]

@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/escrow-domain",
     "crates/escrow-core",
     "crates/escrow-adapter",
     "crates/escrow-scheduler",
@@ -16,6 +17,7 @@ license = "MIT"
 repository = "https://github.com/toshiki670/escrow"
 
 [workspace.dependencies]
+escrow-domain = { path = "crates/escrow-domain" }
 escrow-core = { path = "crates/escrow-core" }
 escrow-adapter = { path = "crates/escrow-adapter" }
 escrow-scheduler = { path = "crates/escrow-scheduler" }
