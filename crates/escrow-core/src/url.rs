@@ -39,7 +39,8 @@ pub enum TypeHint {
     /// パスが種別を決めている。
     Known(ContentType),
     /// YouTube の `/watch?v=` と `youtu.be/` は shorts / video / live を区別しない。
-    /// 検知なら列挙したタブが、人の登録なら別の手段が決める（#7）。
+    /// 検知はフィードの `link` で決まらなかったぶんを1件ごとの追加取得で埋め、
+    /// 人の登録は `--type` で受ける（#5）。
     YoutubeUnknown,
 }
 

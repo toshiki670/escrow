@@ -2,6 +2,8 @@
 
 use std::num::NonZeroU32;
 
+use thiserror::Error;
+
 use crate::content::ContentType;
 use crate::id::id_type;
 use crate::state::HoldPolicy;
@@ -44,11 +46,58 @@ pub struct Source {
     pub created_at: Timestamp,
     /// 預かる日数。空なら捨てない。
     pub hold_days: Option<NonZeroU32>,
-    /// 新規投稿とライブ開始を確認する間隔。
+    /// 検知の重み。
     ///
-    /// 生存確認（共通設定）とは別の概念なので、`Source` ごとに持つ。X は配信が
-    /// 予約されず突発的に始まるので高頻度、YouTube は予約枠が先に見えるので低頻度（#1）。
-    pub discover_interval_minutes: NonZeroU32,
+    /// 間隔ではない。間隔を宣言すると、配信元 N 本ぶんの合計が #13 の予算を超えた
+    /// 時点で守れない約束になる。重みなら、実際の頻度は予算から導出される（#1）。
+    pub priority: NonZeroU32,
+    /// いつからいつまで見るか。
+    pub monitoring: Monitoring,
+}
+
+/// 監視の期間（#1）。
+///
+/// X は継続監視せず、人が宣言した期間の中だけ見る（#5）。YouTube は RSS が
+/// 1チャンネル1回で済むので区切らない。
+///
+/// **片方だけ決まった状態を作れない。** DB の `monitor_from` / `monitor_until` は
+/// 2列に分かれているが、そこに意味があるのは「両方 NULL」と「両方埋まっている」の
+/// 2つだけなので、写した先では1つの値にする。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Monitoring {
+    /// 区切らず監視し続ける。
+    Continuous,
+    /// この期間の中だけ見る。
+    Period { from: Timestamp, until: Timestamp },
+}
+
+/// 監視の期間として読めなかった。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum MonitoringError {
+    #[error("監視の開始と終了は、両方を決めるか、両方を空にする")]
+    HalfOpen,
+    #[error("監視の終了は開始より後")]
+    NotOrdered,
+}
+
+impl Monitoring {
+    /// 2つの値から組み立てる。DB の行と人の入力が通る唯一の入口。
+    pub fn new(from: Option<Timestamp>, until: Option<Timestamp>) -> Result<Self, MonitoringError> {
+        match (from, until) {
+            (None, None) => Ok(Self::Continuous),
+            (Some(from), Some(until)) if from < until => Ok(Self::Period { from, until }),
+            (Some(_), Some(_)) => Err(MonitoringError::NotOrdered),
+            (Some(_), None) | (None, Some(_)) => Err(MonitoringError::HalfOpen),
+        }
+    }
+
+    /// 書き戻すときの2列。
+    pub const fn columns(self) -> (Option<Timestamp>, Option<Timestamp>) {
+        match self {
+            Self::Continuous => (None, None),
+            Self::Period { from, until } => (Some(from), Some(until)),
+        }
+    }
 }
 
 impl Source {
@@ -99,8 +148,60 @@ mod tests {
             enabled: true,
             created_at: Timestamp::parse("2026-01-01T00:00:00+09:00").unwrap(),
             hold_days: hold_days.map(|d| NonZeroU32::new(d).unwrap()),
-            discover_interval_minutes: NonZeroU32::new(15).unwrap(),
+            priority: NonZeroU32::new(1).unwrap(),
+            monitoring: Monitoring::Continuous,
         }
+    }
+
+    fn at(text: &str) -> Timestamp {
+        Timestamp::parse(text).expect(text)
+    }
+
+    /// 「両方が空なら継続して監視する」（#1）。
+    #[test]
+    fn an_empty_period_means_watching_without_end() {
+        assert_eq!(Monitoring::new(None, None), Ok(Monitoring::Continuous));
+    }
+
+    #[test]
+    fn a_period_round_trips_through_its_two_columns() {
+        let from = at("2026-09-01T00:00:00+09:00");
+        let until = at("2026-09-08T00:00:00+09:00");
+
+        let monitoring = Monitoring::new(Some(from), Some(until)).unwrap();
+        assert_eq!(monitoring, Monitoring::Period { from, until });
+        assert_eq!(monitoring.columns(), (Some(from), Some(until)));
+        assert_eq!(Monitoring::Continuous.columns(), (None, None));
+    }
+
+    /// 片方だけ決まった行は意味が決まっていないので、型にできない。
+    #[test]
+    fn half_of_a_period_is_not_a_period() {
+        let at = at("2026-09-01T00:00:00+09:00");
+
+        assert_eq!(
+            Monitoring::new(Some(at), None),
+            Err(MonitoringError::HalfOpen)
+        );
+        assert_eq!(
+            Monitoring::new(None, Some(at)),
+            Err(MonitoringError::HalfOpen)
+        );
+    }
+
+    #[test]
+    fn a_period_that_ends_before_it_starts_is_not_a_period() {
+        let from = at("2026-09-08T00:00:00+09:00");
+        let until = at("2026-09-01T00:00:00+09:00");
+
+        assert_eq!(
+            Monitoring::new(Some(from), Some(until)),
+            Err(MonitoringError::NotOrdered)
+        );
+        assert_eq!(
+            Monitoring::new(Some(from), Some(from)),
+            Err(MonitoringError::NotOrdered)
+        );
     }
 
     /// #1 の「`hold_days` が空なら捨てない」。

@@ -6,19 +6,20 @@
 //! `read_audio_data: failed to read audio data`）。取得したものは mp4 や m4a なので、
 //! 16kHz モノラルの PCM へ落としてから渡す。
 //!
-//! #5 は「`ffmpeg` は yt-dlp が内部で呼ぶ。escrow が直接叩くことはない」としているが、
-//! ここだけは escrow が直接叩く。
+//! #5 の対応表で escrow が `ffmpeg` を直接叩く唯一の場所がここ。他の呼び出しは
+//! yt-dlp が内部で呼ぶ。
 //!
-//! この変換が [`Transcribe`] の内側に閉じているのは、口が「手元の実体を文字起こしする」
-//! だけを約束しているため。WAV を要求しない別の実装へ替えれば、変換ごと消える。
+//! この変換が [`Transcribe`] の内側に閉じているのは、trait が「手元の実体を
+//! 文字起こしする」だけを約束しているため。WAV を要求しない別の実装へ替えれば、
+//! 変換ごと消える。
 
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 
-use super::invocation::{Invocation, run};
-use super::{AdapterError, Transcribe};
-use crate::asset::{Asset, AssetKind};
-use crate::config::Language;
+use crate::invocation::{Invocation, run};
+use escrow_core::adapter::{AdapterError, Transcribe};
+use escrow_core::asset::{Asset, AssetKind};
+use escrow_core::config::Language;
 
 const WHISPER: &str = "whisper-cli";
 const FFMPEG: &str = "ffmpeg";

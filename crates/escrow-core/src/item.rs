@@ -27,6 +27,12 @@ pub struct Item {
     /// 正規化した URL。項目の一意キー。
     pub url: NormalizedUrl,
     pub published_at: Timestamp,
+    /// 配信の開始予定時刻。予約枠でなければ空。
+    ///
+    /// 予約枠を見つけた時点で分かり、始まってしまえば二度と取れない。巻き戻し
+    /// 禁止の配信は開始に間に合わせないと頭を失うので、この時刻に取得を予約する
+    /// （#1・#5）。
+    pub scheduled_start_at: Option<Timestamp>,
     pub state: State,
     /// この状態になった日時。預かりの期限は `Source.hold_days` と合わせて計算する。
     pub state_since: Timestamp,
@@ -52,6 +58,7 @@ mod tests {
                 .unwrap()
                 .0,
             published_at: Timestamp::parse("2026-03-01T20:00:00+09:00").unwrap(),
+            scheduled_start_at: None,
             state: State::Kept,
             state_since: Timestamp::parse("2026-03-01T22:30:00+09:00").unwrap(),
             content,

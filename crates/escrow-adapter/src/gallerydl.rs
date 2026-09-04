@@ -21,15 +21,15 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-use super::invocation::{Completed, Invocation, run};
-use super::{Acquire, AdapterError, Discover, Found};
-use crate::asset::{Asset, AssetKind};
-use crate::config::Browser;
-use crate::content::{Content, ContentType};
-use crate::source::Source;
-use crate::state::MediaPresence;
-use crate::timestamp::Timestamp;
-use crate::url::{self, NormalizedUrl};
+use crate::invocation::{Completed, Invocation, run};
+use escrow_core::adapter::{Acquire, AdapterError, Discover, Found};
+use escrow_core::asset::{Asset, AssetKind};
+use escrow_core::config::Browser;
+use escrow_core::content::{Content, ContentType};
+use escrow_core::source::Source;
+use escrow_core::state::MediaPresence;
+use escrow_core::timestamp::Timestamp;
+use escrow_core::url::{self, NormalizedUrl};
 
 const PROGRAM: &str = "gallery-dl";
 
@@ -201,6 +201,8 @@ fn post(meta: &serde_json::Value) -> Result<Found, AdapterError> {
 
     Ok(Found {
         url,
+        // X に予約枠は無い。Space もライブ配信も、始まってから見つかる。
+        scheduled_start_at: None,
         published_at: naive_utc(&meta.date)?,
         content: Content::Post {
             body: meta.content,
@@ -497,7 +499,7 @@ mod tests {
     ///
     /// X はタイムラインの列挙に cookie を要るので、この形は認証を通したうえで
     /// もう一度確かめる必要がある（#5 の「取りこぼしや不便が出てから直す」）。
-    const TIMELINE: &str = include_str!("../../tests/fixtures/gallerydl/timeline.json");
+    const TIMELINE: &str = include_str!("../tests/fixtures/gallerydl/timeline.json");
 
     #[test]
     fn reads_a_timeline() {
@@ -602,7 +604,7 @@ mod tests {
     ///
     /// **失敗が標準エラーではなく出力の中に混ざる。** 終了コードだけ見ていると
     /// 「空のタイムライン」に見えてしまう。
-    const AUTH_REQUIRED: &str = include_str!("../../tests/fixtures/gallerydl/auth-required.json");
+    const AUTH_REQUIRED: &str = include_str!("../tests/fixtures/gallerydl/auth-required.json");
 
     #[test]
     fn an_auth_failure_inside_the_output_is_not_an_empty_timeline() {
@@ -613,7 +615,7 @@ mod tests {
             "{error:?}"
         );
         // cookie の失効は消えたことを意味しない。判定は保留（#5）。
-        assert_eq!(error.presence(), crate::liveness::Presence::Unknown);
+        assert_eq!(error.presence(), escrow_core::liveness::Presence::Unknown);
     }
 
     #[test]
@@ -622,7 +624,7 @@ mod tests {
         let error = parse_timeline(json).unwrap_err();
 
         assert!(matches!(error, AdapterError::Transient { .. }), "{error:?}");
-        assert_eq!(error.presence(), crate::liveness::Presence::Unknown);
+        assert_eq!(error.presence(), escrow_core::liveness::Presence::Unknown);
     }
 
     #[test]
@@ -639,7 +641,7 @@ mod tests {
         // cookie の失効は消えたことを意味しない。判定は保留（#5）。
         assert_eq!(
             classify(&completed).presence(),
-            crate::liveness::Presence::Unknown
+            escrow_core::liveness::Presence::Unknown
         );
     }
 

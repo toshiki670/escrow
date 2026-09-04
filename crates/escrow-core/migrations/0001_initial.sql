@@ -12,15 +12,21 @@ CREATE TABLE person (
 ) STRICT;
 
 CREATE TABLE source (
-    id                        INTEGER PRIMARY KEY,
-    person_id                 INTEGER NOT NULL REFERENCES person(id) ON DELETE CASCADE,
-    url                       TEXT    NOT NULL,
-    enabled                   INTEGER NOT NULL,
+    id            INTEGER PRIMARY KEY,
+    person_id     INTEGER NOT NULL REFERENCES person(id) ON DELETE CASCADE,
+    url           TEXT    NOT NULL,
+    enabled       INTEGER NOT NULL,
     -- 登録日時。これ以降の投稿を監視する。
-    created_at                TEXT    NOT NULL,
+    created_at    TEXT    NOT NULL,
+    -- 検知の重み。予算の分け前を決める（#13）。間隔ではないので、実際の頻度は
+    -- 予算と他の配信元との兼ね合いで決まる。
+    priority      INTEGER NOT NULL,
     -- 預かる日数。NULL は「捨てない」。
-    hold_days                 INTEGER,
-    discover_interval_minutes INTEGER NOT NULL
+    hold_days     INTEGER,
+    -- 監視の期間。両方 NULL なら区切らず継続して監視する。片方だけ埋まった行は
+    -- 意味が決まっていないので、読み出しの parse が撥ねる。
+    monitor_from  TEXT,
+    monitor_until TEXT
 ) STRICT;
 
 CREATE TABLE exclude (
@@ -41,6 +47,8 @@ CREATE TABLE item (
     state           TEXT    NOT NULL,
     state_since     TEXT    NOT NULL,
     -- ここから下が #1 の「NULL を許す」列。
+    -- 配信の開始予定時刻。予約枠でなければ NULL。
+    scheduled_start_at TEXT,
     title           TEXT,  -- subtype が Post なら NULL
     body            TEXT,  -- subtype が Media なら NULL
     in_reply_to_url TEXT,  -- 返信ではない（Media は常に NULL）

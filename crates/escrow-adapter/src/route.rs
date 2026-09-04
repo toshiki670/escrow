@@ -2,7 +2,7 @@
 //!
 //! | | 検知 | 取得 |
 //! |---|---|---|
-//! | YouTube ショート / 動画 / 配信 | yt-dlp | yt-dlp |
+//! | YouTube ショート / 動画 / 配信 | RSS ＋ yt-dlp の追加取得 | yt-dlp |
 //! | X 投稿 | gallery-dl | gallery-dl |
 //! | X Space | gallery-dl | yt-dlp |
 //! | X ライブ配信 | gallery-dl | yt-dlp |
@@ -14,24 +14,35 @@
 
 use std::path::Path;
 
-use super::gallerydl::GalleryDl;
-use super::ytdlp::YtDlp;
-use super::{Acquire, AdapterError, Discover, Found};
-use crate::asset::Asset;
-use crate::content::{ContentType, Platform};
-use crate::source::Source;
-use crate::timestamp::Timestamp;
-use crate::url::{self, NormalizedUrl};
+use crate::gallerydl::GalleryDl;
+use crate::rss::Rss;
+use crate::ytdlp::YtDlp;
+use escrow_core::adapter::{Acquire, AdapterError, Discover, Found};
+use escrow_core::asset::Asset;
+use escrow_core::content::{Content, ContentType, Platform};
+use escrow_core::source::Source;
+use escrow_core::state::MediaPresence;
+use escrow_core::timestamp::Timestamp;
+use escrow_core::url::{self, NormalizedUrl, TypeHint};
 
 /// 使えるツールを揃えたもの。
+///
+/// **中のツールを外へ見せない。** 見せると呼ぶ側が対応表を迂回して
+/// `adapters.ytdlp` を直に叩けてしまい、「この対応をコードの1か所に置く」が
+/// 約束にしかならない。外から呼べるのは下の3つだけ。
 pub struct Adapters {
-    pub ytdlp: YtDlp,
-    pub gallerydl: GalleryDl,
+    rss: Rss,
+    ytdlp: YtDlp,
+    gallerydl: GalleryDl,
 }
 
 impl Adapters {
-    pub const fn new(ytdlp: YtDlp, gallerydl: GalleryDl) -> Self {
-        Self { ytdlp, gallerydl }
+    pub const fn new(rss: Rss, ytdlp: YtDlp, gallerydl: GalleryDl) -> Self {
+        Self {
+            rss,
+            ytdlp,
+            gallerydl,
+        }
     }
 
     /// 対応表の「取得」列。
@@ -50,15 +61,35 @@ impl Adapters {
 
     /// 対応表の「検知」列。
     ///
-    /// X は yt-dlp ではタイムラインを列挙できないので gallery-dl（#5）。
+    /// YouTube は RSS。認証が要らず、1チャンネル1回で済み、叩いてよい頻度が
+    /// 公表されている（#5）。X は yt-dlp ではタイムラインを列挙できないので
+    /// gallery-dl。
     pub fn discoverer(&self, source: &Source) -> Result<Discoverer<'_>, AdapterError> {
         match url::platform_of_source(&source.url) {
-            Some(Platform::Youtube) => Ok(Discoverer::YtDlp(&self.ytdlp)),
+            Some(Platform::Youtube) => Ok(Discoverer::Youtube {
+                rss: &self.rss,
+                ytdlp: &self.ytdlp,
+            }),
             Some(Platform::X) => Ok(Discoverer::GalleryDl(&self.gallerydl)),
             None => Err(AdapterError::Parse {
                 program: "escrow".to_owned(),
                 detail: format!("どのプラットフォームの配信元か決められない: {}", source.url),
             }),
+        }
+    }
+
+    /// 1件のメタデータを取る。
+    ///
+    /// 分かれ目は subtype。`Media` は yt-dlp、`Post` は gallery-dl。本文と
+    /// 繋がりの URL を返せるのが gallery-dl だけだから（#5）。
+    pub async fn describe(
+        &self,
+        url: &NormalizedUrl,
+        content_type: ContentType,
+    ) -> Result<Found, AdapterError> {
+        match content_type.media_type() {
+            Some(media_type) => self.ytdlp.describe(url, media_type).await,
+            None => self.gallerydl.describe(url).await,
         }
     }
 }
@@ -85,7 +116,14 @@ impl Acquire for Acquirer<'_> {
 
 /// 検知を担うもの。
 pub enum Discoverer<'a> {
-    YtDlp(&'a YtDlp),
+    /// **RSS で見つけ、足りないぶんだけ yt-dlp で埋める**（#5）。
+    ///
+    /// フィードは1チャンネル1回で15件を返すが、`/watch?v=` の項目が動画か配信かを
+    /// 語らず、開始時刻も持たない。そこだけを1件ごとの追加取得で埋める。
+    Youtube {
+        rss: &'a Rss,
+        ytdlp: &'a YtDlp,
+    },
     GalleryDl(&'a GalleryDl),
 }
 
@@ -96,21 +134,75 @@ impl Discover for Discoverer<'_> {
         since: Timestamp,
     ) -> Result<Vec<Found>, AdapterError> {
         match self {
-            Self::YtDlp(tool) => tool.discover(source, since).await,
+            Self::Youtube { rss, ytdlp } => discover_youtube(rss, ytdlp, source, since).await,
             Self::GalleryDl(tool) => tool.discover(source, since).await,
         }
     }
 }
 
+/// フィードを読み、`since` 以降のものだけ追加取得へ回す。
+///
+/// **追加取得の回数を決めるのは `since`。** フィードは常に15件返すので、絞らないと
+/// 巡回のたびに15回叩くことになる。台帳との突き合わせは呼ぶ側の仕事なので（#1 の
+/// `Item.url` の一意キー）、ここでは日時だけで切る。
+async fn discover_youtube(
+    rss: &Rss,
+    ytdlp: &YtDlp,
+    source: &Source,
+    since: Timestamp,
+) -> Result<Vec<Found>, AdapterError> {
+    let mut found = Vec::new();
+
+    for sighting in rss.sightings(&source.url).await? {
+        if sighting.published_at < since {
+            continue;
+        }
+
+        // ショートはフィードだけで決まる。追加取得は要らない。
+        let (media_type, scheduled_start_at) = match sighting.hint {
+            TypeHint::Known(content_type) => (
+                content_type
+                    .media_type()
+                    .ok_or_else(|| AdapterError::Parse {
+                        program: "escrow".to_owned(),
+                        detail: format!("YouTube に本文だけの種別は無い: {content_type}"),
+                    })?,
+                None,
+            ),
+            TypeHint::YoutubeUnknown => {
+                let schedule = ytdlp.schedule(&sighting.url).await?;
+                (schedule.media_type, schedule.scheduled_start_at)
+            }
+        };
+
+        found.push(Found {
+            url: sighting.url,
+            // 枠を作った時刻。予約枠の開始予定時刻とは別物なので、追加取得の値で
+            // 上書きしない（#5）。
+            published_at: sighting.published_at,
+            scheduled_start_at,
+            content: Content::Media {
+                media_type,
+                title: sighting.title,
+            },
+            // YouTube のものは、どれも落とす実体を持つ。
+            media: MediaPresence::Present,
+        });
+    }
+
+    Ok(found)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Browser;
-    use crate::source::{PersonId, SourceId};
+    use escrow_core::config::Browser;
+    use escrow_core::source::{Monitoring, PersonId, SourceId};
     use std::num::NonZeroU32;
 
     fn adapters() -> Adapters {
         Adapters::new(
+            Rss::new(),
             YtDlp::new("/bin/yt-dlp", Browser::Firefox),
             GalleryDl::new("/bin/gallery-dl", Browser::Firefox),
         )
@@ -124,7 +216,8 @@ mod tests {
             enabled: true,
             created_at: Timestamp::parse("2026-01-01T00:00:00+09:00").unwrap(),
             hold_days: None,
-            discover_interval_minutes: NonZeroU32::new(15).unwrap(),
+            priority: NonZeroU32::new(1).unwrap(),
+            monitoring: Monitoring::Continuous,
         }
     }
 
@@ -137,7 +230,7 @@ mod tests {
 
     fn discoverer_name(discoverer: &Discoverer<'_>) -> &'static str {
         match discoverer {
-            Discoverer::YtDlp(_) => "yt-dlp",
+            Discoverer::Youtube { .. } => "rss",
             Discoverer::GalleryDl(_) => "gallery-dl",
         }
     }
@@ -164,7 +257,7 @@ mod tests {
         }
     }
 
-    /// 「検知」列。X は yt-dlp ではタイムラインを列挙できない（#5）。
+    /// 「検知」列。YouTube は RSS、X は gallery-dl（#5）。
     #[test]
     fn discovery_follows_the_table() {
         let adapters = adapters();
@@ -172,7 +265,7 @@ mod tests {
         let youtube = source("https://www.youtube.com/channel/UCBR8-60-B28hp2BmDPdntcQ");
         assert_eq!(
             discoverer_name(&adapters.discoverer(&youtube).unwrap()),
-            "yt-dlp"
+            "rss"
         );
 
         let x = source("https://x.com/i/user/12");

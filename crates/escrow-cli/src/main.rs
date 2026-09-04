@@ -4,24 +4,22 @@
 //! GUI（Phase 6）ができるまで手で回すための口。
 
 use std::num::NonZeroU32;
-use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, bail};
 use clap::{Parser, Subcommand};
 
-use escrow_core::adapter::{
-    Adapters, Resolver, Tool, gallerydl::GalleryDl, whisper::Whisper, ytdlp::YtDlp,
-};
+use escrow_core::adapter::{Resolution, Resolver};
 use escrow_core::config::{Config, Dirs, Paths};
 use escrow_core::content::ContentType;
 use escrow_core::handover;
 use escrow_core::item::ItemId;
 use escrow_core::pipeline::Pipeline;
-use escrow_core::source::{PersonId, SourceId};
+use escrow_core::source::{Monitoring, PersonId, SourceId};
 use escrow_core::state::{ReleaseReference, State, StateName};
 use escrow_core::store::{NewItem, NewSource, Store};
 use escrow_core::timestamp::Timestamp;
 use escrow_core::url::{self, TypeHint};
+use escrow_scheduler::Scheduler;
 
 /// 配信元から失われうるものを取り込み、手元に預かる。
 #[derive(Debug, Parser)]
@@ -79,9 +77,15 @@ enum SourceCommand {
         person: i64,
         /// 不変 ID へ解決済みの URL。
         url: String,
-        /// 新規投稿とライブ開始を確認する間隔。
+        /// 検知の重み。大きいほど予算の分け前が増える（#13）。
+        #[arg(long, default_value = "1")]
+        priority: u32,
+        /// 監視を始める日時。--monitor-until と対で指定する。
         #[arg(long)]
-        discover_interval_minutes: u32,
+        monitor_from: Option<String>,
+        /// 監視を終える日時。両方省くと区切らず監視する。
+        #[arg(long)]
+        monitor_until: Option<String>,
         /// 預かる日数。省くと捨てない。
         #[arg(long)]
         hold_days: Option<u32>,
@@ -113,11 +117,20 @@ async fn main() -> Result<()> {
         Command::Source(SourceCommand::Add {
             person,
             url,
-            discover_interval_minutes,
+            priority,
+            monitor_from,
+            monitor_until,
             hold_days,
         }) => {
-            app.add_source(person, &url, discover_interval_minutes, hold_days)
-                .await
+            app.add_source(
+                person,
+                &url,
+                priority,
+                monitor_from.as_deref(),
+                monitor_until.as_deref(),
+                hold_days,
+            )
+            .await
         }
         Command::Item(ItemCommand::Add {
             source,
@@ -156,21 +169,10 @@ impl App {
         })
     }
 
-    /// 使えるツールを揃える。どれをいつ使うかは #5 の対応表（`Adapters`）が決める。
-    fn adapters(&self) -> Result<Adapters> {
-        let browser = self.config.auth.cookies_from;
-        Ok(Adapters::new(
-            YtDlp::new(self.tool(Tool::YtDlp)?, browser),
-            GalleryDl::new(self.tool(Tool::GalleryDl)?, browser),
-        ))
-    }
-
-    fn tool(&self, tool: Tool) -> Result<PathBuf> {
-        self.resolver
-            .resolve(tool)
-            .path()
-            .map(Path::to_path_buf)
-            .ok_or_else(|| anyhow::anyhow!("{tool} が見つからない。`escrow doctor` で確かめる"))
+    /// 外部アクセスの受付。外へ出る呼び出しはすべてここを通る（#13）。
+    fn scheduler(&self) -> Result<Scheduler> {
+        Scheduler::new(&self.config, &self.paths, &self.resolver)
+            .map_err(|missing| anyhow::anyhow!("{missing}。`escrow doctor` で確かめる"))
     }
 
     async fn list(&self, state: Option<String>, id: Option<i64>, json: bool) -> Result<()> {
@@ -234,14 +236,19 @@ impl App {
         &self,
         person: i64,
         raw_url: &str,
-        interval: u32,
+        priority: u32,
+        monitor_from: Option<&str>,
+        monitor_until: Option<&str>,
         hold_days: Option<u32>,
     ) -> Result<()> {
         let url = url::normalize_source(raw_url)?;
-        let interval = NonZeroU32::new(interval).context("確認の間隔は1分以上")?;
+        let priority = NonZeroU32::new(priority).context("重みは1以上")?;
         let hold_days = hold_days
             .map(|d| NonZeroU32::new(d).context("預かる日数は1日以上"))
             .transpose()?;
+
+        let at = |text: Option<&str>| text.map(Timestamp::parse).transpose();
+        let monitoring = Monitoring::new(at(monitor_from)?, at(monitor_until)?)?;
 
         let id = self
             .store
@@ -250,8 +257,9 @@ impl App {
                 url,
                 enabled: true,
                 created_at: Timestamp::now(),
+                priority,
+                monitoring,
                 hold_days,
-                discover_interval_minutes: interval,
             })
             .await?;
 
@@ -273,12 +281,7 @@ impl App {
         };
 
         // 中身を取るツールも #5 の対応表が決める。
-        let adapters = self.adapters()?;
-        let found = match content_type.media_type() {
-            Some(media_type) => adapters.ytdlp.describe(&url, media_type).await?,
-            // `Post` 側は `x_post` だけ。本文と繋がりは gallery-dl が返す。
-            None => adapters.gallerydl.describe(&url).await?,
-        };
+        let found = self.scheduler()?.describe(&url, content_type).await?;
 
         let id = self
             .store
@@ -286,6 +289,7 @@ impl App {
                 source_id: SourceId::new(source),
                 url: found.url,
                 published_at: found.published_at,
+                scheduled_start_at: found.scheduled_start_at,
                 state: State::initial(found.media),
                 state_since: Timestamp::now(),
                 content: found.content,
@@ -309,19 +313,18 @@ impl App {
             .await?
             .context("配信元が無い")?;
 
-        let adapters = self.adapters()?;
+        let scheduler = self.scheduler()?;
         // #5 の対応表が、この種別を取るのがどのツールかを決める。
-        let acquirer = adapters.acquirer(item.content_type());
-        let whisper = Whisper::new(
-            self.tool(Tool::WhisperCli)?,
-            self.tool(Tool::Ffmpeg)?,
-            &self.paths.transcribe_model,
-            self.config.transcribe.language.clone(),
-        );
+        let acquirer = scheduler.acquirer(item.content_type());
 
-        let state = Pipeline::new(&self.store, &self.paths.media_dir, &acquirer, &whisper)
-            .run(id, source.hold_policy())
-            .await?;
+        let state = Pipeline::new(
+            &self.store,
+            &self.paths.media_dir,
+            &acquirer,
+            scheduler.transcriber(),
+        )
+        .run(id, source.hold_policy())
+        .await?;
 
         println!("{id} -> {state}", state = state.as_str());
         Ok(())
@@ -335,7 +338,7 @@ impl App {
             }
         }
 
-        let model = escrow_core::adapter::Resolution::of_file(&self.paths.transcribe_model);
+        let model = Resolution::of_file(&self.paths.transcribe_model);
         match model.path() {
             Some(path) => println!("\n  文字起こしモデル  {}  ✓", path.display()),
             None => println!(

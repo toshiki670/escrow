@@ -53,8 +53,14 @@ pub struct Storage {
     pub media_dir: String,
     /// DB の場所。空なら Application Support 配下。
     pub db_path: String,
-    /// これを下回ったら取得を始めない。
-    pub min_free_gb: u64,
+    /// これを下回ったら取得を始めない。単位は GiB（2^30 バイト）。
+    ///
+    /// 単位を名前に持たせているのは、GB（10^9）と GiB（2^30）が 7% 違うため。
+    /// macOS 自身がどちらでも数字を見せる（Finder は GB、`df -h` は Gi）ので、
+    /// 設定の側で決めておかないと、人が書いた 20 と escrow が使う 20 が別物になる。
+    /// 厳しい側を採る — 多く空けさせて損をするのは待ち時間だけだが、足りないまま
+    /// 始めると取得が途中で死ぬ（#2）。
+    pub min_free_gib: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -62,7 +68,8 @@ pub struct Storage {
 pub struct Check {
     /// `holding` の項目をまとめて確認する間隔。
     ///
-    /// 検知（`Source.discover_interval_minutes`）とは別の概念なので、こちらは共通設定（#1）。
+    /// 検知（`Source.priority` と #13 の予算）とは別の概念なので、こちらは共通設定（#1）。
+    /// ディスクが逼迫したら詰める（#7 Phase 4）。
     pub interval_hours: NonZeroU32,
 }
 
@@ -160,12 +167,13 @@ impl fmt::Display for Language {
 /// cookie の取り出し元。
 ///
 /// #2 が「認証の取得元はプラットフォームごとに分けない」と決めているので、
-/// この1つの値が**すべてのアダプタへ渡る**。したがってここに並ぶのは、
-/// どのアダプタでも使えるものだけ。
+/// この1つの値が**認証の要る呼び出しすべてへ渡る**。したがってここに並ぶのは、
+/// どのアダプタでも使えるものだけ。渡らない先もある — YouTube の検知は匿名で、
+/// cookie を受け取る手段を持たない（#5）。
 ///
 /// どのアダプタが何を受けるかは、それぞれのアダプタが持つ
-/// （`adapter::<tool>::SUPPORTED_BROWSERS`）。ここが部分集合であることは
-/// `adapter` のテストが確かめる。綴りを自由にすると、渡した先で初めて
+/// （`escrow_adapter::<tool>::SUPPORTED_BROWSERS`）。ここが部分集合であることは
+/// `escrow-adapter` のテストが確かめる。綴りを自由にすると、渡した先で初めて
 /// 落ちる値を設定できてしまうので enum にしてある。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -219,7 +227,7 @@ impl Default for Storage {
         Self {
             media_dir: "~/Movies/escrow".to_owned(),
             db_path: String::new(),
-            min_free_gb: 20,
+            min_free_gib: 20,
         }
     }
 }
@@ -432,7 +440,7 @@ mod tests {
 [storage]
 media_dir = "~/Movies/escrow"
 db_path = ""
-min_free_gb = 20
+min_free_gib = 20
 
 [check]
 interval_hours = 24
@@ -481,7 +489,7 @@ extra_paths = []
         let path = dir.path().join("nested").join("config.toml");
 
         let mut config = Config::default();
-        config.storage.min_free_gb = 50;
+        config.storage.min_free_gib = 50;
         config.check.interval_hours = NonZeroU32::new(6).unwrap();
         config.transcribe.language = Language::Auto;
         config.auth.cookies_from = Browser::Safari;
@@ -630,11 +638,11 @@ interval_hours = 0
     fn a_partial_file_merges_with_the_defaults() {
         let partial = r#"
 [storage]
-min_free_gb = 50
+min_free_gib = 50
 "#;
         let config = Config::from_toml(partial).unwrap();
 
-        assert_eq!(config.storage.min_free_gb, 50);
+        assert_eq!(config.storage.min_free_gib, 50);
         // 同じセクションの他の項目も、別のセクションも既定のまま。
         assert_eq!(config.storage.media_dir, Storage::default().media_dir);
         assert_eq!(config.transcribe, Transcribe::default());
@@ -649,7 +657,7 @@ min_free_gb = 50
 
         Config::default().save(&path).unwrap();
         let mut config = Config::default();
-        config.storage.min_free_gb = 99;
+        config.storage.min_free_gib = 99;
         config.save(&path).unwrap();
 
         let left: Vec<_> = std::fs::read_dir(dir.path())
@@ -657,7 +665,7 @@ min_free_gb = 50
             .map(|e| e.unwrap().file_name())
             .collect();
         assert_eq!(left, ["config.toml"], "一時ファイルが残っていない");
-        assert_eq!(Config::load(&path).unwrap().storage.min_free_gb, 99);
+        assert_eq!(Config::load(&path).unwrap().storage.min_free_gib, 99);
     }
 
     /// `auto` の綴り揺れと前後の空白は吸収する。言語コードそのものは畳まない。

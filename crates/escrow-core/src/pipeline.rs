@@ -143,6 +143,7 @@ pub fn ordinal(n: u32) -> Option<NonZeroU32> {
 mod tests {
     use super::*;
     use crate::content::{Content, ContentType, MediaType};
+    use crate::source::Monitoring;
     use crate::source::SourceId;
     use crate::store::{NewItem, NewSource};
     use crate::url::{self, NormalizedUrl};
@@ -220,7 +221,8 @@ mod tests {
                 enabled: true,
                 created_at: Timestamp::parse("2026-01-01T00:00:00+09:00").unwrap(),
                 hold_days: None,
-                discover_interval_minutes: NonZeroU32::new(15).unwrap(),
+                priority: NonZeroU32::new(1).unwrap(),
+                monitoring: Monitoring::Continuous,
             })
             .await
             .unwrap();
@@ -232,6 +234,7 @@ mod tests {
                     .unwrap()
                     .0,
                 published_at: Timestamp::parse("2026-03-01T20:00:00+09:00").unwrap(),
+                scheduled_start_at: None,
                 state: State::Waiting,
                 state_since: Timestamp::parse("2026-03-01T20:00:00+09:00").unwrap(),
                 content: Content::Media {
