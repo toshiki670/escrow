@@ -8,8 +8,7 @@ use std::num::NonZeroU32;
 use anyhow::{Context as _, Result, bail};
 use clap::{Parser, Subcommand};
 
-use escrow_core::adapter::{Resolution, Resolver};
-use escrow_core::config::{Config, Dirs, Paths};
+use escrow_config::{Config, Dirs, Paths, Resolution, Resolver};
 use escrow_core::handover;
 use escrow_core::pipeline::Pipeline;
 use escrow_domain::content::ContentType;

@@ -21,8 +21,8 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 
 use crate::invocation::{Completed, Invocation, run};
-use escrow_core::adapter::{Acquire, AdapterError, Found, Probe};
-use escrow_core::config::Browser;
+use crate::{Acquire, AdapterError, Found, Probe};
+use escrow_config::Browser;
 use escrow_domain::asset::{self, Asset, AssetKind};
 use escrow_domain::content::{Content, ContentType, MediaType};
 use escrow_domain::liveness::Presence;

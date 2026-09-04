@@ -1,26 +1,37 @@
 //! 外部アクセスの一元化（#13）。
 //!
-//! **`escrow-adapter` を依存に持つ唯一の crate**（#3）。外へ出る呼び出しはすべて
+//! **`escrow-external` を依存に持つ唯一の crate**（#3）。外へ出る呼び出しはすべて
 //! ここを通り、迂回できないことは依存の向きが保証する。
+//!
+//! # この crate の公開 API が port そのもの（#15）
+//!
+//! 別に trait を切らず、外部アクセスの語彙をここから再公開する。スライスが書く
+//! 名前は `escrow_scheduler::` から始まり、**`escrow-external` の型を1つも名前で
+//! 知らない**。テストで差し替えるときも、この再公開した trait を実装すればよい。
 //!
 //! # いまは通すだけ
 //!
-//! #13 の4概念 — 受付・予算・拒否と再試行・順序 — は Phase 3.2 で入る。この段階に
+//! #13 の4概念 — 受付・予算・拒否と再試行・順序 — は Phase 5 で入る。この段階に
 //! 在るのは、アダプタを揃えて呼び出しをそのまま渡す層だけ。**順序も待機もまだ無い。**
 
 use std::path::PathBuf;
 
 use thiserror::Error;
 
-use escrow_adapter::gallerydl::GalleryDl;
-use escrow_adapter::route::Adapters;
-use escrow_adapter::rss::Rss;
-use escrow_adapter::whisper::Whisper;
-use escrow_adapter::ytdlp::YtDlp;
-use escrow_core::adapter::{Acquire, AdapterError, Found, Resolver, Tool, Transcribe};
-use escrow_core::config::{Config, Paths};
+use escrow_config::{Config, Paths, Resolver, Tool};
 use escrow_domain::content::ContentType;
 use escrow_domain::url::NormalizedUrl;
+use escrow_external::gallerydl::GalleryDl;
+use escrow_external::route::Adapters;
+use escrow_external::rss::Rss;
+use escrow_external::whisper::Whisper;
+use escrow_external::ytdlp::YtDlp;
+
+/// 外部アクセスの語彙。**スライスが触れてよい外の世界はこれで全部**（#15）。
+///
+/// `escrow-external` で定義されたものを、そのままここから見せる。写しを作らないので
+/// 型は1つきりで、変換の層も要らない。
+pub use escrow_external::{Acquire, AdapterError, Discover, Found, Probe, Transcribe};
 
 /// 要るツールが見つからなかった。
 ///

@@ -17,7 +17,7 @@ use std::path::Path;
 use crate::gallerydl::GalleryDl;
 use crate::rss::Rss;
 use crate::ytdlp::YtDlp;
-use escrow_core::adapter::{Acquire, AdapterError, Discover, Found};
+use crate::{Acquire, AdapterError, Discover, Found};
 use escrow_domain::asset::Asset;
 use escrow_domain::content::{Content, ContentType, Platform};
 use escrow_domain::source::Source;
@@ -196,7 +196,7 @@ async fn discover_youtube(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use escrow_core::config::Browser;
+    use escrow_config::Browser;
     use escrow_domain::source::{Monitoring, PersonId, SourceId};
     use std::num::NonZeroU32;
 

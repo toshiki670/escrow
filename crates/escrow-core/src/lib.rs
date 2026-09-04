@@ -6,7 +6,5 @@
 
 pub use escrow_domain::{asset, content, item, liveness, source, state, timestamp, url};
 
-pub mod adapter;
-pub mod config;
 pub mod handover;
 pub mod pipeline;

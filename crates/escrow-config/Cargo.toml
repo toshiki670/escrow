@@ -1,22 +1,18 @@
 [package]
-name = "escrow-core"
+name = "escrow-config"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+# escrow の crate に依存しない（#15）。設定は #1 の語彙を知らずに読めるので、
+# 段2 の中でも独立して立つ。
 [dependencies]
-escrow-domain.workspace = true
-escrow-ledger.workspace = true
-escrow-scheduler.workspace = true
 directories.workspace = true
 serde.workspace = true
-serde_json.workspace = true
-sqlx.workspace = true
-tempfile.workspace = true
 thiserror.workspace = true
-tokio.workspace = true
+tempfile.workspace = true
 toml.workspace = true
 which.workspace = true
 

@@ -17,8 +17,8 @@ use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 
 use crate::invocation::{Invocation, run};
-use escrow_core::adapter::{AdapterError, Transcribe};
-use escrow_core::config::Language;
+use crate::{AdapterError, Transcribe};
+use escrow_config::Language;
 use escrow_domain::asset::{Asset, AssetKind};
 
 const WHISPER: &str = "whisper-cli";

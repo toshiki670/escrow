@@ -1,5 +1,5 @@
 [package]
-name = "escrow-adapter"
+name = "escrow-external"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,17 +8,17 @@ repository.workspace = true
 
 [dependencies]
 escrow-domain.workspace = true
-escrow-core.workspace = true
+escrow-config.workspace = true
 chrono.workspace = true
 quick-xml.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+thiserror.workspace = true
 tempfile.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
-toml.workspace = true
 which.workspace = true
 
 [lints]

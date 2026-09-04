@@ -8,8 +8,8 @@ repository.workspace = true
 
 [dependencies]
 escrow-domain.workspace = true
-escrow-core.workspace = true
-escrow-adapter.workspace = true
+escrow-config.workspace = true
+escrow-external.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]

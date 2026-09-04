@@ -18,29 +18,31 @@ use std::path::{Path, PathBuf};
 /// 実際に使っているかは問わない（`escrow-gui` はまだ空）。ここに無い辺が
 /// 生えたら落ちる。
 const ALLOWED: &[(&str, &[&str])] = &[
+    // 段1 — カーネル。誰にも依存しない。
     ("escrow-domain", &[]),
+    // 段2 — 設定・永続化・外部ツール。互いを知らない（config だけは external が読む）。
+    ("escrow-config", &[]),
     ("escrow-ledger", &["escrow-domain"]),
-    ("escrow-core", &["escrow-domain", "escrow-ledger"]),
-    (
-        "escrow-adapter",
-        &["escrow-domain", "escrow-ledger", "escrow-core"],
-    ),
+    ("escrow-external", &["escrow-domain", "escrow-config"]),
+    // 段3 — 外部アクセスの受付。external を依存に持つ唯一の crate。
     (
         "escrow-scheduler",
-        &[
-            "escrow-domain",
-            "escrow-ledger",
-            "escrow-core",
-            "escrow-adapter",
-        ],
+        &["escrow-domain", "escrow-config", "escrow-external"],
     ),
+    // 段4 — スライス。互いを知らない。
+    (
+        "escrow-core",
+        &["escrow-domain", "escrow-ledger", "escrow-scheduler"],
+    ),
+    // 段5 — 入口。すべてを組み立てるが、external だけは名前で知らない。
     (
         "escrow-cli",
         &[
             "escrow-domain",
             "escrow-ledger",
-            "escrow-core",
+            "escrow-config",
             "escrow-scheduler",
+            "escrow-core",
         ],
     ),
     (
@@ -48,8 +50,9 @@ const ALLOWED: &[(&str, &[&str])] = &[
         &[
             "escrow-domain",
             "escrow-ledger",
-            "escrow-core",
+            "escrow-config",
             "escrow-scheduler",
+            "escrow-core",
         ],
     ),
 ];
@@ -58,7 +61,7 @@ const ALLOWED: &[(&str, &[&str])] = &[
 ///
 /// 定数で持つのは、crate を改名したときに次のテストが**黙って通る**のを防ぐため。
 /// 名前が実在することを先に確かめる。
-const EXTERNAL: &str = "escrow-adapter";
+const EXTERNAL: &str = "escrow-external";
 
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))

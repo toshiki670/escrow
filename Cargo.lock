@@ -485,28 +485,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "escrow-adapter"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "escrow-core",
- "escrow-domain",
- "quick-xml",
- "reqwest",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "toml",
- "which",
-]
-
-[[package]]
 name = "escrow-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "escrow-config",
  "escrow-core",
  "escrow-domain",
  "escrow-ledger",
@@ -516,12 +500,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "escrow-config"
+version = "0.1.0"
+dependencies = [
+ "directories",
+ "serde",
+ "tempfile",
+ "thiserror 2.0.20",
+ "toml",
+ "which",
+]
+
+[[package]]
 name = "escrow-core"
 version = "0.1.0"
 dependencies = [
  "directories",
  "escrow-domain",
  "escrow-ledger",
+ "escrow-scheduler",
  "serde",
  "serde_json",
  "sqlx",
@@ -541,6 +538,23 @@ dependencies = [
  "thiserror 2.0.20",
  "toml",
  "url",
+]
+
+[[package]]
+name = "escrow-external"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "escrow-config",
+ "escrow-domain",
+ "quick-xml",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
+ "which",
 ]
 
 [[package]]
@@ -566,9 +580,9 @@ dependencies = [
 name = "escrow-scheduler"
 version = "0.1.0"
 dependencies = [
- "escrow-adapter",
- "escrow-core",
+ "escrow-config",
  "escrow-domain",
+ "escrow-external",
  "thiserror 2.0.20",
 ]
 

@@ -7,6 +7,10 @@
 //! ファイルに書いてあるとおりの値を持ち、`~` の展開も `db_path` の既定も畳み込まない。
 //! 環境と突き合わせて実際の場所を出すのは [`Paths`] の仕事で、下流はそちらだけを見る。
 
+pub mod tools;
+
+pub use tools::{Resolution, Resolver, Tool};
+
 use std::fmt;
 use std::num::NonZeroU32;
 use std::path::{Component, Path, PathBuf};
@@ -172,8 +176,8 @@ impl fmt::Display for Language {
 /// cookie を受け取る手段を持たない（#5）。
 ///
 /// どのアダプタが何を受けるかは、それぞれのアダプタが持つ
-/// （`escrow_adapter::<tool>::SUPPORTED_BROWSERS`）。ここが部分集合であることは
-/// `escrow-adapter` のテストが確かめる。綴りを自由にすると、渡した先で初めて
+/// （`escrow_external::<tool>::SUPPORTED_BROWSERS`）。ここが部分集合であることは
+/// `escrow-external` のテストが確かめる。綴りを自由にすると、渡した先で初めて
 /// 落ちる値を設定できてしまうので enum にしてある。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

@@ -7,7 +7,7 @@
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 
-use escrow_core::adapter::AdapterError;
+use crate::AdapterError;
 
 /// 1回ぶんの呼び出し。
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -25,7 +25,7 @@
 
 use serde::Deserialize;
 
-use escrow_core::adapter::AdapterError;
+use crate::AdapterError;
 use escrow_domain::timestamp::Timestamp;
 use escrow_domain::url::{self, NormalizedUrl, TypeHint};
 
@@ -83,7 +83,7 @@ struct EntryLink {
 
 /// フィードで見つけた1件。
 ///
-/// [`escrow_core::adapter::Found`] にはまだ足りない — `/watch?v=` の側は種別が
+/// [`crate::Found`] にはまだ足りない — `/watch?v=` の側は種別が
 /// 決まっていない。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Sighting {

@@ -12,11 +12,11 @@ use thiserror::Error;
 
 use escrow_ledger::{Ledger, LedgerError, Projected};
 
-use crate::adapter::{Acquire, AdapterError, Transcribe};
 use crate::asset::{self, Asset, AssetKind};
 use crate::item::{Item, ItemId};
 use crate::state::{Event, Hold, State, TranscriptNeed};
 use crate::timestamp::Timestamp;
+use escrow_scheduler::{Acquire, AdapterError, Transcribe};
 
 #[derive(Debug, Error)]
 pub enum PipelineError {

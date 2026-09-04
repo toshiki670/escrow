@@ -3,8 +3,9 @@ resolver = "3"
 members = [
     "crates/escrow-domain",
     "crates/escrow-ledger",
+    "crates/escrow-config",
     "crates/escrow-core",
-    "crates/escrow-adapter",
+    "crates/escrow-external",
     "crates/escrow-scheduler",
     "crates/escrow-cli",
     "crates/escrow-gui",
@@ -21,7 +22,8 @@ repository = "https://github.com/toshiki670/escrow"
 escrow-domain = { path = "crates/escrow-domain" }
 escrow-ledger = { path = "crates/escrow-ledger" }
 escrow-core = { path = "crates/escrow-core" }
-escrow-adapter = { path = "crates/escrow-adapter" }
+escrow-config = { path = "crates/escrow-config" }
+escrow-external = { path = "crates/escrow-external" }
 escrow-scheduler = { path = "crates/escrow-scheduler" }
 clap = { version = "4.6", features = ["derive"] }
 anyhow = "1.0"

@@ -1,29 +1,56 @@
-//! 外部アクセスの語彙。
+//! 外部ツールの呼び出しと、その語彙。
 //!
 //! 「配信元から、まだ見ていない項目を見つける」「項目の実体を手元へ落とす」を
-//! trait として定め、実際にどのツールがそれを行うかは知らない。実装は
-//! `escrow-adapter`、呼ぶ順序と時刻は `escrow-scheduler`（#3）。
+//! trait として定め、それを実際のプロセス起動と HTTP へ落とす。#5 が決めた対応表の
+//! 実装にあたる層で、#5 自身が「ここで決めるのは実装の詳細で、データモデル（#1）より
+//! 可変性が高い」と言っているとおり、**ここは変わる前提**で組む。X の仕様変更、
+//! ツールのフラグ変更、ツールそのものの入れ替えに耐えること。
+//!
+//! **この crate を依存に持つのは `escrow-scheduler` だけ**（#3）。スライスも UI も
+//! 外部ツールを名前で知らないので、外部アクセスの迂回はコンパイルエラーになる。
+//! スライスが書くのは `escrow_scheduler::` から始まる名前だけで、ここの trait と
+//! 型はそちらが再公開したものを通って届く（#15）。
 //!
 //! # trait はドメインの語彙で切る
 //!
 //! [`Discover`] / [`Acquire`] / [`Transcribe`] / [`Probe`] のどれにも、ツール固有の
 //! 語を出さない。「タイムラインを列挙する」ではなく「配信元から、まだ見ていない
 //! 項目を見つける」。ツールを入れ替えても、呼ぶ側は動かない。
+//!
+//! # 分け方
+//!
+//! 3つの層を混ぜない。それぞれ別の理由で壊れるため。
+//!
+//! | 層 | 形 | 壊れる理由 |
+//! |---|---|---|
+//! | 引数の組み立て | 純関数 → [`Invocation`] | ツールのフラグが変わった |
+//! | 出力の読み取り | 純関数 `&str -> Result<_, AdapterError>` | ツールの出力形式が変わった |
+//! | 実行 | [`run`] 1か所 | OS 側の事情 |
+//!
+//! 1つの関数に混ぜると、落ちたときにどれが原因か分からない。分けてあれば、
+//! 引数のテストはプロセスを起動せず argv を突き合わせるだけで済み、出力のテストは
+//! 実物を固めた fixture で offline に回せる。
 
-pub mod tools;
+pub mod gallerydl;
+pub mod invocation;
+pub mod route;
+pub mod rss;
+pub mod whisper;
+pub mod ytdlp;
+
+pub use invocation::{Completed, Invocation, run};
+pub use route::{Acquirer, Adapters, Discoverer};
 
 use std::path::Path;
 
 use thiserror::Error;
 
-use crate::asset::Asset;
-use crate::content::{Content, ContentType};
-use crate::liveness::Presence;
-use crate::source::Source;
-use crate::timestamp::Timestamp;
-use crate::url::NormalizedUrl;
-
-pub use tools::{Resolution, Resolver, Tool};
+use escrow_domain::asset::Asset;
+use escrow_domain::content::{Content, ContentType};
+use escrow_domain::liveness::Presence;
+use escrow_domain::source::Source;
+use escrow_domain::timestamp::Timestamp;
+use escrow_domain::url::NormalizedUrl;
 
 /// 外部ツールが期待どおりに働かなかったとき。
 ///
@@ -88,9 +115,9 @@ pub struct Found {
     /// 過ぎた時刻を入れると待つ意味が無くなる。
     pub scheduled_start_at: Option<Timestamp>,
     pub content: Content,
-    /// 取得する実体があるか。無ければ [`crate::state::State::initial`] で
+    /// 取得する実体があるか。無ければ [`escrow_domain::state::State::initial`] で
     /// そのまま `kept` になる（#1）。
-    pub media: crate::state::MediaPresence,
+    pub media: escrow_domain::state::MediaPresence,
 }
 
 impl Found {
@@ -146,4 +173,31 @@ pub trait Probe {
         &self,
         url: &NormalizedUrl,
     ) -> impl Future<Output = Result<Presence, AdapterError>> + Send;
+}
+
+#[cfg(test)]
+mod tests {
+    use escrow_config::Browser;
+
+    /// 設定に並ぶブラウザは、**すべてのアダプタが受けられる**こと。
+    ///
+    /// #2 が「認証の取得元はプラットフォームごとに分けない」と決めたので、1つの値が
+    /// 全アダプタへ渡る。どれか1つでも受けないものが混ざると、そのプラットフォームだけ
+    /// 落ちる。アダプタを足すときは、ここへ1行足して同じことを確かめる。
+    #[test]
+    fn every_configurable_browser_works_with_every_adapter() {
+        let adapters: [(&str, &[Browser]); 2] = [
+            ("yt-dlp", super::ytdlp::SUPPORTED_BROWSERS),
+            ("gallery-dl", super::gallerydl::SUPPORTED_BROWSERS),
+        ];
+
+        for browser in Browser::ALL {
+            for (name, supported) in adapters {
+                assert!(
+                    supported.contains(&browser),
+                    "{name} は {browser} を受けないので、共通設定に置けない"
+                );
+            }
+        }
+    }
 }
