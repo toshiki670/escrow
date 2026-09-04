@@ -312,19 +312,13 @@ impl App {
             .await?
             .with_context(|| format!("項目 {id} が無い"))?
             .item;
-        let source = self
-            .ledger
-            .source(item.source_id)
-            .await?
-            .context("配信元が無い")?;
-
         let scheduler = self.scheduler()?;
         // #5 の対応表が、この種別を取るのがどのツールかを決める。
         let acquirer = scheduler.acquirer(item.content_type());
 
-        // 期限を出すのは取得が終わった瞬間なので、渡すのは日数のまま（#1）。
+        // 預かる日数も期限も、取得が終わった瞬間に取得のスライスが決める（#1）。
         let state = Acquisition::new(&self.ledger, &self.paths.media_dir, &acquirer)
-            .run(id, source.hold_days)
+            .run(id)
             .await?;
 
         // スライスは互いを知らないので、**次に誰が拾うかは状態が決める**（#15）。

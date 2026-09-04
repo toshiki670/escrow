@@ -9,12 +9,12 @@
 //!
 //! リトライ・空き容量の門・待ち行列は Phase 6（#7）。ここは1件を1回運ぶだけ。
 
-use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 
 use escrow_domain::asset::{self, Asset, transcript_need};
 use escrow_domain::item::ItemId;
-use escrow_domain::state::{Event, Hold, HoldTooFar, State, TranscriptNeed};
+use escrow_domain::source::SourceId;
+use escrow_domain::state::{Event, HoldTooFar, State, TranscriptNeed};
 use escrow_domain::timestamp::Timestamp;
 use escrow_ledger::{Ledger, LedgerError, Projected};
 use escrow_scheduler::{Acquire, AdapterError};
@@ -28,6 +28,8 @@ pub enum AcquisitionError {
     Adapter(#[from] AdapterError),
     #[error("項目 {0} が無い")]
     NoSuchItem(ItemId),
+    #[error("配信元 {0} が無い")]
+    NoSuchSource(SourceId),
     #[error(transparent)]
     HoldTooFar(#[from] HoldTooFar),
     #[error("手元の実体を扱えない: {path}")]
@@ -55,18 +57,15 @@ impl<'a, A: Acquire> Acquisition<'a, A> {
 
     /// `waiting` の1件を取得し、次の状態まで進める。
     ///
-    /// `hold_days` は配信元の既定値（#1）。**期限になるのは取得が終わった瞬間**で、
-    /// ここで1つの日時に変わったあとは `Item` が持つ。始める前に出しておくと、
-    /// 数時間の録画ではその長さぶん期限が早まる。
+    /// 預かる日数は配信元から**取得が終わった瞬間に読む**（#1）。呼ぶ側から
+    /// 受け取らないのは、数時間の録画の間に人が日数を変えられるため — 始める前に
+    /// 読んだ値を終わってから当てると、どちらの時点の設定でもない期限になる。
     ///
     /// 途中の状態は都度書く。落ちたときにどこまで進んだかが台帳に残り、#6 の
     /// ダッシュボードが「いま動いているもの」を読める。
-    pub async fn run(
-        &self,
-        id: ItemId,
-        hold_days: Option<NonZeroU32>,
-    ) -> Result<State, AcquisitionError> {
+    pub async fn run(&self, id: ItemId) -> Result<State, AcquisitionError> {
         let current = self.load(id).await?;
+        let source_id = current.item.source_id;
         let current = self.step(current, &Event::AcquisitionStarted).await?;
 
         let dir = asset::item_dir(self.media_dir, id);
@@ -77,8 +76,16 @@ impl<'a, A: Acquire> Acquisition<'a, A> {
 
         // 何を落とせたかで、文字起こしが要るかが決まる（#1 のスイッチ表）。
         let transcript = transcript_need(&assets);
+
+        // 期限も日数も、この1つの瞬間から決まる。
         let finished = Timestamp::now();
-        let hold = Hold::from_days(hold_days, finished)?;
+        let source = self
+            .ledger
+            .source(source_id)
+            .await?
+            .ok_or(AcquisitionError::NoSuchSource(source_id))?;
+        let hold = source.hold_from(finished)?;
+
         let current = self
             .append(current, &Event::Acquired { transcript, hold }, finished)
             .await?;
@@ -177,6 +184,13 @@ mod tests {
     }
 
     async fn waiting_item(ledger: &Ledger) -> (SourceId, ItemId) {
+        waiting_item_holding_for(ledger, None).await
+    }
+
+    async fn waiting_item_holding_for(
+        ledger: &Ledger,
+        hold_days: Option<NonZeroU32>,
+    ) -> (SourceId, ItemId) {
         let person = ledger.add_person("○○").await.unwrap();
         let source = ledger
             .add_source(&NewSource {
@@ -187,7 +201,7 @@ mod tests {
                 .unwrap(),
                 enabled: true,
                 created_at: at("2026-01-01T00:00:00+09:00"),
-                hold_days: None,
+                hold_days,
                 priority: NonZeroU32::MIN,
                 monitoring: Monitoring::Continuous,
             })
@@ -230,12 +244,12 @@ mod tests {
     #[tokio::test]
     async fn audible_media_stops_at_transcribing() {
         let ledger = Ledger::open_in_memory().await.unwrap();
-        let (_, id) = waiting_item(&ledger).await;
+        let (_, id) = waiting_item_holding_for(&ledger, NonZeroU32::new(7)).await;
         let media = tempfile::tempdir().unwrap();
         let acquire = takes(&["video.1.mp4"]);
 
         let state = Acquisition::new(&ledger, media.path(), &acquire)
-            .run(id, NonZeroU32::new(7))
+            .run(id)
             .await
             .unwrap();
 
@@ -250,11 +264,11 @@ mod tests {
     async fn images_alone_skip_transcription() {
         for (hold_days, expects_a_deadline) in [(None, false), (NonZeroU32::new(7), true)] {
             let ledger = Ledger::open_in_memory().await.unwrap();
-            let (_, id) = waiting_item(&ledger).await;
+            let (_, id) = waiting_item_holding_for(&ledger, hold_days).await;
             let media = tempfile::tempdir().unwrap();
 
             let state = Acquisition::new(&ledger, media.path(), &takes(&["image.1.jpg"]))
-                .run(id, hold_days)
+                .run(id)
                 .await
                 .unwrap();
 
@@ -282,7 +296,7 @@ mod tests {
             media.path(),
             &takes(&["video.1.mp4", "video.2.mp4"]),
         )
-        .run(id, None)
+        .run(id)
         .await
         .unwrap();
 
@@ -306,7 +320,7 @@ mod tests {
         let media = tempfile::tempdir().unwrap();
 
         let result = Acquisition::new(&ledger, media.path(), &Failing)
-            .run(id, None)
+            .run(id)
             .await;
 
         assert!(matches!(result, Err(AcquisitionError::Adapter(_))));
@@ -338,12 +352,12 @@ mod tests {
         }
 
         let ledger = Ledger::open_in_memory().await.unwrap();
-        let (_, id) = waiting_item(&ledger).await;
+        let (_, id) = waiting_item_holding_for(&ledger, NonZeroU32::new(7)).await;
         let media = tempfile::tempdir().unwrap();
 
         let started = Timestamp::now();
         let state = Acquisition::new(&ledger, media.path(), &Slow)
-            .run(id, NonZeroU32::new(7))
+            .run(id)
             .await
             .unwrap();
 
@@ -367,7 +381,7 @@ mod tests {
             .unwrap();
 
         let result = Acquisition::new(&ledger, media.path(), &takes(&["video.1.mp4"]))
-            .run(id, None)
+            .run(id)
             .await;
 
         assert!(matches!(

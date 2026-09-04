@@ -107,11 +107,8 @@ mod tests {
     use escrow_domain::state::{Event, Hold, MediaPresence, State, TranscriptNeed};
     use escrow_domain::url;
 
+    use crate::testing::at;
     use crate::{Ledger, NewSource, Seq};
-
-    fn at(text: &str) -> escrow_domain::timestamp::Timestamp {
-        escrow_domain::timestamp::Timestamp::parse(text).expect("固定値")
-    }
 
     /// 投影を壊してから作り直し、元に戻ることを確かめる。
     ///
@@ -210,6 +207,79 @@ mod tests {
 
         for (id, expected) in ids.iter().zip(&before) {
             assert_eq!(&ledger.item(*id).await.unwrap().unwrap(), expected);
+        }
+    }
+
+    /// 引き渡し済みの項目と、繋がりを持つ投稿も、作り直しで元に戻ること。
+    ///
+    /// 状態と対でしか意味を持たない値（`release_reference`）と、subtype ごとの値
+    /// （`title` / `body` / 繋がりの URL）が、どれも投影の側にしか無い状態に
+    /// なっていないことの確認（#1）。
+    #[tokio::test]
+    async fn released_items_and_linked_posts_survive_a_rebuild() {
+        let (ledger, source) = crate::testing::seeded().await;
+
+        // 引き渡し済みの配信。題名に引用符と日本語が入る。
+        let live = ledger
+            .discover(
+                &Discovered {
+                    source_id: source,
+                    url: url::normalize_item("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+                        .unwrap()
+                        .0,
+                    published_at: at("2026-03-01T20:00:00+09:00"),
+                    scheduled_start_at: Some(at("2026-03-01T21:00:00+09:00")),
+                    content: Content::Media {
+                        media_type: MediaType::YoutubeLive,
+                        title: "「89%」が言う \"widespread\" — ○○の雑談".to_owned(),
+                    },
+                    media: MediaPresence::Present,
+                },
+                at("2026-03-01T20:05:00+09:00"),
+            )
+            .await
+            .unwrap();
+
+        let mut seq = Seq::FIRST;
+        for (event, moment) in [
+            (Event::AcquisitionStarted, "2026-03-01T20:10:00+09:00"),
+            (
+                Event::Acquired {
+                    transcript: TranscriptNeed::NotNeeded,
+                    hold: Hold::None,
+                },
+                "2026-03-02T00:30:00+09:00",
+            ),
+            (
+                Event::Released {
+                    reference: Some(escrow_domain::state::ReleaseReference::new(
+                        "Attachments/2026-03-01 ○○.mp4",
+                    )),
+                },
+                "2026-03-03T21:00:00+09:00",
+            ),
+        ] {
+            seq = ledger.append(live, seq, &event, at(moment)).await.unwrap();
+        }
+
+        // 繋がりを持つ投稿。実体が無いので kept から始まる。
+        let post = ledger
+            .discover(
+                &crate::testing::a_post(source),
+                at("2026-03-01T12:01:00+09:00"),
+            )
+            .await
+            .unwrap();
+
+        let before = [
+            ledger.item(live).await.unwrap().unwrap(),
+            ledger.item(post).await.unwrap().unwrap(),
+        ];
+
+        assert_eq!(ledger.rebuild().await.unwrap(), 2);
+
+        for (id, expected) in [live, post].into_iter().zip(&before) {
+            assert_eq!(&ledger.item(id).await.unwrap().unwrap(), expected);
         }
     }
 
