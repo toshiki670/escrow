@@ -23,13 +23,13 @@ use serde::Deserialize;
 
 use crate::invocation::{Completed, Invocation, run};
 use escrow_core::adapter::{Acquire, AdapterError, Discover, Found};
-use escrow_core::asset::{Asset, AssetKind};
 use escrow_core::config::Browser;
-use escrow_core::content::{Content, ContentType};
-use escrow_core::source::Source;
-use escrow_core::state::MediaPresence;
-use escrow_core::timestamp::Timestamp;
-use escrow_core::url::{self, NormalizedUrl};
+use escrow_domain::asset::{Asset, AssetKind};
+use escrow_domain::content::{Content, ContentType};
+use escrow_domain::source::Source;
+use escrow_domain::state::MediaPresence;
+use escrow_domain::timestamp::Timestamp;
+use escrow_domain::url::{self, NormalizedUrl};
 
 const PROGRAM: &str = "gallery-dl";
 
@@ -615,7 +615,7 @@ mod tests {
             "{error:?}"
         );
         // cookie の失効は消えたことを意味しない。判定は保留（#5）。
-        assert_eq!(error.presence(), escrow_core::liveness::Presence::Unknown);
+        assert_eq!(error.presence(), escrow_domain::liveness::Presence::Unknown);
     }
 
     #[test]
@@ -624,7 +624,7 @@ mod tests {
         let error = parse_timeline(json).unwrap_err();
 
         assert!(matches!(error, AdapterError::Transient { .. }), "{error:?}");
-        assert_eq!(error.presence(), escrow_core::liveness::Presence::Unknown);
+        assert_eq!(error.presence(), escrow_domain::liveness::Presence::Unknown);
     }
 
     #[test]
@@ -641,7 +641,7 @@ mod tests {
         // cookie の失効は消えたことを意味しない。判定は保留（#5）。
         assert_eq!(
             classify(&completed).presence(),
-            escrow_core::liveness::Presence::Unknown
+            escrow_domain::liveness::Presence::Unknown
         );
     }
 

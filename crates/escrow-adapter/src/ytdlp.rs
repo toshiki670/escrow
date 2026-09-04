@@ -22,13 +22,13 @@ use serde::Deserialize;
 
 use crate::invocation::{Completed, Invocation, run};
 use escrow_core::adapter::{Acquire, AdapterError, Found, Probe};
-use escrow_core::asset::{self, Asset, AssetKind};
 use escrow_core::config::Browser;
-use escrow_core::content::{Content, ContentType, MediaType};
-use escrow_core::liveness::Presence;
-use escrow_core::state::MediaPresence;
-use escrow_core::timestamp::Timestamp;
-use escrow_core::url::{self, NormalizedUrl};
+use escrow_domain::asset::{self, Asset, AssetKind};
+use escrow_domain::content::{Content, ContentType, MediaType};
+use escrow_domain::liveness::Presence;
+use escrow_domain::state::MediaPresence;
+use escrow_domain::timestamp::Timestamp;
+use escrow_domain::url::{self, NormalizedUrl};
 
 const PROGRAM: &str = "yt-dlp";
 

@@ -7,6 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+escrow-domain.workspace = true
 escrow-core.workspace = true
 escrow-adapter.workspace = true
 thiserror.workspace = true

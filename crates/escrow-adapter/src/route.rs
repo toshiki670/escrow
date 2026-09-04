@@ -18,12 +18,12 @@ use crate::gallerydl::GalleryDl;
 use crate::rss::Rss;
 use crate::ytdlp::YtDlp;
 use escrow_core::adapter::{Acquire, AdapterError, Discover, Found};
-use escrow_core::asset::Asset;
-use escrow_core::content::{Content, ContentType, Platform};
-use escrow_core::source::Source;
-use escrow_core::state::MediaPresence;
-use escrow_core::timestamp::Timestamp;
-use escrow_core::url::{self, NormalizedUrl, TypeHint};
+use escrow_domain::asset::Asset;
+use escrow_domain::content::{Content, ContentType, Platform};
+use escrow_domain::source::Source;
+use escrow_domain::state::MediaPresence;
+use escrow_domain::timestamp::Timestamp;
+use escrow_domain::url::{self, NormalizedUrl, TypeHint};
 
 /// 使えるツールを揃えたもの。
 ///
@@ -197,7 +197,7 @@ async fn discover_youtube(
 mod tests {
     use super::*;
     use escrow_core::config::Browser;
-    use escrow_core::source::{Monitoring, PersonId, SourceId};
+    use escrow_domain::source::{Monitoring, PersonId, SourceId};
     use std::num::NonZeroU32;
 
     fn adapters() -> Adapters {

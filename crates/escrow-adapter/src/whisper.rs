@@ -18,8 +18,8 @@ use std::path::{Path, PathBuf};
 
 use crate::invocation::{Invocation, run};
 use escrow_core::adapter::{AdapterError, Transcribe};
-use escrow_core::asset::{Asset, AssetKind};
 use escrow_core::config::Language;
+use escrow_domain::asset::{Asset, AssetKind};
 
 const WHISPER: &str = "whisper-cli";
 const FFMPEG: &str = "ffmpeg";

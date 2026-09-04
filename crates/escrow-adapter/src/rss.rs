@@ -26,8 +26,8 @@
 use serde::Deserialize;
 
 use escrow_core::adapter::AdapterError;
-use escrow_core::timestamp::Timestamp;
-use escrow_core::url::{self, NormalizedUrl, TypeHint};
+use escrow_domain::timestamp::Timestamp;
+use escrow_domain::url::{self, NormalizedUrl, TypeHint};
 
 const PROGRAM: &str = "youtube-rss";
 
@@ -185,7 +185,7 @@ fn transient(detail: &dyn std::fmt::Display) -> AdapterError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use escrow_core::content::ContentType;
+    use escrow_domain::content::ContentType;
 
     /// 実物を固めたもの。CNN のチャンネル、2026-09-03 取得。
     const FEED: &str = include_str!("../tests/fixtures/rss/videos.xml");

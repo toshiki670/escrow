@@ -19,8 +19,8 @@ use escrow_adapter::whisper::Whisper;
 use escrow_adapter::ytdlp::YtDlp;
 use escrow_core::adapter::{Acquire, AdapterError, Found, Resolver, Tool, Transcribe};
 use escrow_core::config::{Config, Paths};
-use escrow_core::content::ContentType;
-use escrow_core::url::NormalizedUrl;
+use escrow_domain::content::ContentType;
+use escrow_domain::url::NormalizedUrl;
 
 /// 要るツールが見つからなかった。
 ///

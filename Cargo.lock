@@ -490,6 +490,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "escrow-core",
+ "escrow-domain",
  "quick-xml",
  "reqwest",
  "serde",
@@ -547,6 +548,7 @@ name = "escrow-gui"
 version = "0.1.0"
 dependencies = [
  "escrow-core",
+ "escrow-domain",
 ]
 
 [[package]]
@@ -566,6 +568,7 @@ version = "0.1.0"
 dependencies = [
  "escrow-adapter",
  "escrow-core",
+ "escrow-domain",
  "thiserror 2.0.20",
 ]
 

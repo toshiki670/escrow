@@ -10,15 +10,15 @@ use clap::{Parser, Subcommand};
 
 use escrow_core::adapter::{Resolution, Resolver};
 use escrow_core::config::{Config, Dirs, Paths};
-use escrow_core::content::ContentType;
 use escrow_core::handover;
-use escrow_core::item::ItemId;
 use escrow_core::pipeline::Pipeline;
-use escrow_core::source::{Monitoring, PersonId, SourceId};
-use escrow_core::state::{ReleaseReference, StateName};
-use escrow_core::timestamp::Timestamp;
-use escrow_core::url::{self, TypeHint};
+use escrow_domain::content::ContentType;
 use escrow_domain::item::Discovered;
+use escrow_domain::item::ItemId;
+use escrow_domain::source::{Monitoring, PersonId, SourceId};
+use escrow_domain::state::{ReleaseReference, StateName};
+use escrow_domain::timestamp::Timestamp;
+use escrow_domain::url::{self, TypeHint};
 use escrow_ledger::{Ledger, NewSource};
 use escrow_scheduler::Scheduler;
 
