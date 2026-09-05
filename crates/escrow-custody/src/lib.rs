@@ -111,7 +111,9 @@ impl<'a> Custody<'a> {
     /// 終端に達した項目の実体を消し、消したものを返す。
     ///
     /// escrow はメディアを永続化しないので、終端の項目に対応するディレクトリは
-    /// 残らない（#1）。**残っていたら、事象を書いたあとファイルを消す前に落ちた跡**。
+    /// 残らない（#1）。**残っているのは、途中で落ちたか、取得しきれなかったぶん**。
+    /// #7 は終端の4つを区別せずここへ載せている — 取り切れなかった断片も追跡する
+    /// 相手がいないので、残せば `min_free_gib` を静かに削る。
     ///
     /// # Errors
     ///
@@ -479,6 +481,8 @@ mod tests {
     }
 
     /// 終端の項目に残った実体を消し、進行中のものには触らない（#7）。
+    ///
+    /// **取り切れなかったぶんも消す。** #7 は終端の4つを区別していない。
     #[tokio::test]
     async fn orphans_are_removed_and_live_items_are_left_alone() {
         let ledger = Ledger::open_in_memory().await.unwrap();
@@ -502,8 +506,31 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(custody.remove_orphans().await.unwrap(), vec![discarded]);
+        // 取得しきれずに終わったもの。断片が手元に残る。
+        let failed = live_item(&ledger, media.path(), source, "Ks-_Mh1QhMc").await;
+        let seq = ledger
+            .append(
+                failed,
+                Seq::FIRST,
+                &Event::AcquisitionStarted,
+                at("2026-03-01T20:10:00+09:00"),
+            )
+            .await
+            .unwrap();
+        ledger
+            .append(
+                failed,
+                seq,
+                &Event::RetriesExhausted,
+                at("2026-03-01T21:00:00+09:00"),
+            )
+            .await
+            .unwrap();
+
+        let removed = custody.remove_orphans().await.unwrap();
+        assert_eq!(removed.len(), 2, "{removed:?}");
         assert!(!media_exists(media.path(), discarded));
+        assert!(!media_exists(media.path(), failed));
         assert!(media_exists(media.path(), held));
         assert!(media_exists(media.path(), live));
     }

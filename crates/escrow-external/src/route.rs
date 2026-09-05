@@ -380,6 +380,11 @@ mod tests {
                 expected,
                 "{content_type}"
             );
+            assert_eq!(
+                Adapters::has_prober(content_type),
+                expected,
+                "担い手の有無と、担い手そのものが食い違う: {content_type}"
+            );
         }
     }
 
