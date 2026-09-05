@@ -72,9 +72,6 @@ pub struct Schedule {
 }
 
 // ------------------------------------------------------------ 引数の組み立て
-//
-// すべて純関数。テストはプロセスを起動せず argv を突き合わせるだけで済むので、
-// ツールのフラグが変わったときに落ちるのはこの層だけになる。
 
 /// どの呼び出しにも渡すもの。**cookie はここに入れない。**
 fn base(program: &Path) -> Invocation {
@@ -92,9 +89,8 @@ fn with_cookies(invocation: Invocation, browser: Browser) -> Invocation {
         .arg(browser.as_str())
 }
 
-/// 検知の追加取得。**cookie を渡さない**（#5）。
+/// 検知の追加取得。フィードが語らない「動画か配信か」と開始時刻を、ここで埋める。
 ///
-/// フィードは動画か配信かを語らず、開始時刻も持たないので、そこだけをここで埋める。
 /// 引数は [`describe_argv`] と同じで、違うのは cookie の有無だけ。
 pub fn schedule_argv(program: &Path, url: &NormalizedUrl) -> Invocation {
     base(program)
@@ -143,9 +139,6 @@ pub fn download_argv(
 }
 
 // ---------------------------------------------------------- 出力の読み取り
-//
-// こちらも純関数。fixture で offline にテストできるので、ツールの出力形式が
-// 変わったときに落ちるのはこの層だけになる。
 
 /// `--dump-json` の、escrow が使う項目だけ。
 ///
@@ -651,10 +644,6 @@ mod tests {
     }
 
     /// cookie を使えないのはプラットフォーム全体の問題。項目の `error` にしない（#5）。
-    ///
-    /// 設定したブラウザが入っていない場合も同じ扱いにする。実測すると、その場合は
-    /// 認証の要らない公開のものまで落ちるので、一時的な失敗として扱うと何を直せば
-    /// よいか分からないまま止まり続ける。
     #[test]
     fn unusable_cookies_are_their_own_failure() {
         for stderr in [
