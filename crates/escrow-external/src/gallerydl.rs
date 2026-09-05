@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 
 use crate::invocation::{Completed, Invocation, run};
-use crate::{Acquire, AdapterError, BoxFuture, Discover, Found};
+use crate::{AdapterError, Found};
 use escrow_config::Browser;
 use escrow_domain::asset::{Asset, AssetKind};
 use escrow_domain::content::Content;
@@ -309,13 +309,14 @@ impl GalleryDl {
     }
 }
 
-impl Discover for GalleryDl {
-    fn discover<'a>(
-        &'a self,
-        source: &'a Source,
+impl GalleryDl {
+    /// タイムラインを1回読む。順番待ちは [`crate::route::Discoverer`] が掛ける。
+    pub(crate) async fn discover(
+        &self,
+        source: &Source,
         since: Timestamp,
-    ) -> BoxFuture<'a, Result<Vec<Found>, AdapterError>> {
-        Box::pin(async move {
+    ) -> Result<Vec<Found>, AdapterError> {
+        {
             let timeline = timeline_url(&source.url).ok_or_else(|| AdapterError::Parse {
                 program: PROGRAM.to_owned(),
                 detail: format!("X の配信元として読めない: {}", source.url),
@@ -330,17 +331,18 @@ impl Discover for GalleryDl {
             let mut found = parse_timeline(&completed.stdout)?;
             found.retain(|f| f.published_at >= since);
             Ok(found)
-        })
+        }
     }
 }
 
-impl Acquire for GalleryDl {
-    fn acquire<'a>(
-        &'a self,
-        url: &'a NormalizedUrl,
-        into: &'a Path,
-    ) -> BoxFuture<'a, Result<Vec<Asset>, AdapterError>> {
-        Box::pin(async move {
+impl GalleryDl {
+    /// 実体を落とす。順番待ちは [`crate::route::Acquirer`] が掛ける。
+    pub(crate) async fn acquire(
+        &self,
+        url: &NormalizedUrl,
+        into: &Path,
+    ) -> Result<Vec<Asset>, AdapterError> {
+        {
             let io_error = |source| AdapterError::Launch {
                 program: PROGRAM.to_owned(),
                 source,
@@ -360,7 +362,7 @@ impl Acquire for GalleryDl {
             }
 
             rename_into_place(scratch.path(), into)
-        })
+        }
     }
 }
 

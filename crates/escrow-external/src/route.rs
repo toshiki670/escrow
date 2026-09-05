@@ -1,29 +1,36 @@
 //! #5 の対応表。**プラットフォーム × 操作 → ツール**。
 //!
-//! | | 検知 | 取得 |
-//! |---|---|---|
-//! | YouTube ショート / 動画 / 配信 | RSS ＋ yt-dlp の追加取得 | yt-dlp |
-//! | X 投稿 | gallery-dl | gallery-dl |
-//! | X Space | gallery-dl | yt-dlp |
-//! | X ライブ配信 | gallery-dl | yt-dlp |
+//! | | 検知 | 取得 | 生存確認 |
+//! |---|---|---|---|
+//! | YouTube ショート / 動画 / 配信 | RSS ＋ yt-dlp の追加取得 | yt-dlp | yt-dlp |
+//! | X 投稿 | gallery-dl | gallery-dl | **未決**（#5） |
+//! | X Space | gallery-dl | yt-dlp | yt-dlp |
+//! | X ライブ配信 | gallery-dl | yt-dlp | yt-dlp |
 //!
 //! **この対応をコードの1か所に置く。** 散らばっていると「X の取得を別ツールへ」が
 //! 何箇所の変更になるか分からない。ここに集めてあれば、変わるのは表の1行になる。
 //!
 //! 呼ぶ側（パイプライン・CLI・エンジン）はどのツールが動いたかを知らない。
+//!
+//! # 外へ出る点はここに集まる
+//!
+//! 下の [`Acquirer`] / [`Discoverer`] / [`Adapters::describe`] が、この crate の
+//! 外向きの呼び出しを1本残らず [`through`] へ通す（#13）。ツールの側は素の
+//! メソッドを持つだけなので、予算を迂回する経路が crate の外から見えない。
 
 use std::path::Path;
 
 use crate::gallerydl::GalleryDl;
 use crate::rss::Rss;
 use crate::ytdlp::YtDlp;
-use crate::{Acquire, AdapterError, BoxFuture, Discover, Found};
+use crate::{Acquire, AdapterError, Admit, BoxFuture, Discover, Found, Probe, Route, through};
 use escrow_domain::asset::Asset;
 use escrow_domain::content::{Content, ContentType, Platform};
+use escrow_domain::liveness::Presence;
 use escrow_domain::source::Source;
 use escrow_domain::state::MediaPresence;
 use escrow_domain::timestamp::Timestamp;
-use escrow_domain::url::{self, NormalizedUrl, TypeHint};
+use escrow_domain::url::{NormalizedUrl, TypeHint};
 
 /// 使えるツールを揃えたもの。
 ///
@@ -49,14 +56,19 @@ impl Adapters {
     ///
     /// X の Space とライブ配信が gallery-dl でないのは、`twitter:spaces` /
     /// `twitter:broadcast` を持つのが yt-dlp だけだから（#5）。
-    pub const fn acquirer(&self, content_type: ContentType) -> Acquirer<'_> {
-        match content_type {
+    pub const fn acquirer<'a>(
+        &'a self,
+        content_type: ContentType,
+        admit: &'a dyn Admit,
+    ) -> Acquirer<'a> {
+        let tool = match content_type {
             ContentType::YoutubeShorts | ContentType::YoutubeVideo | ContentType::YoutubeLive => {
-                Acquirer::YtDlp(&self.ytdlp)
+                AcquireTool::YtDlp(&self.ytdlp)
             }
-            ContentType::XPost => Acquirer::GalleryDl(&self.gallerydl),
-            ContentType::XSpace | ContentType::XBroadcast => Acquirer::YtDlp(&self.ytdlp),
-        }
+            ContentType::XPost => AcquireTool::GalleryDl(&self.gallerydl),
+            ContentType::XSpace | ContentType::XBroadcast => AcquireTool::YtDlp(&self.ytdlp),
+        };
+        Acquirer { tool, admit }
     }
 
     /// 対応表の「検知」列。
@@ -64,16 +76,39 @@ impl Adapters {
     /// YouTube は RSS。認証が要らず、1チャンネル1回で済み、叩いてよい頻度が
     /// 公表されている（#5）。X は yt-dlp ではタイムラインを列挙できないので
     /// gallery-dl。
-    pub fn discoverer(&self, source: &Source) -> Result<Discoverer<'_>, AdapterError> {
-        match url::platform_of_source(&source.url) {
-            Some(Platform::Youtube) => Ok(Discoverer::Youtube {
+    pub const fn discoverer<'a>(
+        &'a self,
+        platform: Platform,
+        admit: &'a dyn Admit,
+    ) -> Discoverer<'a> {
+        let tool = match platform {
+            Platform::Youtube => DiscoverTool::Youtube {
                 rss: &self.rss,
                 ytdlp: &self.ytdlp,
-            }),
-            Some(Platform::X) => Ok(Discoverer::GalleryDl(&self.gallerydl)),
-            None => Err(AdapterError::Parse {
-                program: "escrow".to_owned(),
-                detail: format!("どのプラットフォームの配信元か決められない: {}", source.url),
+            },
+            Platform::X => DiscoverTool::GalleryDl(&self.gallerydl),
+        };
+        Discoverer { tool, admit }
+    }
+
+    /// 対応表の「生存確認」列。
+    ///
+    /// **X 投稿には担い手がいない** — #5 が手段を決めていない。#5 の非対称性により
+    /// 確かめられない項目は `holding` に留まるので、空を返すことがそのまま仕様になる。
+    pub const fn prober<'a>(
+        &'a self,
+        content_type: ContentType,
+        admit: &'a dyn Admit,
+    ) -> Option<Prober<'a>> {
+        match content_type {
+            ContentType::XPost => None,
+            ContentType::YoutubeShorts
+            | ContentType::YoutubeVideo
+            | ContentType::YoutubeLive
+            | ContentType::XSpace
+            | ContentType::XBroadcast => Some(Prober {
+                tool: &self.ytdlp,
+                admit,
             }),
         }
     }
@@ -86,16 +121,24 @@ impl Adapters {
         &self,
         url: &NormalizedUrl,
         content_type: ContentType,
+        admit: &dyn Admit,
     ) -> Result<Found, AdapterError> {
         match content_type.media_type() {
-            Some(media_type) => self.ytdlp.describe(url, media_type).await,
-            None => self.gallerydl.describe(url).await,
+            Some(media_type) => {
+                through(admit, Route::Describe, self.ytdlp.describe(url, media_type)).await
+            }
+            None => through(admit, Route::Describe, self.gallerydl.describe(url)).await,
         }
     }
 }
 
 /// 取得を担うもの。呼ぶ側はどれが動いたかを知らない。
-pub enum Acquirer<'a> {
+pub struct Acquirer<'a> {
+    tool: AcquireTool<'a>,
+    admit: &'a dyn Admit,
+}
+
+enum AcquireTool<'a> {
     YtDlp(&'a YtDlp),
     GalleryDl(&'a GalleryDl),
 }
@@ -107,16 +150,41 @@ impl Acquire for Acquirer<'_> {
         into: &'a Path,
     ) -> BoxFuture<'a, Result<Vec<Asset>, AdapterError>> {
         Box::pin(async move {
-            match self {
-                Self::YtDlp(tool) => tool.acquire(url, into).await,
-                Self::GalleryDl(tool) => tool.acquire(url, into).await,
+            let admit = self.admit;
+            match self.tool {
+                AcquireTool::YtDlp(tool) => {
+                    through(admit, Route::Acquire, tool.acquire(url, into)).await
+                }
+                AcquireTool::GalleryDl(tool) => {
+                    through(admit, Route::Acquire, tool.acquire(url, into)).await
+                }
             }
         })
     }
 }
 
+/// 生存確認を担うもの。
+pub struct Prober<'a> {
+    tool: &'a YtDlp,
+    admit: &'a dyn Admit,
+}
+
+impl Probe for Prober<'_> {
+    fn probe<'a>(
+        &'a self,
+        url: &'a NormalizedUrl,
+    ) -> BoxFuture<'a, Result<Presence, AdapterError>> {
+        Box::pin(through(self.admit, Route::Probe, self.tool.probe(url)))
+    }
+}
+
 /// 検知を担うもの。
-pub enum Discoverer<'a> {
+pub struct Discoverer<'a> {
+    tool: DiscoverTool<'a>,
+    admit: &'a dyn Admit,
+}
+
+enum DiscoverTool<'a> {
     /// **RSS で見つけ、足りないぶんだけ yt-dlp で埋める**（#5）。
     ///
     /// フィードは1チャンネル1回で15件を返すが、`/watch?v=` の項目が動画か配信かを
@@ -135,9 +203,13 @@ impl Discover for Discoverer<'_> {
         since: Timestamp,
     ) -> BoxFuture<'a, Result<Vec<Found>, AdapterError>> {
         Box::pin(async move {
-            match self {
-                Self::Youtube { rss, ytdlp } => discover_youtube(rss, ytdlp, source, since).await,
-                Self::GalleryDl(tool) => tool.discover(source, since).await,
+            match self.tool {
+                DiscoverTool::Youtube { rss, ytdlp } => {
+                    discover_youtube(rss, ytdlp, source, since, self.admit).await
+                }
+                DiscoverTool::GalleryDl(tool) => {
+                    through(self.admit, Route::Discover, tool.discover(source, since)).await
+                }
             }
         })
     }
@@ -148,15 +220,22 @@ impl Discover for Discoverer<'_> {
 /// **追加取得の回数を決めるのは `since`。** フィードは常に15件返すので、絞らないと
 /// 巡回のたびに15回叩くことになる。台帳との突き合わせは呼ぶ側の仕事なので（#1 の
 /// `Item.url` の一意キー）、ここでは日時だけで切る。
+///
+/// 外へ出るのは1回ではない。フィードが1回、追加取得が項目ごとに1回で、**それぞれ別の
+/// 経路の予算に載る**（#13）。まとめて1回として数えると、配信元1本ぶんの要求が実際の
+/// 15分の1に見える。
 async fn discover_youtube(
     rss: &Rss,
     ytdlp: &YtDlp,
     source: &Source,
     since: Timestamp,
+    admit: &dyn Admit,
 ) -> Result<Vec<Found>, AdapterError> {
     let mut found = Vec::new();
 
-    for sighting in rss.sightings(&source.url).await? {
+    let sightings = through(admit, Route::Discover, rss.sightings(&source.url)).await?;
+
+    for sighting in sightings {
         if sighting.published_at < since {
             continue;
         }
@@ -173,7 +252,8 @@ async fn discover_youtube(
                 None,
             ),
             TypeHint::YoutubeUnknown => {
-                let schedule = ytdlp.schedule(&sighting.url).await?;
+                let schedule =
+                    through(admit, Route::Describe, ytdlp.schedule(&sighting.url)).await?;
                 (schedule.media_type, schedule.scheduled_start_at)
             }
         };
@@ -200,8 +280,6 @@ async fn discover_youtube(
 mod tests {
     use super::*;
     use escrow_config::Browser;
-    use escrow_domain::source::{Monitoring, PersonId, SourceId};
-    use std::num::NonZeroU32;
 
     fn adapters() -> Adapters {
         Adapters::new(
@@ -211,30 +289,30 @@ mod tests {
         )
     }
 
-    fn source(url: &str) -> Source {
-        Source {
-            id: SourceId::new(1),
-            person_id: PersonId::new(1),
-            url: url::normalize_source(url).expect(url),
-            enabled: true,
-            created_at: Timestamp::parse("2026-01-01T00:00:00+09:00").unwrap(),
-            hold_days: None,
-            priority: NonZeroU32::new(1).unwrap(),
-            monitoring: Monitoring::Continuous,
+    /// 順番を待たせないもの。対応表だけを見るテストで使う。
+    struct Anytime;
+
+    impl Admit for Anytime {
+        fn admit(&self, _route: Route) -> BoxFuture<'_, Box<dyn crate::Permit + '_>> {
+            Box::pin(async { Box::new(Self) as Box<dyn crate::Permit + '_> })
         }
     }
 
+    impl crate::Permit for Anytime {
+        fn report(&self, _result: Result<(), &AdapterError>) {}
+    }
+
     fn acquirer_name(acquirer: &Acquirer<'_>) -> &'static str {
-        match acquirer {
-            Acquirer::YtDlp(_) => "yt-dlp",
-            Acquirer::GalleryDl(_) => "gallery-dl",
+        match acquirer.tool {
+            AcquireTool::YtDlp(_) => "yt-dlp",
+            AcquireTool::GalleryDl(_) => "gallery-dl",
         }
     }
 
     fn discoverer_name(discoverer: &Discoverer<'_>) -> &'static str {
-        match discoverer {
-            Discoverer::Youtube { .. } => "rss",
-            Discoverer::GalleryDl(_) => "gallery-dl",
+        match discoverer.tool {
+            DiscoverTool::Youtube { .. } => "rss",
+            DiscoverTool::GalleryDl(_) => "gallery-dl",
         }
     }
 
@@ -242,6 +320,7 @@ mod tests {
     #[test]
     fn acquisition_follows_the_table() {
         let adapters = adapters();
+        let admit = Anytime;
 
         for (content_type, expected) in [
             (ContentType::YoutubeShorts, "yt-dlp"),
@@ -253,7 +332,7 @@ mod tests {
             (ContentType::XBroadcast, "yt-dlp"),
         ] {
             assert_eq!(
-                acquirer_name(&adapters.acquirer(content_type)),
+                acquirer_name(&adapters.acquirer(content_type, &admit)),
                 expected,
                 "{content_type}"
             );
@@ -264,26 +343,41 @@ mod tests {
     #[test]
     fn discovery_follows_the_table() {
         let adapters = adapters();
+        let admit = Anytime;
 
-        let youtube = source("https://www.youtube.com/channel/UCBR8-60-B28hp2BmDPdntcQ");
         assert_eq!(
-            discoverer_name(&adapters.discoverer(&youtube).unwrap()),
+            discoverer_name(&adapters.discoverer(Platform::Youtube, &admit)),
             "rss"
         );
-
-        let x = source("https://x.com/i/user/12");
         assert_eq!(
-            discoverer_name(&adapters.discoverer(&x).unwrap()),
+            discoverer_name(&adapters.discoverer(Platform::X, &admit)),
             "gallery-dl"
         );
+    }
+
+    /// 「生存確認」列。X 投稿だけ担い手がいない（#5）。
+    #[test]
+    fn liveness_checks_follow_the_table() {
+        let adapters = adapters();
+        let admit = Anytime;
+
+        for content_type in ContentType::ALL {
+            let expected = content_type != ContentType::XPost;
+            assert_eq!(
+                adapters.prober(content_type, &admit).is_some(),
+                expected,
+                "{content_type}"
+            );
+        }
     }
 
     /// 全種別に取得の担当がいること。種別を足したらここで気づく。
     #[test]
     fn every_type_has_someone_to_fetch_it() {
         let adapters = adapters();
+        let admit = Anytime;
         for content_type in ContentType::ALL {
-            let _ = adapters.acquirer(content_type);
+            let _ = adapters.acquirer(content_type, &admit);
         }
     }
 

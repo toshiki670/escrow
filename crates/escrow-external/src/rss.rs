@@ -12,6 +12,8 @@
 //! `/shorts/` と `/watch?v=` は `link` で分かるが、`/watch?v=` の側は動画か配信かを
 //! 語らない。そこだけ1件ごとの追加取得で埋める（[`crate::ytdlp::YtDlp::schedule`]）。
 
+use std::time::Duration;
+
 use serde::Deserialize;
 
 use crate::AdapterError;
@@ -157,11 +159,36 @@ impl Rss {
                 url: source.as_str().to_owned(),
             });
         }
+        // 断られたことは一時的な失敗と分ける（#13）。**この経路にだけ合図が在る** —
+        // yt-dlp と gallery-dl はどの失敗でも終了コードが 1 で、文言から拒否を
+        // 読み取るのは当てにならない（#5）。
+        if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            return Err(AdapterError::Rejected {
+                program: PROGRAM.to_owned(),
+                detail: response.status().to_string(),
+                retry_after: retry_after(response.headers()),
+            });
+        }
         let response = response.error_for_status().map_err(|e| transient(&e))?;
         let xml = response.text().await.map_err(|e| transient(&e))?;
 
         parse_feed(&xml)
     }
+}
+
+/// `Retry-After` が指す待ち時間。
+///
+/// 読むのは秒数の形だけ。HTTP-date の形は空を返し、#2 の既定へ落とす — 日時の書式を
+/// 自前で解くより、設定した待ち時間を使うほうが外れ方が小さい。
+fn retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
+    headers
+        .get(reqwest::header::RETRY_AFTER)?
+        .to_str()
+        .ok()?
+        .trim()
+        .parse()
+        .ok()
+        .map(Duration::from_secs)
 }
 
 fn transient(detail: &dyn std::fmt::Display) -> AdapterError {
@@ -194,6 +221,30 @@ mod tests {
                     .to_owned()
             )
         );
+    }
+
+    /// 秒数の `Retry-After` は読み、それ以外は空にして既定へ落とす。
+    #[test]
+    fn retry_after_is_read_only_in_its_seconds_form() {
+        let header = |value: &str| {
+            let mut headers = reqwest::header::HeaderMap::new();
+            headers.insert(
+                reqwest::header::RETRY_AFTER,
+                reqwest::header::HeaderValue::from_str(value).unwrap(),
+            );
+            retry_after(&headers)
+        };
+
+        assert_eq!(header("120"), Some(Duration::from_secs(120)));
+        assert_eq!(header(" 120 "), Some(Duration::from_secs(120)));
+        assert_eq!(header("0"), Some(Duration::ZERO));
+
+        // HTTP-date の形。読まずに空を返す。
+        assert_eq!(header("Wed, 21 Oct 2026 07:28:00 GMT"), None);
+        assert_eq!(header("しばらく"), None);
+        assert_eq!(header("-5"), None);
+
+        assert_eq!(retry_after(&reqwest::header::HeaderMap::new()), None);
     }
 
     /// X の配信元にはフィードが無い。

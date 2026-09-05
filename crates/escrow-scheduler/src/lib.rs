@@ -9,18 +9,40 @@
 //! 名前は `escrow_scheduler::` から始まり、**`escrow-external` の型を1つも名前で
 //! 知らない**。テストで差し替えるときも、この再公開した trait を実装すればよい。
 //!
-//! # いまは通すだけ
+//! # 語彙は3つ（#13）
 //!
-//! #13 の4概念 — 受付・予算・拒否と再試行・順序 — は Phase 5 で入る。この段階に
-//! 在るのは、アダプタを揃えて呼び出しをそのまま渡す層だけ。**順序も待機もまだ無い。**
+//! | 向き | 語彙 | 型 |
+//! |---|---|---|
+//! | 要求する側 → | 何が欲しいか | 下の trait のどれかを呼ぶ |
+//! | 要求する側 → | いつまでに要るか | [`Demand`] |
+//! | ← スケジューラ | いつ出すつもりか | [`Plan`] |
+//!
+//! 要求する側は上限の値も待ち方も知らず、**いつ出るかを決めない**。返ってきたものを
+//! 呼ぶと、その中で順番を待つ。
+//!
+//! # 予算は要求を出す側の外に在る
+//!
+//! 各経路が自分で自分を抑える形だと、経路が複数ある時点で合計を誰も知らない（#13）。
+//! [`budget::Budget`] が経路ごとの門を持ち、`escrow-external` の外向きの呼び出しは
+//! 1本残らずそこを通る。
+//!
+//! # 生存確認の受付はまだ無い
+//!
+//! 予算の側には経路が在り、対応表（#5）にも列が在るが、**呼ぶ側が Phase 6**（#7 の
+//! 巡回）。呼ぶ側の形が決まる前に受付を書くと、書き直しになる。
 
-use std::path::PathBuf;
+pub mod budget;
+
+use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
 use escrow_config::{Config, Paths, Resolver, Tool};
-use escrow_domain::content::ContentType;
-use escrow_domain::url::NormalizedUrl;
+use escrow_domain::asset::Asset;
+use escrow_domain::content::{ContentType, Platform};
+use escrow_domain::source::Source;
+use escrow_domain::timestamp::Timestamp;
+use escrow_domain::url::{self, NormalizedUrl};
 use escrow_external::gallerydl::GalleryDl;
 use escrow_external::route::Adapters;
 use escrow_external::rss::Rss;
@@ -31,7 +53,12 @@ use escrow_external::ytdlp::YtDlp;
 ///
 /// `escrow-external` で定義されたものを、そのままここから見せる。写しを作らないので
 /// 型は1つきりで、変換の層も要らない。
-pub use escrow_external::{Acquire, AdapterError, BoxFuture, Discover, Found, Probe, Transcribe};
+pub use budget::{Demand, Next, Plan};
+pub use escrow_external::{
+    Acquire, AdapterError, BoxFuture, Discover, Found, Probe, Route, Transcribe,
+};
+
+use budget::{Budget, Turn};
 
 /// 要るツールが見つからなかった。
 ///
@@ -44,6 +71,7 @@ pub struct MissingTool(pub Tool);
 pub struct Scheduler {
     adapters: Adapters,
     whisper: Whisper,
+    budget: Budget,
 }
 
 impl Scheduler {
@@ -55,6 +83,7 @@ impl Scheduler {
         let browser = config.auth.cookies_from;
 
         Ok(Self {
+            budget: Budget::new(&config.schedule),
             adapters: Adapters::new(
                 Rss::new(),
                 YtDlp::new(path(resolver, Tool::YtDlp)?, browser),
@@ -70,22 +99,109 @@ impl Scheduler {
     }
 
     /// 1件のメタデータを取る。
+    ///
+    /// # Errors
+    ///
+    /// 順番を待ったうえで外へ出て、そこで起きたことをそのまま返す。
     pub async fn describe(
         &self,
         url: &NormalizedUrl,
         content_type: ContentType,
+        demand: Demand,
     ) -> Result<Found, AdapterError> {
-        self.adapters.describe(url, content_type).await
+        let turn = self.budget.turn(content_type.platform(), demand);
+
+        self.adapters.describe(url, content_type, &turn).await
+    }
+
+    /// この配信元を見るもの。#5 の対応表が決める。
+    ///
+    /// # Errors
+    ///
+    /// 配信元の URL からプラットフォームを決められないとき。
+    pub fn discoverer(
+        &self,
+        source: &Source,
+        demand: Demand,
+    ) -> Result<Box<dyn Discover + '_>, AdapterError> {
+        let platform = url::platform_of_source(&source.url).ok_or_else(|| AdapterError::Parse {
+            program: "escrow".to_owned(),
+            detail: format!("どのプラットフォームの配信元か決められない: {}", source.url),
+        })?;
+
+        Ok(Box::new(Discovering {
+            adapters: &self.adapters,
+            turn: self.budget.turn(platform, demand),
+            platform,
+        }))
     }
 
     /// この種別を取るもの。#5 の対応表が決める。
-    pub fn acquirer(&self, content_type: ContentType) -> Box<dyn Acquire + '_> {
-        Box::new(self.adapters.acquirer(content_type))
+    pub fn acquirer(&self, content_type: ContentType, demand: Demand) -> Box<dyn Acquire + '_> {
+        Box::new(Acquiring {
+            adapters: &self.adapters,
+            turn: self.budget.turn(content_type.platform(), demand),
+            content_type,
+        })
     }
 
     /// 文字起こしをするもの。
+    ///
+    /// **予算を通らない。** whisper はローカルで動き、外へ要求を出さない（#13）。
     pub const fn transcriber(&self) -> &dyn Transcribe {
         &self.whisper
+    }
+
+    /// いつ出すつもりかを、経路ごとに答える（#13）。UI がこれを読む。
+    ///
+    /// `now` は答えを壁の時計へ写すための起点。門が測っているのは経過時間なので、
+    /// 残りをこの時刻へ足して返す。
+    pub fn plan(&self, now: Timestamp) -> Vec<Plan> {
+        self.budget.plan(now)
+    }
+}
+
+/// 予算を通してから配信元を見る。
+struct Discovering<'a> {
+    adapters: &'a Adapters,
+    turn: Turn<'a>,
+    platform: Platform,
+}
+
+impl Discover for Discovering<'_> {
+    fn discover<'a>(
+        &'a self,
+        source: &'a Source,
+        since: Timestamp,
+    ) -> BoxFuture<'a, Result<Vec<Found>, AdapterError>> {
+        Box::pin(async move {
+            self.adapters
+                .discoverer(self.platform, &self.turn)
+                .discover(source, since)
+                .await
+        })
+    }
+}
+
+/// 予算を通してから実体を落とす。
+struct Acquiring<'a> {
+    adapters: &'a Adapters,
+    turn: Turn<'a>,
+    content_type: ContentType,
+}
+
+impl Acquire for Acquiring<'_> {
+    fn acquire<'a>(
+        &'a self,
+        url: &'a NormalizedUrl,
+        into: &'a Path,
+    ) -> BoxFuture<'a, Result<Vec<Asset>, AdapterError>> {
+        Box::pin(async move {
+            self.adapters
+                .acquirer(self.content_type, &self.turn)
+                .acquire(url, into)
+                .await
+        })
     }
 }
 

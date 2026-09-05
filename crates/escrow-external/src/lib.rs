@@ -43,6 +43,7 @@ pub use route::{Acquirer, Adapters, Discoverer};
 
 use std::path::Path;
 use std::pin::Pin;
+use std::time::Duration;
 
 use thiserror::Error;
 
@@ -53,9 +54,9 @@ use escrow_domain::source::Source;
 use escrow_domain::timestamp::Timestamp;
 use escrow_domain::url::NormalizedUrl;
 
-/// [`Discover`] / [`Acquire`] / [`Transcribe`] / [`Probe`] が返す future。
+/// [`Discover`] / [`Acquire`] / [`Transcribe`] / [`Probe`] / [`Admit`] が返す future。
 ///
-/// **`Box` へ入れると、この4つを `dyn` にできる**（#7）。`impl Future` を返す形は
+/// **`Box` へ入れると、これらを `dyn` にできる**（#7）。`impl Future` を返す形は
 /// `dyn` にできず、型引数が呼ぶ側へ伝播して入口まで届く。`Box` にすれば入口の型が
 /// 具象のままになり、払うのは呼び出し1回あたりの確保1回だけ — 相手はプロセス起動か
 /// HTTP なので、その1回は測れる大きさに届かない。
@@ -93,6 +94,17 @@ pub enum AdapterError {
     /// 一時的な失敗。次の回でやり直す。
     #[error("{program} が一時的に失敗した: {detail}")]
     Transient { program: String, detail: String },
+    /// 断られた。
+    ///
+    /// **一時的な失敗と分けて持つ**（#13）。分けずに扱うと、断られた直後に同じ速さで
+    /// 叩き直し、やり直しが止められている原因そのものになる。
+    #[error("{program} に断られた: {detail}")]
+    Rejected {
+        program: String,
+        detail: String,
+        /// 相手が指定した待ち時間。無ければ #2 の `schedule.rejection_backoff_seconds`。
+        retry_after: Option<Duration>,
+    },
 }
 
 impl AdapterError {
@@ -106,7 +118,8 @@ impl AdapterError {
             Self::Launch { .. }
             | Self::Parse { .. }
             | Self::Unauthenticated { .. }
-            | Self::Transient { .. } => Presence::Unknown,
+            | Self::Transient { .. }
+            | Self::Rejected { .. } => Presence::Unknown,
         }
     }
 }
@@ -133,6 +146,60 @@ impl Found {
     pub fn content_type(&self) -> ContentType {
         self.content.content_type()
     }
+}
+
+/// 外へ出る要求の種類。#13 の経路がそのまま並ぶ。
+///
+/// 文字起こしがここに無いのは、whisper がローカルで動いて外へ要求を出さないため。
+/// 一覧に無ければ、飛ばす理由を書く場所も要らない。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Route {
+    /// 配信元を1回読む。
+    Discover,
+    /// 1件のメタデータを取る。予約枠のポーリングもここを通る。
+    Describe,
+    /// 実体を手元へ落とす。
+    Acquire,
+    /// 配信元にまだ在るかを確かめる。
+    Probe,
+}
+
+impl Route {
+    pub const ALL: [Self; 4] = [Self::Discover, Self::Describe, Self::Acquire, Self::Probe];
+}
+
+/// 外へ出る順番を決めるもの。
+///
+/// **実装は `escrow-scheduler`**（#13）。ここが宣言するのは「外へ出る点はどこか」
+/// までで、上限の値も待ち方も順番の決め方も持たない。
+pub trait Admit: Send + Sync {
+    /// この経路の順番が来るまで待つ。
+    fn admit(&self, route: Route) -> BoxFuture<'_, Box<dyn Permit + '_>>;
+}
+
+/// 順番が回ってきたことの証。**落とすと枠が空く。**
+pub trait Permit: Send {
+    /// 呼び出しがどうなったかを伝える。断られていれば、その経路がしばらく閉じる。
+    fn report(&self, result: Result<(), &AdapterError>);
+}
+
+/// 順番を待ってから外へ出て、結果を伝える。
+///
+/// **この crate が外へ出る点は、すべてここを通る**（#13）。素通りさせると、その1本ぶん
+/// だけ予算が実際より軽く見える。
+///
+/// # Errors
+///
+/// `call` が返した失敗をそのまま返す。順番待ちそのものは失敗しない。
+pub async fn through<T>(
+    admit: &dyn Admit,
+    route: Route,
+    call: impl Future<Output = Result<T, AdapterError>>,
+) -> Result<T, AdapterError> {
+    let permit = admit.admit(route).await;
+    let result = call.await;
+    permit.report(result.as_ref().map(|_| ()));
+    result
 }
 
 /// 配信元から、まだ見ていない項目を見つける。

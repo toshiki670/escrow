@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 
 use crate::invocation::{Completed, Invocation, run};
-use crate::{Acquire, AdapterError, BoxFuture, Found, Probe};
+use crate::{AdapterError, Found};
 use escrow_config::Browser;
 use escrow_domain::asset::{self, Asset, AssetKind};
 use escrow_domain::content::{Content, MediaType};
@@ -326,13 +326,14 @@ impl YtDlp {
     }
 }
 
-impl Acquire for YtDlp {
-    fn acquire<'a>(
-        &'a self,
-        url: &'a NormalizedUrl,
-        into: &'a Path,
-    ) -> BoxFuture<'a, Result<Vec<Asset>, AdapterError>> {
-        Box::pin(async move {
+impl YtDlp {
+    /// 実体を落とす。順番待ちは [`crate::route::Acquirer`] が掛ける。
+    pub(crate) async fn acquire(
+        &self,
+        url: &NormalizedUrl,
+        into: &Path,
+    ) -> Result<Vec<Asset>, AdapterError> {
+        {
             std::fs::create_dir_all(into).map_err(|source| AdapterError::Launch {
                 program: PROGRAM.to_owned(),
                 source,
@@ -358,21 +359,19 @@ impl Acquire for YtDlp {
                 });
             }
             Ok(assets)
-        })
+        }
     }
 }
 
-impl Probe for YtDlp {
-    fn probe<'a>(
-        &'a self,
-        url: &'a NormalizedUrl,
-    ) -> BoxFuture<'a, Result<Presence, AdapterError>> {
-        Box::pin(async move {
+impl YtDlp {
+    /// まだ在るかを確かめる。順番待ちは [`crate::route::Prober`] が掛ける。
+    pub(crate) async fn probe(&self, url: &NormalizedUrl) -> Result<Presence, AdapterError> {
+        {
             let invocation = probe_argv(&self.program, url, self.browser);
             let completed = run(&invocation, None).await?;
 
             Ok(parse_probe(&completed))
-        })
+        }
     }
 }
 
