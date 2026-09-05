@@ -100,16 +100,45 @@ impl Adapters {
         content_type: ContentType,
         admit: &'a dyn Admit,
     ) -> Option<Prober<'a>> {
+        if Self::has_prober(content_type) {
+            Some(Prober {
+                tool: &self.ytdlp,
+                admit,
+            })
+        } else {
+            None
+        }
+    }
+
+    /// 生存確認の担い手がいる種別か。
+    ///
+    /// 担い手そのものを組み立てずに済むので、**[`Admit`] を持たない場所からも対応表へ
+    /// 訊ける**。[`Adapters::prober`] もここを読むので、答えは1か所で決まる。
+    pub const fn has_prober(content_type: ContentType) -> bool {
         match content_type {
-            ContentType::XPost => None,
+            ContentType::XPost => false,
             ContentType::YoutubeShorts
             | ContentType::YoutubeVideo
             | ContentType::YoutubeLive
             | ContentType::XSpace
-            | ContentType::XBroadcast => Some(Prober {
-                tool: &self.ytdlp,
-                admit,
-            }),
+            | ContentType::XBroadcast => true,
+        }
+    }
+
+    /// 1件が配信元に在るかを確かめる。
+    ///
+    /// **担い手がいない種別は、観測できなかったとして返す**（#5）。#5 の非対称性が
+    /// 「それ以外すべて」を判定保留に寄せているので、手段を決めていないことも
+    /// その中に収まる。
+    pub async fn probe(
+        &self,
+        url: &NormalizedUrl,
+        content_type: ContentType,
+        admit: &dyn Admit,
+    ) -> Result<Presence, AdapterError> {
+        match self.prober(content_type, admit) {
+            Some(prober) => prober.probe(url).await,
+            None => Ok(Presence::Unknown),
         }
     }
 
@@ -368,7 +397,31 @@ mod tests {
                 expected,
                 "{content_type}"
             );
+            assert_eq!(
+                Adapters::has_prober(content_type),
+                expected,
+                "担い手の有無と、担い手そのものが食い違う: {content_type}"
+            );
         }
+    }
+
+    /// 担い手がいない種別は、外へ出ずに判定保留を返す（#5）。
+    ///
+    /// アダプタのパスは存在しないので、**起動すれば失敗が返る**。`Ok` が返ることが
+    /// そのまま「出ていない」の証拠になる。
+    #[tokio::test]
+    async fn a_type_with_no_prober_answers_without_going_out() {
+        let adapters = adapters();
+        let url = escrow_domain::url::normalize_item("https://x.com/i/status/20")
+            .unwrap()
+            .0;
+
+        let observed = adapters
+            .probe(&url, ContentType::XPost, &Anytime)
+            .await
+            .unwrap();
+
+        assert_eq!(observed, Presence::Unknown);
     }
 
     /// 全種別に取得の担当がいること。種別を足したらここで気づく。

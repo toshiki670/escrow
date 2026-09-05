@@ -25,10 +25,6 @@
 //! [`budget::Budget`] が経路ごとの門を持ち、`escrow-external` の外向きの呼び出しは
 //! 1本残らずそこを通る。
 //!
-//! # 生存確認の受付はまだ無い
-//!
-//! 予算の側には経路が在り、対応表（#5）にも列が在るが、**呼ぶ側が Phase 6**（#7 の
-//! 巡回）。呼ぶ側の形が決まる前に受付を書くと、書き直しになる。
 
 pub mod budget;
 
@@ -39,6 +35,7 @@ use thiserror::Error;
 use escrow_config::{Config, Paths, Resolver, Tool};
 use escrow_domain::asset::Asset;
 use escrow_domain::content::{ContentType, Platform};
+use escrow_domain::liveness::Presence;
 use escrow_domain::source::Source;
 use escrow_domain::timestamp::Timestamp;
 use escrow_domain::url::{self, NormalizedUrl};
@@ -144,6 +141,20 @@ impl Scheduler {
         })
     }
 
+    /// この種別の生存確認をするもの。#5 の対応表が決める。
+    ///
+    /// **手段を決めていない種別では空**（X 投稿）。空を返すので、**確かめようのない
+    /// ものに予算を使わない**。
+    pub fn prober(&self, content_type: ContentType, demand: Demand) -> Option<Box<dyn Probe + '_>> {
+        Adapters::has_prober(content_type).then(|| {
+            Box::new(Probing {
+                adapters: &self.adapters,
+                turn: self.budget.turn(content_type.platform(), demand),
+                content_type,
+            }) as Box<dyn Probe + '_>
+        })
+    }
+
     /// 文字起こしをするもの。
     ///
     /// **予算を通らない。** whisper はローカルで動き、外へ要求を出さない（#13）。
@@ -200,6 +211,22 @@ impl Acquire for Acquiring<'_> {
                 .acquire(url, into)
                 .await
         })
+    }
+}
+
+/// 予算を通してから配信元を確かめる。
+struct Probing<'a> {
+    adapters: &'a Adapters,
+    turn: Turn<'a>,
+    content_type: ContentType,
+}
+
+impl Probe for Probing<'_> {
+    fn probe<'a>(
+        &'a self,
+        url: &'a NormalizedUrl,
+    ) -> BoxFuture<'a, Result<Presence, AdapterError>> {
+        Box::pin(self.adapters.probe(url, self.content_type, &self.turn))
     }
 }
 

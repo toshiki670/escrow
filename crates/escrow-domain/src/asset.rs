@@ -141,6 +141,17 @@ pub fn item_dir(media_dir: &Path, item: ItemId) -> PathBuf {
     media_dir.join(item.to_string())
 }
 
+/// 1つの項目の実体をまとめて消す。**在ったときだけ真**。
+///
+/// 消えていることが目的なので、無いのは成功。場所は `Item.id` から導出する（#1）。
+pub fn remove(media_dir: &Path, item: ItemId) -> io::Result<bool> {
+    match fs::remove_dir_all(item_dir(media_dir, item)) {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
 /// 手元にある実体を読み出す。種類、次に通し番号の順に並ぶ。
 ///
 /// ディレクトリが無い場合は空を返す。まだ何も取得していない項目は普通にこれ。
@@ -309,5 +320,21 @@ mod tests {
                 "transcript.2.vtt"
             ]
         );
+    }
+
+    /// 消えていることが目的なので、無いのは成功。
+    #[test]
+    fn removing_what_is_not_there_succeeds() {
+        let media_dir = tempfile::tempdir().unwrap();
+        let item = ItemId::new(7);
+
+        assert!(!remove(media_dir.path(), item).unwrap());
+
+        let dir = item_dir(media_dir.path(), item);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("video.1.mp4"), b"x").unwrap();
+
+        assert!(remove(media_dir.path(), item).unwrap());
+        assert!(!dir.exists());
     }
 }

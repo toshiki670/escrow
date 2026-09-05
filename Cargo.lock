@@ -560,6 +560,14 @@ dependencies = [
 [[package]]
 name = "escrow-custody"
 version = "0.1.0"
+dependencies = [
+ "escrow-domain",
+ "escrow-ledger",
+ "escrow-scheduler",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
+]
 
 [[package]]
 name = "escrow-discovery"
