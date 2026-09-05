@@ -1,20 +1,25 @@
-//! `macro_rules!` の一覧を表で固定する。
+//! **ワークスペース全体で `macro_rules!` を禁じる。**
 //!
 //! マクロは自由度が高いぶん、書き手の想定を外れた展開が起きてもコンパイラが助けない。
-//! 導出・generics・trait で書ける形はそちらを採る、というのが方針で、**足すには下の表を
-//! 編集することになる**ので必ず差分に現れる。
+//! `derive`・generics・trait で書ける形は、そちらを採る（`CONTRIBUTING.md`）。
 //!
-//! 置き場所が `escrow-domain` なのは、この crate が誰にも依存されずに残る唯一の段
-//! だから。表が見るのは他の crate のファイルだけなので、ここに置いても依存は増えない。
+//! # 本当に要るものが出てきたら
+//!
+//! ここを許可リストへ変える前に、**escrow から独立した crate にできないか**を見る。
+//! マクロで解くほど一般的な仕組みなら、escrow に閉じている理由がないことが多い。
+//!
+//! それでも escrow の中に要るなら、この禁止を「限定的な許可」へ書き換える。そのとき
+//! 何を許したかと理由がここに残り、差分に現れる。**いま許可の枠が無いので、1つ目を
+//! 入れるにも同じ手間がかかる。**
+//!
+//! # 置き場所
+//!
+//! `escrow-domain` に在るのは、この crate が誰にも依存されずに残る唯一の段だから。
+//! 見るのは他の crate のファイルだけなので、ここに置いても依存は増えない。走査が
+//! ワークスペースの全 crate に届いていることは、下の2つ目のテストが確かめる。
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-
-/// 書いてよい `macro_rules!`。`<crate>/<src からの相対パス>:<名前>` の形で並べる。
-///
-/// **いまは空。** 識別子の newtype を作る `id_type!` が居たが、`derive_more` の導出に
-/// 置き換わって消えた。空のまま残しておくと、1つ目を足すときにも表の編集が要る。
-const ALLOWED: &[&str] = &[];
 
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -52,23 +57,66 @@ fn sources() -> Vec<(String, String)> {
     found
 }
 
-/// `macro_rules! <name>` の宣言を、`<パス>:<名前>` の形で集める。
-fn declarations(path: &str, body: &str) -> Vec<String> {
-    body.lines()
-        .map(str::trim_start)
-        .filter_map(|line| line.strip_prefix("macro_rules! "))
-        .filter_map(|rest| rest.split([' ', '{']).next())
-        .map(|name| format!("{path}:{name}"))
-        .collect()
+#[test]
+fn macro_rules_is_banned_across_the_workspace() {
+    let declared: Vec<String> = sources()
+        .iter()
+        .flat_map(|(path, body)| {
+            body.lines()
+                .map(str::trim_start)
+                .filter_map(|line| line.strip_prefix("macro_rules! "))
+                .filter_map(|rest| rest.split([' ', '{']).next())
+                .map(|name| format!("{path}:{name}"))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+
+    assert!(
+        declared.is_empty(),
+        "macro_rules! は禁止。独立した crate に切り出すか、\
+         ここの禁止を限定的な許可へ書き換える: {declared:?}"
+    );
 }
 
+/// 禁止がワークスペースの全 crate に届いていること。
+///
+/// 走査は `crates/` をディレクトリごと辿るので、そこに在る限り自動で入る。**そこから
+/// 外れた member が居ないこと**をここで確かめる。1つでも外に置かれると、その crate だけ
+/// マクロを書ける場所になる。
 #[test]
-fn only_the_listed_macros_exist() {
-    let actual: BTreeSet<String> = sources()
-        .iter()
-        .flat_map(|(path, body)| declarations(path, body))
-        .collect();
-    let allowed: BTreeSet<String> = ALLOWED.iter().map(|s| (*s).to_owned()).collect();
+fn the_ban_reaches_every_crate_in_the_workspace() {
+    let root = workspace_root();
+    let manifest: toml::Table = std::fs::read_to_string(root.join("Cargo.toml"))
+        .expect("ワークスペースの Cargo.toml")
+        .parse()
+        .expect("読める TOML");
 
-    assert_eq!(actual, allowed, "表に無い macro_rules! がある");
+    let members: BTreeSet<String> = manifest["workspace"]["members"]
+        .as_array()
+        .expect("workspace.members は配列")
+        .iter()
+        .map(|member| member.as_str().expect("member は文字列").to_owned())
+        .collect();
+
+    let outside: Vec<&String> = members
+        .iter()
+        .filter(|member| !member.starts_with("crates/"))
+        .collect();
+
+    assert!(
+        outside.is_empty(),
+        "crates/ の外に member が居るので、走査が届かない: {outside:?}"
+    );
+
+    // 走査が空振りしていないことも見る。ディレクトリ名を間違えると全部素通りする。
+    let scanned: BTreeSet<String> = sources()
+        .iter()
+        .filter_map(|(path, _)| path.split('/').next().map(str::to_owned))
+        .collect();
+    let expected: BTreeSet<String> = members
+        .iter()
+        .filter_map(|m| m.strip_prefix("crates/").map(str::to_owned))
+        .collect();
+
+    assert_eq!(scanned, expected, "走査した crate と member が食い違う");
 }

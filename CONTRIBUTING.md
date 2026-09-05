@@ -65,11 +65,18 @@
 
 ### 導出と trait で書く
 
-**マクロは他に手段が無いときだけ。** 自由度が高いぶん、書き手の想定を外れた展開が起きても
-コンパイラが助けない。`derive`・generics・trait で書ける形は、そちらを採る。
+**`macro_rules!` はワークスペース全体で禁じている。** 自由度が高いぶん、書き手の想定を
+外れた展開が起きてもコンパイラが助けない。`derive`・generics・trait で書ける形を採る。
 
-`crates/escrow-domain/tests/macros.rs` が `macro_rules!` の一覧を表で固定している。
-足すには表を編集することになるので、必ず差分に現れる。
+本当に要るものが出てきたときの道は2つ。
+
+1. **escrow から独立した crate にする。** マクロで解くほど一般的な仕組みなら、escrow に
+   閉じている理由が無いことが多い
+2. **禁止を「限定的な許可」へ書き換える。** 何を許したかと理由が
+   `crates/escrow-domain/tests/macros.rs` に残り、差分に現れる
+
+禁止が全 crate に届いていることも、同じテストが確かめる — `crates/` の外に member を
+置くと落ちる。
 
 ### ライブラリを採るかどうか
 
@@ -115,7 +122,7 @@
 | 守るもの | 落ちる場所 |
 |---|---|
 | カーネルの依存とモジュールの一覧 | `crates/escrow-domain/tests/kernel.rs` |
-| `macro_rules!` の一覧 | `crates/escrow-domain/tests/macros.rs` |
+| `macro_rules!` の禁止（ワークスペース全体） | `crates/escrow-domain/tests/macros.rs` |
 | crate の依存の向き、スライス同士の隔離 | `crates/escrow-domain/tests/dependency_direction.rs` |
 | `escrow-ledger` の公開 API、投影へ書く SQL の置き場所 | `crates/escrow-ledger/tests/public_api.rs` |
 | 状態遷移の網羅（9状態 × 11事象のうち 20 本） | `crates/escrow-domain/src/state.rs` |
