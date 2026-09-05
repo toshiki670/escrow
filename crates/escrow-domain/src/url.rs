@@ -14,12 +14,10 @@ use crate::content::{ContentType, Platform};
 
 /// 正規化を通った URL。
 ///
-/// 生の文字列からは作れない。`Item.url` の `UNIQUE` が何を同一と見なすかを、
-/// 約束ではなくこの型が担保する。
+/// 作る道は [`normalize_item`] と [`normalize_source`] の2つ。`Item.url` の `UNIQUE` が
+/// 何を同一と見なすかを、この型が決める（#1）。
 ///
-/// **`Constructor` も `From` も導出しない。** どちらかを入れると `String` から作る道が
-/// 生えて、正規化を通らない値を `Item.url` に入れられるようになる。識別子の newtype
-/// とはそこが違う — あちらは包むのが仕事だが、こちらは**作る道を絞るのが仕事**。
+/// 導出は `Display` まで。`Constructor` と `From` はこの2つの道を迂回させるので外してある。
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Display)]
 pub struct NormalizedUrl(String);
 
