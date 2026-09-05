@@ -143,8 +143,8 @@ impl Scheduler {
 
     /// この種別の生存確認をするもの。#5 の対応表が決める。
     ///
-    /// **手段を決めていない種別では空**（X 投稿）。#5 の非対称性により、確かめられない
-    /// 項目は預かりに留まる。空を返すので、**確かめようのないものに予算を使わない**。
+    /// **手段を決めていない種別では空**（X 投稿）。空を返すので、**確かめようのない
+    /// ものに予算を使わない**。
     pub fn prober(&self, content_type: ContentType, demand: Demand) -> Option<Box<dyn Probe + '_>> {
         Adapters::has_prober(content_type).then(|| {
             Box::new(Probing {
@@ -226,13 +226,7 @@ impl Probe for Probing<'_> {
         &'a self,
         url: &'a NormalizedUrl,
     ) -> BoxFuture<'a, Result<Presence, AdapterError>> {
-        Box::pin(async move {
-            match self.adapters.prober(self.content_type, &self.turn) {
-                Some(prober) => prober.probe(url).await,
-                // 手段が無いのは、観測できなかったのと同じ（#5）。
-                None => Ok(Presence::Unknown),
-            }
-        })
+        Box::pin(self.adapters.probe(url, self.content_type, &self.turn))
     }
 }
 

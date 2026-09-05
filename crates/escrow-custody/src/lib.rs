@@ -5,11 +5,9 @@
 //!
 //! # 確かめられたときだけ書く
 //!
-//! #5 は判定を**分類ではなく非対称性**で決めている。在ることを確かめられたときだけ
-//! 事象が増え、確かめられなかった回は行が増えない。**沈黙が記録されない**ことが、
-//! そのまま「期限が過ぎていても、直近の確認で『在る』が取れていなければ捨てない」に
-//! なる。誤って捨てると手元のメディアは戻らないが、誤って保留すると預かりが延びる
-//! だけなので、間違える向きが片側へ寄る。
+//! 判定の規則は [`escrow_domain::liveness`]。ここが足すのは、**その規則が台帳の
+//! 行数に出る**こと — 在ることを確かめた回だけ事象が増え、確かめられなかった回は
+//! 何も残らない。
 //!
 //! # どの項目をいつ確かめるかは持たない
 //!
@@ -63,9 +61,10 @@ impl<'a> Custody<'a> {
     ///
     /// # Errors
     ///
-    /// 「消えた」と断定できない失敗は、項目ではなく escrow 側の問題（#5）。cookie の
-    /// 失効はプラットフォーム全体を止め、ツールの出力が読めないのは仕様変更の疑いに
-    /// なるので、握りつぶさず呼ぶ側へ返す。
+    /// 「消えた」と断定できない失敗は、種類を問わずそのまま返す。台帳の側は #5 の
+    /// 判定保留のまま — 何も書かず `holding` に残る — で、**返すのは呼ぶ側が失敗の
+    /// 種類で動けるようにするため**。cookie の失効はプラットフォーム全体を止め、
+    /// 出力を読めないのは仕様変更の疑いになる。
     pub async fn check(
         &self,
         id: ItemId,
@@ -133,14 +132,11 @@ impl<'a> Custody<'a> {
         Ok(removed)
     }
 
-    /// 手元のディレクトリを消す。**在ったときだけ真**。
     fn remove_media(&self, id: ItemId) -> Result<bool, CustodyError> {
-        let dir = asset::item_dir(self.media_dir, id);
-        match std::fs::remove_dir_all(&dir) {
-            Ok(()) => Ok(true),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
-            Err(source) => Err(CustodyError::Io { path: dir, source }),
-        }
+        asset::remove(self.media_dir, id).map_err(|source| CustodyError::Io {
+            path: asset::item_dir(self.media_dir, id),
+            source,
+        })
     }
 
     async fn load(&self, id: ItemId) -> Result<Projected, CustodyError> {
