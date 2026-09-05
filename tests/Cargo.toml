@@ -1,0 +1,29 @@
+[package]
+name = "escrow-tests"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+autotests = false
+
+# ワークスペース全体にかかる守り。crate を1つも依存に持たず、読むのは
+# `Cargo.toml` とソースのファイルだけ。
+[lib]
+name = "escrow_tests"
+path = "workspace.rs"
+
+[dependencies]
+toml.workspace = true
+
+[[test]]
+name = "dependency_direction"
+path = "dependency_direction.rs"
+
+[[test]]
+name = "macros"
+path = "macros.rs"
+
+[lints]
+workspace = true

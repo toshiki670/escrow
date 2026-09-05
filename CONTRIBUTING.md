@@ -72,11 +72,7 @@
 
 1. **escrow から独立した crate にする。** マクロで解くほど一般的な仕組みなら、escrow に
    閉じている理由が無いことが多い
-2. **禁止を「限定的な許可」へ書き換える。** 何を許したかと理由が
-   `crates/escrow-domain/tests/macros.rs` に残り、差分に現れる
-
-禁止が全 crate に届いていることも、同じテストが確かめる — `crates/` の外に member を
-置くと落ちる。
+2. **禁止を「限定的な許可」へ書き換える。** 何を許したかと理由が `tests/macros.rs` に残る
 
 ### ライブラリを採るかどうか
 
@@ -119,11 +115,14 @@
 
 **「気をつける」で守るものを増やさない。** 守らせたい約束は、破ったときに落ちる形にする。
 
+**ワークスペース全体にかかるものは `tests/` に置く。** member の一覧を `Cargo.toml` から
+読むので、crate をどこへ置いても届く。1つの crate に閉じたものは、その crate の `tests/` へ。
+
 | 守るもの | 落ちる場所 |
 |---|---|
+| `macro_rules!` の禁止 | `tests/macros.rs` |
+| crate の依存の向き、スライス同士の隔離 | `tests/dependency_direction.rs` |
 | カーネルの依存とモジュールの一覧 | `crates/escrow-domain/tests/kernel.rs` |
-| `macro_rules!` の禁止（ワークスペース全体） | `crates/escrow-domain/tests/macros.rs` |
-| crate の依存の向き、スライス同士の隔離 | `crates/escrow-domain/tests/dependency_direction.rs` |
 | `escrow-ledger` の公開 API、投影へ書く SQL の置き場所 | `crates/escrow-ledger/tests/public_api.rs` |
 | 状態遷移の網羅（9状態 × 11事象のうち 20 本） | `crates/escrow-domain/src/state.rs` |
 | 事象の順序と競合 | `item_event(item_id, seq)` の UNIQUE |

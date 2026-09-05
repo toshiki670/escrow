@@ -6,12 +6,10 @@
 //!
 //! 見るのは `Cargo.toml` で、**dev-dependencies も含める**。テストの中でだけ
 //! 迂回できるなら、迂回路は在ることになる。
-//!
-//! 置き場所が `escrow-domain` なのは、この crate が誰にも依存されずに残る唯一の
-//! 段だから。表が見るのは他の `Cargo.toml` だけなので、ここに置いても依存は増えない。
 
 use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
+
+use escrow_tests::members;
 
 /// #3 の依存図。左が右を依存に持ってよい、の全部。
 ///
@@ -35,6 +33,8 @@ const ENTRY: &[&str] = &[
 ];
 
 const ALLOWED: &[(&str, &[&str])] = &[
+    // ワークスペース全体にかかる守り。crate を1つも依存に持たない。
+    ("escrow-tests", &[]),
     // 段1 — カーネル。誰にも依存しない。
     ("escrow-domain", &[]),
     // 段2 — 設定・永続化・外部ツール。config だけは external と入口が読む。
@@ -64,48 +64,22 @@ const ALLOWED: &[(&str, &[&str])] = &[
 /// 名前が実在することを先に確かめる。
 const EXTERNAL: &str = "escrow-external";
 
-fn workspace_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(Path::parent)
-        .expect("crates/<name>/ の2つ上がワークスペース")
-        .to_owned()
-}
-
-fn manifest(path: &Path) -> toml::Table {
-    let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-    text.parse()
-        .unwrap_or_else(|e| panic!("{}: {e}", path.display()))
-}
-
-/// その crate が名前を知っている escrow-* の crate。
-fn escrow_dependencies_of(crate_name: &str) -> BTreeSet<String> {
-    let path = workspace_root()
-        .join("crates")
-        .join(crate_name)
-        .join("Cargo.toml");
-    let manifest = manifest(&path);
-
-    ["dependencies", "dev-dependencies", "build-dependencies"]
-        .iter()
-        .filter_map(|table| manifest.get(*table))
-        .filter_map(toml::Value::as_table)
-        .flat_map(toml::Table::keys)
-        .filter(|name| name.starts_with("escrow-"))
-        .cloned()
-        .collect()
-}
-
 /// #3 の図に無い辺が生えていないこと。
 #[test]
 fn dependencies_follow_the_one_way_graph() {
-    for (crate_name, allowed) in ALLOWED {
-        let allowed: BTreeSet<&str> = allowed.iter().copied().collect();
+    let allowed: std::collections::BTreeMap<&str, BTreeSet<&str>> = ALLOWED
+        .iter()
+        .map(|(name, deps)| (*name, deps.iter().copied().collect()))
+        .collect();
 
-        for actual in escrow_dependencies_of(crate_name) {
+    for member in members() {
+        let allowed = &allowed[member.name.as_str()];
+
+        for actual in member.escrow_dependencies() {
             assert!(
                 allowed.contains(actual.as_str()),
-                "{crate_name} が {actual} に依存している。#3 の向きに無い"
+                "{} が {actual} に依存している。#3 の向きに無い",
+                member.name
             );
         }
     }
@@ -119,41 +93,26 @@ fn only_the_scheduler_knows_the_external_tools() {
         "{EXTERNAL} がワークスペースに無い。改名したなら EXTERNAL も直す"
     );
 
-    for (crate_name, _) in ALLOWED {
-        let knows = escrow_dependencies_of(crate_name).contains(EXTERNAL);
+    for member in members() {
+        let knows = member.escrow_dependencies().contains(EXTERNAL);
 
         assert_eq!(
             knows,
-            *crate_name == "escrow-scheduler",
-            "{crate_name} から {EXTERNAL} への依存"
+            member.name == "escrow-scheduler",
+            "{} から {EXTERNAL} への依存",
+            member.name
         );
     }
 }
 
 /// 表がワークスペースの全 crate を覆っていること。
 ///
-/// 覆っていないと、表に載らない crate が誰にも見られずに迂回路を作れる。
+/// 覆っていないと、表に載らない crate が誰にも見られずに迂回路を作れる。名前は
+/// ディレクトリではなく `package.name` から取るので、置き場所を変えても追える。
 #[test]
 fn the_graph_covers_every_crate_in_the_workspace() {
-    let root = workspace_root();
-    let manifest = manifest(&root.join("Cargo.toml"));
-
-    let members: BTreeSet<String> = manifest["workspace"]["members"]
-        .as_array()
-        .expect("workspace.members は配列")
-        .iter()
-        .map(|member| {
-            member
-                .as_str()
-                .expect("member は文字列")
-                .rsplit('/')
-                .next()
-                .expect("crates/<name>")
-                .to_owned()
-        })
-        .collect();
-
+    let actual: BTreeSet<String> = members().into_iter().map(|m| m.name).collect();
     let covered: BTreeSet<String> = ALLOWED.iter().map(|(name, _)| (*name).to_owned()).collect();
 
-    assert_eq!(members, covered);
+    assert_eq!(actual, covered);
 }

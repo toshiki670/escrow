@@ -13,6 +13,7 @@ members = [
     "crates/escrow-handover",
     "crates/escrow-cli",
     "crates/escrow-gui",
+    "tests",
 ]
 
 [workspace.package]
