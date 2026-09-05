@@ -71,6 +71,11 @@ pub struct Plan {
     pub next: Next,
     /// 順番を待っている要求の数。
     pub waiting: usize,
+    /// 拒否を受けて閉じている、その終わり。開いていれば空。
+    ///
+    /// [`Plan::next`] と別に持つのは、**間隔で待っているのか断られて止まっているのかを
+    /// 見せ分けるため**。前者は予定どおりで、後者は人が設定を見直す合図になる。
+    pub closed_until: Option<Timestamp>,
 }
 
 /// 次の要求を出せるのはいつか。
@@ -253,8 +258,16 @@ impl Gate {
     fn rejected(&self, retry_after: Option<Duration>) {
         let mut state = self.lock();
         let wait = retry_after.unwrap_or(state.backoff);
+        let until = Instant::now() + wait;
 
-        state.closed_until = Some(Instant::now() + wait);
+        // 同じ経路の別の呼び出しが、もっと長く待てと言われていることがある。**遅いほうを
+        // 残す** — 両方の指示を満たす時刻はそれだけで、短いほうで上書きすると、
+        // まだ待てと言われている経路へ出ていく。
+        state.closed_until = Some(
+            state
+                .closed_until
+                .map_or(until, |current| current.max(until)),
+        );
         state.backoff = state.backoff.saturating_mul(2).min(self.backoff_max);
         drop(state);
 
@@ -281,18 +294,13 @@ impl Gate {
             route,
             next,
             waiting: state.waiting.len(),
+            closed_until: Self::closed_for(&state, at).and_then(|wait| now.plus(wait)),
         }
     }
 
     /// 門が開くか。**[`Gate::take`] と [`Gate::plan`] の両方がここを読む。**
     fn opens(&self, state: &GateState, now: Instant) -> Opening {
-        if let Some(until) = state.closed_until
-            && until > now
-        {
-            return Opening::In(until - now);
-        }
-
-        match self.measure {
+        let by_measure = match self.measure {
             Measure::Gap(gap) => match state.started_at {
                 Some(started) if now.saturating_duration_since(started) < gap => {
                     Opening::In(gap - now.saturating_duration_since(started))
@@ -301,7 +309,25 @@ impl Gate {
             },
             Measure::Concurrency(limit) if state.running >= limit.get() => Opening::WhenOneFinishes,
             Measure::Concurrency(_) => Opening::Now,
+        };
+
+        // 閉鎖と測り方の両方が効いていることがある。**遅いほうが答え。**
+        match (Self::closed_for(state, now), by_measure) {
+            (Some(closed), Opening::In(measured)) => Opening::In(closed.max(measured)),
+            (Some(closed), Opening::Now) => Opening::In(closed),
+            // 走っているものが終わる時刻は分からないので、閉鎖の残りと比べられない。
+            // 閉鎖の終わりは [`Plan::closed_until`] が別に持つ。
+            (_, Opening::WhenOneFinishes) => Opening::WhenOneFinishes,
+            (None, opening) => opening,
         }
+    }
+
+    /// 拒否で閉じている残り時間。開いていれば空。
+    fn closed_for(state: &GateState, now: Instant) -> Option<Duration> {
+        state
+            .closed_until
+            .filter(|until| *until > now)
+            .map(|until| until - now)
     }
 }
 
@@ -727,6 +753,129 @@ mod tests {
 
         let plan = gate.plan(Platform::Youtube, Route::Discover, now);
         assert_eq!(plan.next, Next::At(at("2026-09-05T12:15:00+09:00")));
+    }
+
+    /// 並んだ拒否は、待機を短くしない。
+    ///
+    /// 同じ経路で2つの呼び出しが走り、先に長い `Retry-After`、後から短い
+    /// `Retry-After` が返る。後で上書きすると、まだ待てと言われている経路へ出ていく。
+    #[tokio::test(start_paused = true)]
+    async fn a_shorter_rejection_does_not_cut_a_longer_one_short() {
+        let gate = gate(Measure::Gap(Duration::from_secs(1)));
+
+        // 間隔が1秒なので、2本目は1秒後に枠を取る。両方の呼び出しが走っている形。
+        let first = gate.admit(Demand::weighed(weight(1))).await;
+        let second = gate.admit(Demand::weighed(weight(1))).await;
+        let start = Instant::now();
+
+        first.report(Err(&rejected(Some(Duration::from_secs(600)))));
+        second.report(Err(&rejected(Some(Duration::from_secs(30)))));
+        drop(first);
+        drop(second);
+
+        drop(gate.admit(Demand::weighed(weight(1))).await);
+        assert_eq!(
+            Instant::now() - start,
+            Duration::from_secs(600),
+            "長いほうが残る"
+        );
+    }
+
+    /// 順番が逆でも同じ。
+    #[tokio::test(start_paused = true)]
+    async fn the_later_close_wins_whichever_arrives_first() {
+        let gate = gate(Measure::Gap(Duration::from_secs(1)));
+
+        let first = gate.admit(Demand::weighed(weight(1))).await;
+        let second = gate.admit(Demand::weighed(weight(1))).await;
+        let start = Instant::now();
+
+        first.report(Err(&rejected(Some(Duration::from_secs(30)))));
+        second.report(Err(&rejected(Some(Duration::from_secs(600)))));
+        drop(first);
+        drop(second);
+
+        drop(gate.admit(Demand::weighed(weight(1))).await);
+        assert_eq!(Instant::now() - start, Duration::from_secs(600));
+    }
+
+    /// 間隔で待っているだけなら、閉鎖の終わりは空（#13）。
+    #[tokio::test(start_paused = true)]
+    async fn waiting_out_a_gap_leaves_the_close_empty() {
+        let now = at("2026-09-05T12:00:00+09:00");
+        let gate = gate(Measure::Gap(Duration::from_secs(900)));
+        drop(gate.admit(Demand::weighed(weight(1))).await);
+
+        let plan = gate.plan(Platform::Youtube, Route::Discover, now);
+        assert_eq!(plan.next, Next::At(at("2026-09-05T12:15:00+09:00")));
+        assert_eq!(plan.closed_until, None, "断られてはいない");
+    }
+
+    /// 断られたら閉鎖の終わりが入り、過ぎれば空へ戻る。
+    #[tokio::test(start_paused = true)]
+    async fn a_rejection_shows_up_as_a_close_until_it_passes() {
+        let now = at("2026-09-05T12:00:00+09:00");
+        let gate = gate(Measure::Gap(Duration::from_secs(1)));
+
+        let slot = gate.admit(Demand::weighed(weight(1))).await;
+        slot.report(Err(&rejected(Some(Duration::from_secs(300)))));
+        drop(slot);
+
+        let plan = gate.plan(Platform::Youtube, Route::Discover, now);
+        assert_eq!(plan.closed_until, Some(at("2026-09-05T12:05:00+09:00")));
+        assert_eq!(plan.next, Next::At(at("2026-09-05T12:05:00+09:00")));
+
+        tokio::time::sleep(Duration::from_secs(300)).await;
+
+        let plan = gate.plan(Platform::Youtube, Route::Discover, now);
+        assert_eq!(plan.closed_until, None, "過ぎたら開いている");
+        assert_eq!(plan.next, Next::Now);
+    }
+
+    /// 閉鎖と間隔の両方が効いているとき、答えるのは遅いほう。
+    ///
+    /// 閉鎖だけを見て答えると、UI が言った時刻に出ていかない。
+    #[tokio::test(start_paused = true)]
+    async fn the_plan_answers_the_later_of_the_close_and_the_gap() {
+        let now = at("2026-09-05T12:00:00+09:00");
+        let gate = gate(Measure::Gap(Duration::from_secs(900)));
+
+        let slot = gate.admit(Demand::weighed(weight(1))).await;
+        slot.report(Err(&rejected(Some(Duration::from_secs(300)))));
+        drop(slot);
+
+        let plan = gate.plan(Platform::Youtube, Route::Discover, now);
+        assert_eq!(
+            plan.closed_until,
+            Some(at("2026-09-05T12:05:00+09:00")),
+            "閉鎖は5分後"
+        );
+        assert_eq!(
+            plan.next,
+            Next::At(at("2026-09-05T12:15:00+09:00")),
+            "間隔のほうが遅いので、出せるのは15分後"
+        );
+    }
+
+    /// 予定の時刻に、実際にその要求が出ていくこと。
+    #[tokio::test(start_paused = true)]
+    async fn the_plan_matches_when_the_request_actually_goes_out() {
+        let now = at("2026-09-05T12:00:00+09:00");
+        let gate = gate(Measure::Gap(Duration::from_secs(900)));
+
+        let slot = gate.admit(Demand::weighed(weight(1))).await;
+        slot.report(Err(&rejected(Some(Duration::from_secs(300)))));
+        drop(slot);
+
+        let Next::At(planned) = gate.plan(Platform::Youtube, Route::Discover, now).next else {
+            panic!("待つと答えるはず");
+        };
+
+        let start = Instant::now();
+        drop(gate.admit(Demand::weighed(weight(1))).await);
+        let waited = Instant::now() - start;
+
+        assert_eq!(now.plus(waited), Some(planned));
     }
 
     /// 走っているものが終わる時刻は分からない。分かる顔で答えない。
