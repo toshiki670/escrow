@@ -3,8 +3,9 @@
 use std::fmt;
 
 use std::num::NonZeroU32;
+use std::time::Duration;
 
-use chrono::{DateTime, Days, FixedOffset, Local, SecondsFormat, SubsecRound};
+use chrono::{DateTime, Days, FixedOffset, Local, SecondsFormat, SubsecRound, TimeDelta};
 use thiserror::Error;
 
 /// 時差を保つ日時。秒までで丸める。
@@ -39,6 +40,16 @@ impl Timestamp {
 
     pub const fn inner(self) -> DateTime<FixedOffset> {
         self.0
+    }
+
+    /// この日時から時間を進める。
+    ///
+    /// 表せる範囲を超えたら空。
+    pub fn plus(self, duration: Duration) -> Option<Self> {
+        TimeDelta::from_std(duration)
+            .ok()
+            .and_then(|delta| self.0.checked_add_signed(delta))
+            .map(Self::from)
     }
 
     /// この日時から日数を進める。暦を跨ぐので、加算は `chrono` に任せる。
@@ -83,9 +94,27 @@ mod tests {
     }
 
     #[test]
+    fn adds_a_span_shorter_than_a_day() {
+        let at = Timestamp::parse("2026-02-27T22:10:00+09:00").unwrap();
+
+        assert_eq!(
+            at.plus(Duration::from_secs(900)).unwrap().to_text(),
+            "2026-02-27T22:25:00+09:00"
+        );
+        // 秒より下は結果から落ちる。往復で字面を変えないため。
+        assert_eq!(
+            at.plus(Duration::from_millis(1500)).unwrap().to_text(),
+            "2026-02-27T22:10:01+09:00"
+        );
+        assert_eq!(at.plus(Duration::ZERO).unwrap(), at);
+    }
+
+    #[test]
     fn refuses_a_span_that_leaves_the_calendar() {
         let at = Timestamp::parse("2026-02-27T22:10:00+09:00").unwrap();
+
         assert!(at.plus_days(NonZeroU32::MAX).is_none());
+        assert!(at.plus(Duration::MAX).is_none());
     }
 
     #[test]

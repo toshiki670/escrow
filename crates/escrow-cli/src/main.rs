@@ -19,7 +19,7 @@ use escrow_domain::timestamp::Timestamp;
 use escrow_domain::url::{self, TypeHint};
 use escrow_handover::Handover;
 use escrow_ledger::{Ledger, NewSource};
-use escrow_scheduler::Scheduler;
+use escrow_scheduler::{Demand, Scheduler};
 use escrow_transcription::Transcription;
 
 /// 配信元から失われうるものを取り込み、手元に預かる。
@@ -278,8 +278,11 @@ impl App {
             ),
         };
 
-        // 中身を取るツールも #5 の対応表が決める。
-        let found = self.scheduler()?.describe(&url, content_type).await?;
+        // 中身を取るツールも #5 の対応表が決める。人が待っているので最優先で通す（#13）。
+        let found = self
+            .scheduler()?
+            .describe(&url, content_type, Demand::interactive(Timestamp::now()))
+            .await?;
 
         let id = self
             .ledger
@@ -309,11 +312,11 @@ impl App {
             .with_context(|| format!("項目 {id} が無い"))?
             .item;
         let scheduler = self.scheduler()?;
-        // #5 の対応表が、この種別を取るのがどのツールかを決める。
-        let acquirer = scheduler.acquirer(item.content_type());
+        let acquirer =
+            scheduler.acquirer(item.content_type(), Demand::interactive(Timestamp::now()));
 
         // 預かる日数も期限も、取得が終わった瞬間に取得のスライスが決める（#1）。
-        let state = Acquisition::new(&self.ledger, &self.paths.media_dir, &acquirer)
+        let state = Acquisition::new(&self.ledger, &self.paths.media_dir, acquirer.as_ref())
             .run(id)
             .await?;
 

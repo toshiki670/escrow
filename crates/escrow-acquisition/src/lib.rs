@@ -34,14 +34,14 @@ pub enum AcquisitionError {
     HoldTooFar(#[from] HoldTooFar),
 }
 
-pub struct Acquisition<'a, A> {
+pub struct Acquisition<'a> {
     ledger: &'a Ledger,
     media_dir: &'a Path,
-    acquire: &'a A,
+    acquire: &'a dyn Acquire,
 }
 
-impl<'a, A: Acquire> Acquisition<'a, A> {
-    pub const fn new(ledger: &'a Ledger, media_dir: &'a Path, acquire: &'a A) -> Self {
+impl<'a> Acquisition<'a> {
+    pub const fn new(ledger: &'a Ledger, media_dir: &'a Path, acquire: &'a dyn Acquire) -> Self {
         Self {
             ledger,
             media_dir,
@@ -120,6 +120,7 @@ mod tests {
     use escrow_domain::state::MediaPresence;
     use escrow_domain::url::{self, NormalizedUrl};
     use escrow_ledger::{NewSource, Seq};
+    use escrow_scheduler::BoxFuture;
     use std::num::NonZeroU32;
     use std::sync::Mutex;
 
@@ -133,31 +134,35 @@ mod tests {
     }
 
     impl Acquire for FakeAcquire {
-        async fn acquire(
-            &self,
-            _url: &NormalizedUrl,
-            into: &Path,
-        ) -> Result<Vec<Asset>, AdapterError> {
-            *self.calls.lock().unwrap() += 1;
-            std::fs::create_dir_all(into).unwrap();
-            for name in &self.files {
-                std::fs::write(into.join(name), b"x").unwrap();
-            }
-            Ok(asset::scan_dir(into).unwrap())
+        fn acquire<'a>(
+            &'a self,
+            _url: &'a NormalizedUrl,
+            into: &'a Path,
+        ) -> BoxFuture<'a, Result<Vec<Asset>, AdapterError>> {
+            Box::pin(async move {
+                *self.calls.lock().unwrap() += 1;
+                std::fs::create_dir_all(into).unwrap();
+                for name in &self.files {
+                    std::fs::write(into.join(name), b"x").unwrap();
+                }
+                Ok(asset::scan_dir(into).unwrap())
+            })
         }
     }
 
     struct Failing;
 
     impl Acquire for Failing {
-        async fn acquire(
-            &self,
-            _url: &NormalizedUrl,
-            _into: &Path,
-        ) -> Result<Vec<Asset>, AdapterError> {
-            Err(AdapterError::Transient {
-                program: "yt-dlp".to_owned(),
-                detail: "落ちた".to_owned(),
+        fn acquire<'a>(
+            &'a self,
+            _url: &'a NormalizedUrl,
+            _into: &'a Path,
+        ) -> BoxFuture<'a, Result<Vec<Asset>, AdapterError>> {
+            Box::pin(async move {
+                Err(AdapterError::Transient {
+                    program: "yt-dlp".to_owned(),
+                    detail: "落ちた".to_owned(),
+                })
             })
         }
     }
@@ -320,15 +325,17 @@ mod tests {
     async fn the_deadline_counts_from_when_the_download_finished() {
         struct Slow;
         impl Acquire for Slow {
-            async fn acquire(
-                &self,
-                _url: &NormalizedUrl,
-                into: &Path,
-            ) -> Result<Vec<Asset>, AdapterError> {
-                tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
-                std::fs::create_dir_all(into).unwrap();
-                std::fs::write(into.join("image.1.jpg"), b"x").unwrap();
-                Ok(asset::scan_dir(into).unwrap())
+            fn acquire<'a>(
+                &'a self,
+                _url: &'a NormalizedUrl,
+                into: &'a Path,
+            ) -> BoxFuture<'a, Result<Vec<Asset>, AdapterError>> {
+                Box::pin(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+                    std::fs::create_dir_all(into).unwrap();
+                    std::fs::write(into.join("image.1.jpg"), b"x").unwrap();
+                    Ok(asset::scan_dir(into).unwrap())
+                })
             }
         }
 

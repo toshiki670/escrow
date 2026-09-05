@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 
 use crate::invocation::{Completed, Invocation, run};
-use crate::{Acquire, AdapterError, Found, Probe};
+use crate::{AdapterError, Found};
 use escrow_config::Browser;
 use escrow_domain::asset::{self, Asset, AssetKind};
 use escrow_domain::content::{Content, MediaType};
@@ -92,7 +92,7 @@ fn with_cookies(invocation: Invocation, browser: Browser) -> Invocation {
 /// 検知の追加取得。フィードが語らない「動画か配信か」と開始時刻を、ここで埋める。
 ///
 /// 引数は [`describe_argv`] と同じで、違うのは cookie の有無だけ。
-pub fn schedule_argv(program: &Path, url: &NormalizedUrl) -> Invocation {
+pub(crate) fn schedule_argv(program: &Path, url: &NormalizedUrl) -> Invocation {
     base(program)
         .arg("--skip-download")
         .arg("--dump-json")
@@ -100,7 +100,7 @@ pub fn schedule_argv(program: &Path, url: &NormalizedUrl) -> Invocation {
 }
 
 /// 人が登録した1件の中身を取る。
-pub fn describe_argv(program: &Path, url: &NormalizedUrl, browser: Browser) -> Invocation {
+pub(crate) fn describe_argv(program: &Path, url: &NormalizedUrl, browser: Browser) -> Invocation {
     with_cookies(base(program), browser)
         .arg("--skip-download")
         .arg("--dump-json")
@@ -108,7 +108,7 @@ pub fn describe_argv(program: &Path, url: &NormalizedUrl, browser: Browser) -> I
 }
 
 /// 配信元にまだ在るかを確かめる。
-pub fn probe_argv(program: &Path, url: &NormalizedUrl, browser: Browser) -> Invocation {
+pub(crate) fn probe_argv(program: &Path, url: &NormalizedUrl, browser: Browser) -> Invocation {
     with_cookies(base(program), browser)
         .arg("--simulate")
         .arg("--quiet")
@@ -122,7 +122,7 @@ pub fn probe_argv(program: &Path, url: &NormalizedUrl, browser: Browser) -> Invo
 /// こちらは stem だけ指定して、落ちたものを後から走査する。
 ///
 /// 配信は `--live-from-start` で頭から録る。予約枠を待つことはしない（#5）。
-pub fn download_argv(
+pub(crate) fn download_argv(
     program: &Path,
     url: &NormalizedUrl,
     into: &Path,
@@ -188,7 +188,7 @@ impl VideoMetadata {
 }
 
 /// 検知の追加取得の読み取り。フィードに無い2つだけを返す。
-pub fn parse_schedule(stdout: &str) -> Result<Schedule, AdapterError> {
+pub(crate) fn parse_schedule(stdout: &str) -> Result<Schedule, AdapterError> {
     let meta: VideoMetadata = serde_json::from_str(stdout.trim()).map_err(|e| parse_error(&e))?;
 
     Ok(Schedule {
@@ -197,7 +197,7 @@ pub fn parse_schedule(stdout: &str) -> Result<Schedule, AdapterError> {
     })
 }
 
-pub fn parse_describe(stdout: &str, media_type: MediaType) -> Result<Found, AdapterError> {
+pub(crate) fn parse_describe(stdout: &str, media_type: MediaType) -> Result<Found, AdapterError> {
     let meta: VideoMetadata = serde_json::from_str(stdout.trim()).map_err(|e| parse_error(&e))?;
 
     let (url, _) = url::normalize_item(&meta.webpage_url).map_err(|e| parse_error(&e))?;
@@ -224,7 +224,7 @@ pub fn parse_describe(stdout: &str, media_type: MediaType) -> Result<Found, Adap
 /// 生存確認の読み取り。
 ///
 /// #5 の非対称性をそのまま写す。**「在る」と読めたときだけ** [`Presence::Present`]。
-pub fn parse_probe(completed: &Completed) -> Presence {
+pub(crate) fn parse_probe(completed: &Completed) -> Presence {
     if completed.success && !completed.stdout.trim().is_empty() {
         return Presence::Present;
     }
@@ -300,7 +300,7 @@ fn classify(completed: &Completed, url: &NormalizedUrl) -> AdapterError {
 
 impl YtDlp {
     /// 検知の追加取得。フィードに無い2つを取る（#5）。
-    pub async fn schedule(&self, url: &NormalizedUrl) -> Result<Schedule, AdapterError> {
+    pub(crate) async fn schedule(&self, url: &NormalizedUrl) -> Result<Schedule, AdapterError> {
         let invocation = schedule_argv(&self.program, url);
         let completed = run(&invocation, None).await?;
 
@@ -311,7 +311,7 @@ impl YtDlp {
     }
 
     /// 人が登録した1件の中身を取る。
-    pub async fn describe(
+    pub(crate) async fn describe(
         &self,
         url: &NormalizedUrl,
         media_type: MediaType,
@@ -324,10 +324,13 @@ impl YtDlp {
         }
         parse_describe(&completed.stdout, media_type)
     }
-}
 
-impl Acquire for YtDlp {
-    async fn acquire(&self, url: &NormalizedUrl, into: &Path) -> Result<Vec<Asset>, AdapterError> {
+    /// 実体を落とす。順番待ちは [`crate::route::Acquirer`] が掛ける。
+    pub(crate) async fn acquire(
+        &self,
+        url: &NormalizedUrl,
+        into: &Path,
+    ) -> Result<Vec<Asset>, AdapterError> {
         std::fs::create_dir_all(into).map_err(|source| AdapterError::Launch {
             program: PROGRAM.to_owned(),
             source,
@@ -354,10 +357,9 @@ impl Acquire for YtDlp {
         }
         Ok(assets)
     }
-}
 
-impl Probe for YtDlp {
-    async fn probe(&self, url: &NormalizedUrl) -> Result<Presence, AdapterError> {
+    /// まだ在るかを確かめる。順番待ちは [`crate::route::Prober`] が掛ける。
+    pub(crate) async fn probe(&self, url: &NormalizedUrl) -> Result<Presence, AdapterError> {
         let invocation = probe_argv(&self.program, url, self.browser);
         let completed = run(&invocation, None).await?;
 

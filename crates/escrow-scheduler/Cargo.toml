@@ -11,8 +11,11 @@ escrow-domain.workspace = true
 escrow-config.workspace = true
 escrow-external.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
 
 [dev-dependencies]
+# 時計を止めて進める（#7 の Phase 5 の受け入れ）。本番のビルドには入れない。
+tokio = { workspace = true, features = ["test-util"] }
 
 [lints]
 workspace = true

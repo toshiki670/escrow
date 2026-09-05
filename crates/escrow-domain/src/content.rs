@@ -75,6 +75,10 @@ pub enum Platform {
     X,
 }
 
+impl Platform {
+    pub const ALL: [Self; 2] = [Self::Youtube, Self::X];
+}
+
 /// subtype が `Media` になる種別。#1 の表で `Media` 側の5つ。
 ///
 /// [`Content::Media`] がこれを持つことで、`content_type` と中身の食い違いが

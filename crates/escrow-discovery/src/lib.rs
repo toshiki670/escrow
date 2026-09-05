@@ -3,8 +3,9 @@
 //! 見つけたものを台帳へ起票するところまで。取得はしない — 起票すれば状態が
 //! `waiting` になり、次に誰が拾うかは状態が決める（#15 の Blackboard）。
 //!
-//! 巡回の間隔・優先度による重み付け・予算との兼ね合いは Phase 5 と 6（#7・#13）。
-//! ここに在るのは「1つの配信元を1回見る」だけで、**いつ見るかは持たない**。
+//! ここに在るのは「1つの配信元を1回見る」だけで、**いつ見るかは持たない**。順番と
+//! 時刻はスケジューラが決め、`sweep` の中の呼び出しがその中で待つ。どの配信元を
+//! どれだけの頻度で見るかは巡回の側（Phase 6、#7）。
 
 use escrow_domain::item::{Discovered, ItemId};
 use escrow_domain::source::{Exclude, Source};
@@ -21,13 +22,13 @@ pub enum DiscoveryError {
     Adapter(#[from] AdapterError),
 }
 
-pub struct Discovery<'a, D> {
+pub struct Discovery<'a> {
     ledger: &'a Ledger,
-    discover: &'a D,
+    discover: &'a dyn Discover,
 }
 
-impl<'a, D: Discover> Discovery<'a, D> {
-    pub const fn new(ledger: &'a Ledger, discover: &'a D) -> Self {
+impl<'a> Discovery<'a> {
+    pub const fn new(ledger: &'a Ledger, discover: &'a dyn Discover) -> Self {
         Self { ledger, discover }
     }
 
@@ -93,6 +94,7 @@ mod tests {
     use escrow_domain::state::MediaPresence;
     use escrow_domain::url;
     use escrow_ledger::NewSource;
+    use escrow_scheduler::BoxFuture;
     use escrow_scheduler::Found;
     use std::num::NonZeroU32;
 
@@ -100,12 +102,12 @@ mod tests {
     struct FakeDiscover(Vec<Found>);
 
     impl Discover for FakeDiscover {
-        async fn discover(
-            &self,
-            _source: &Source,
+        fn discover<'a>(
+            &'a self,
+            _source: &'a Source,
             _since: Timestamp,
-        ) -> Result<Vec<Found>, AdapterError> {
-            Ok(self.0.clone())
+        ) -> BoxFuture<'a, Result<Vec<Found>, AdapterError>> {
+            Box::pin(async move { Ok(self.0.clone()) })
         }
     }
 

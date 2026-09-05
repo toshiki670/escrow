@@ -637,6 +637,7 @@ dependencies = [
  "escrow-domain",
  "escrow-external",
  "thiserror 2.0.20",
+ "tokio",
 ]
 
 [[package]]
