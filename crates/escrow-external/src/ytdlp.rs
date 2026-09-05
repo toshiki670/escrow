@@ -300,8 +300,6 @@ fn classify(completed: &Completed, url: &NormalizedUrl) -> AdapterError {
 
 impl YtDlp {
     /// 検知の追加取得。フィードに無い2つを取る（#5）。
-    ///
-    /// **cookie を渡さない。** 検知は繰り返し叩く経路なので匿名に保つ。
     pub async fn schedule(&self, url: &NormalizedUrl) -> Result<Schedule, AdapterError> {
         let invocation = schedule_argv(&self.program, url);
         let completed = run(&invocation, None).await?;
