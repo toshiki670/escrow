@@ -107,13 +107,14 @@ mod tests {
             "2026-02-27T22:10:01+09:00"
         );
         assert_eq!(at.plus(Duration::ZERO).unwrap(), at);
-        assert!(at.plus(Duration::MAX).is_none());
     }
 
     #[test]
     fn refuses_a_span_that_leaves_the_calendar() {
         let at = Timestamp::parse("2026-02-27T22:10:00+09:00").unwrap();
+
         assert!(at.plus_days(NonZeroU32::MAX).is_none());
+        assert!(at.plus(Duration::MAX).is_none());
     }
 
     #[test]

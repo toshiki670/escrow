@@ -312,7 +312,6 @@ impl App {
             .with_context(|| format!("項目 {id} が無い"))?
             .item;
         let scheduler = self.scheduler()?;
-        // #5 の対応表が、この種別を取るのがどのツールかを決める。
         let acquirer =
             scheduler.acquirer(item.content_type(), Demand::interactive(Timestamp::now()));
 

@@ -55,7 +55,7 @@ impl Whisper {
 /// 取得したものを、文字起こしが読める形へ落とす。
 ///
 /// 16kHz モノラルの PCM。映像は捨てる。
-pub fn convert_argv(ffmpeg: &Path, input: &Path, output: &Path) -> Invocation {
+pub(crate) fn convert_argv(ffmpeg: &Path, input: &Path, output: &Path) -> Invocation {
     Invocation::new(ffmpeg)
         // 端末を持たないので、上書きの問い合わせで止まらせない。
         .arg("-nostdin")
@@ -76,7 +76,7 @@ pub fn convert_argv(ffmpeg: &Path, input: &Path, output: &Path) -> Invocation {
 /// 省くと動かないか、言語を取り違える（#5）。
 ///
 /// `-of` は拡張子を除いた出力先。`whisper-cli` が `.vtt` を足す。
-pub fn transcribe_argv(
+pub(crate) fn transcribe_argv(
     whisper: &Path,
     model: &Path,
     language: &Language,
@@ -97,7 +97,7 @@ pub fn transcribe_argv(
 }
 
 /// 文字起こしが書くファイルの名前。
-pub fn transcript_asset(ordinal: NonZeroU32) -> Asset {
+pub(crate) fn transcript_asset(ordinal: NonZeroU32) -> Asset {
     Asset::new(AssetKind::Transcript, ordinal, EXTENSION)
 }
 

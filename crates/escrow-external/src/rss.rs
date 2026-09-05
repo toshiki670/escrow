@@ -26,7 +26,7 @@ const PROGRAM: &str = "youtube-rss";
 ///
 /// `Source.url` は `https://www.youtube.com/channel/<UC...>` に正規化済みなので
 /// （#1）、末尾の不変 ID をそのまま渡せる。
-pub fn feed_url(source: &NormalizedUrl) -> Option<String> {
+pub(crate) fn feed_url(source: &NormalizedUrl) -> Option<String> {
     let channel_id = source
         .as_str()
         .strip_prefix("https://www.youtube.com/channel/")?;
@@ -88,7 +88,7 @@ pub struct Sighting {
     pub published_at: Timestamp,
 }
 
-pub fn parse_feed(xml: &str) -> Result<Vec<Sighting>, AdapterError> {
+pub(crate) fn parse_feed(xml: &str) -> Result<Vec<Sighting>, AdapterError> {
     let feed: Feed = quick_xml::de::from_str(xml).map_err(|e| parse_error(&e))?;
 
     feed.entry

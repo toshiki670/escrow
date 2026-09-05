@@ -14,9 +14,9 @@
 //!
 //! # 外へ出る点はここに集まる
 //!
-//! 下の [`Acquirer`] / [`Discoverer`] / [`Adapters::describe`] が、この crate の
-//! 外向きの呼び出しを1本残らず [`through`] へ通す（#13）。ツールの側は素の
-//! メソッドを持つだけなので、予算を迂回する経路が crate の外から見えない。
+//! 下の [`Acquirer`] / [`Discoverer`] / [`Prober`] / [`Adapters::describe`] が、
+//! この crate の外向きの呼び出しを1本残らず [`through`] へ通す（#13）。ツールの側は
+//! 素のメソッドを持つだけなので、予算を迂回する経路が crate の外から見えない。
 
 use std::path::Path;
 

@@ -58,13 +58,7 @@ pub struct Storage {
     pub media_dir: String,
     /// DB の場所。空なら Application Support 配下。
     pub db_path: String,
-    /// これを下回ったら取得を始めない。単位は GiB（2^30 バイト）。
-    ///
-    /// 単位を名前に持たせているのは、GB（10^9）と GiB（2^30）が 7% 違うため。
-    /// macOS 自身がどちらでも数字を見せる（Finder は GB、`df -h` は Gi）ので、
-    /// 設定の側で決めておかないと、人が書いた 20 と escrow が使う 20 が別物になる。
-    /// 厳しい側を採る — 多く空けさせて損をするのは待ち時間だけだが、足りないまま
-    /// 始めると取得が途中で死ぬ（#2）。
+    /// これを下回ったら取得を始めない。単位は GiB（2^30 バイト、#2）。
     pub min_free_gib: u32,
 }
 
@@ -74,7 +68,7 @@ pub struct Check {
     /// `holding` の項目をまとめて確認する間隔。
     ///
     /// 検知（`Source.priority` と #13 の予算）とは別の概念なので、こちらは共通設定（#1）。
-    /// ディスクが逼迫したら詰める（#7 Phase 4）。
+    /// ディスクが逼迫したら詰める（#7 の巡回）。
     pub interval_hours: NonZeroU32,
 }
 
@@ -107,13 +101,10 @@ pub struct Auth {
     pub cookies_from: Browser,
 }
 
-/// 外部アクセスの予算（#13）。
+/// 外部アクセスの予算（#13・#2）。
 ///
 /// **測り方は経路がコードで決め、ここは値だけを持つ。** 項目名が測り方まで言うので、
 /// 検知に同時実行数を書く形にならない。
-///
-/// 予算をプラットフォームごとに分けるのは、片方の上限がもう片方を縛らないため。
-/// 既定値は両方で同じで、差を付けるのは人の判断（#2）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Schedule {
@@ -126,8 +117,6 @@ pub struct Schedule {
 }
 
 /// 1つのプラットフォームの上限。#13 の経路がそのまま並ぶ。
-///
-/// 文字起こしがここに無いのは、whisper がローカルで動き外へ要求を出さないため（#13）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Limits {

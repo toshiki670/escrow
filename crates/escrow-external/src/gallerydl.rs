@@ -64,7 +64,7 @@ impl GalleryDl {
 ///
 /// escrow が持つのは不変の同一性（`x.com/i/user/<id>`）だけで、要求の形は
 /// アダプタが組み立てる。別のツールへ替えれば、変わるのはこの関数だけ。
-pub fn timeline_url(source: &NormalizedUrl) -> Option<String> {
+pub(crate) fn timeline_url(source: &NormalizedUrl) -> Option<String> {
     let id = source.as_str().strip_prefix("https://x.com/i/user/")?;
     (!id.is_empty()).then(|| format!("https://x.com/id:{id}/timeline"))
 }
@@ -83,7 +83,7 @@ fn base(program: &Path, browser: Browser) -> Invocation {
 ///
 /// `text-tweets` はメディアの無い投稿を拾うため。既定では飛ばされる（#5）。
 /// `cards=ytdl` は Space やライブ配信のカードを拾うため。
-pub fn timeline_argv(program: &Path, timeline: &str, browser: Browser) -> Invocation {
+pub(crate) fn timeline_argv(program: &Path, timeline: &str, browser: Browser) -> Invocation {
     base(program, browser)
         .arg("--dump-json")
         .args(["-o", "extractor.twitter.text-tweets=true"])
@@ -97,7 +97,7 @@ pub fn timeline_argv(program: &Path, timeline: &str, browser: Browser) -> Invoca
 /// 1つの投稿の中身を取る。落とさない。
 ///
 /// タイムラインと同じ envelope が返るので、読み取りは共通。
-pub fn describe_argv(program: &Path, url: &NormalizedUrl, browser: Browser) -> Invocation {
+pub(crate) fn describe_argv(program: &Path, url: &NormalizedUrl, browser: Browser) -> Invocation {
     base(program, browser)
         .arg("--dump-json")
         .args(["-o", "extractor.twitter.text-tweets=true"])
@@ -107,7 +107,7 @@ pub fn describe_argv(program: &Path, url: &NormalizedUrl, browser: Browser) -> I
 /// 1つの投稿の実体を落とす。
 ///
 /// 出力先は一時の置き場。名前を #1 の規則へ移すのは呼んだ側。
-pub fn download_argv(
+pub(crate) fn download_argv(
     program: &Path,
     url: &NormalizedUrl,
     into: &Path,
@@ -152,7 +152,7 @@ struct TweetMetadata {
     quoted_id: i64,
 }
 
-pub fn parse_timeline(stdout: &str) -> Result<Vec<Found>, AdapterError> {
+pub(crate) fn parse_timeline(stdout: &str) -> Result<Vec<Found>, AdapterError> {
     let entries: Vec<serde_json::Value> =
         serde_json::from_str(stdout.trim()).map_err(|e| parse_error(&e))?;
 
@@ -307,62 +307,53 @@ impl GalleryDl {
                 url: url.as_str().to_owned(),
             })
     }
-}
 
-impl GalleryDl {
     /// タイムラインを1回読む。順番待ちは [`crate::route::Discoverer`] が掛ける。
     pub(crate) async fn discover(
         &self,
         source: &Source,
         since: Timestamp,
     ) -> Result<Vec<Found>, AdapterError> {
-        {
-            let timeline = timeline_url(&source.url).ok_or_else(|| AdapterError::Parse {
-                program: PROGRAM.to_owned(),
-                detail: format!("X の配信元として読めない: {}", source.url),
-            })?;
+        let timeline = timeline_url(&source.url).ok_or_else(|| AdapterError::Parse {
+            program: PROGRAM.to_owned(),
+            detail: format!("X の配信元として読めない: {}", source.url),
+        })?;
 
-            let completed =
-                run(&timeline_argv(&self.program, &timeline, self.browser), None).await?;
-            if !completed.success {
-                return Err(classify(&completed));
-            }
-
-            let mut found = parse_timeline(&completed.stdout)?;
-            found.retain(|f| f.published_at >= since);
-            Ok(found)
+        let completed = run(&timeline_argv(&self.program, &timeline, self.browser), None).await?;
+        if !completed.success {
+            return Err(classify(&completed));
         }
-    }
-}
 
-impl GalleryDl {
+        let mut found = parse_timeline(&completed.stdout)?;
+        found.retain(|f| f.published_at >= since);
+        Ok(found)
+    }
+
     /// 実体を落とす。順番待ちは [`crate::route::Acquirer`] が掛ける。
     pub(crate) async fn acquire(
         &self,
         url: &NormalizedUrl,
         into: &Path,
     ) -> Result<Vec<Asset>, AdapterError> {
-        {
-            let io_error = |source| AdapterError::Launch {
-                program: PROGRAM.to_owned(),
-                source,
-            };
+        let io_error = |source| AdapterError::Launch {
+            program: PROGRAM.to_owned(),
+            source,
+        };
 
-            // gallery-dl は自分の規則で名前を付けるので、いったん別の場所へ受ける。
-            let scratch = tempfile::tempdir().map_err(io_error)?;
-            std::fs::create_dir_all(into).map_err(io_error)?;
+        // gallery-dl は自分の規則で名前を付けるので、いったん別の場所へ受ける。
+        let scratch = tempfile::tempdir().map_err(io_error)?;
+        std::fs::create_dir_all(into).map_err(io_error)?;
 
-            let completed = run(
-                &download_argv(&self.program, url, scratch.path(), self.browser),
-                None,
-            )
-            .await?;
-            if !completed.success {
-                return Err(classify(&completed));
-            }
-
-            rename_into_place(scratch.path(), into)
+        let completed = run(
+            &download_argv(&self.program, url, scratch.path(), self.browser),
+            None,
+        )
+        .await?;
+        if !completed.success {
+            return Err(classify(&completed));
         }
+
+        rename_into_place(scratch.path(), into)
     }
 }
 

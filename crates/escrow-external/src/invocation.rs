@@ -11,13 +11,13 @@ use crate::AdapterError;
 
 /// 1回ぶんの呼び出し。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Invocation {
+pub(crate) struct Invocation {
     pub program: PathBuf,
     pub args: Vec<OsString>,
 }
 
 impl Invocation {
-    pub fn new(program: impl Into<PathBuf>) -> Self {
+    pub(crate) fn new(program: impl Into<PathBuf>) -> Self {
         Self {
             program: program.into(),
             args: Vec::new(),
@@ -25,7 +25,7 @@ impl Invocation {
     }
 
     #[must_use]
-    pub fn arg(mut self, arg: impl AsRef<OsStr>) -> Self {
+    pub(crate) fn arg(mut self, arg: impl AsRef<OsStr>) -> Self {
         self.args.push(arg.as_ref().to_owned());
         self
     }
@@ -42,7 +42,8 @@ impl Invocation {
     }
 
     /// テストで突き合わせるための形。引数が UTF-8 でなければ `None`。
-    pub fn args_as_str(&self) -> Option<Vec<&str>> {
+    #[cfg(test)]
+    pub(crate) fn args_as_str(&self) -> Option<Vec<&str>> {
         self.args.iter().map(|a| a.to_str()).collect()
     }
 
@@ -58,7 +59,7 @@ impl Invocation {
 
 /// 走り終えたプロセス。
 #[derive(Debug, Clone)]
-pub struct Completed {
+pub(crate) struct Completed {
     pub success: bool,
     pub stdout: String,
     pub stderr: String,
@@ -81,7 +82,7 @@ impl Completed {
 ///
 /// 検知・生存確認・文字起こしのように**終わりがある**呼び出し向け。ライブの録画は
 /// 数時間走って途中で止める必要があるので、そちらはエンジンが別に扱う（#7 Phase 6）。
-pub async fn run(
+pub(crate) async fn run(
     invocation: &Invocation,
     working_dir: Option<&Path>,
 ) -> Result<Completed, AdapterError> {

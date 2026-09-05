@@ -24,14 +24,9 @@ use escrow_domain::timestamp::Timestamp;
 use escrow_external::{AdapterError, Admit, BoxFuture, Permit, Route};
 
 /// 要求に添える、順番を決めるためのもの（#13 の語彙）。
-///
-/// 要求する側が知っているのはこの2つだけで、上限の値も待ち方も知らない。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Demand {
-    /// いつまでに要るか。**近いものから先に通り、持たないものは最後に回る。**
-    ///
-    /// 予約枠の開始時刻も、監視期間の終わりも、預かりの期限も、どれもここへ書ける。
-    /// 「予約が重みより先に通る」はこの順番から出る（#13）。
+    /// いつまでに要るか。**近いものから先に通り、持たないものは最後に回る**（#13）。
     pub deadline: Option<Timestamp>,
     /// 締切が並んだときの順番。`Source.priority` がそのまま入る（#1）。
     pub weight: NonZeroU32,
@@ -56,9 +51,12 @@ impl Demand {
 
     /// 人が待っている要求。
     ///
-    /// #13 の「対話的なものを最優先にする」。締切をいまに置けば、締切を持たない巡回の
-    /// どれよりも、先の締切のどれよりも先に通る。重みは締切が並んだときだけ効くので、
-    /// 一番大きい値にしておく。
+    /// 締切をいまに置けば、締切を持たない巡回のどれよりも、先の締切のどれよりも先に
+    /// 通る。重みは締切が並んだときだけ効くので、一番大きい値にしておく。
+    ///
+    /// #13 は「対話的なものを最優先にするか、予算の一部を空けておくか」を2択のまま
+    /// 残している。**前者を選んだ** — 空けておく形は、空けた分を誰も使わないときに
+    /// 予算を捨てることになる。
     pub const fn interactive(now: Timestamp) -> Self {
         Self {
             deadline: Some(now),
@@ -110,8 +108,7 @@ struct Ticket {
 }
 
 impl Ord for Ticket {
-    /// 締切が近いものが先。締切を持たないものは最後。同着なら重みの大きいほうが先で、
-    /// それも同じなら先に並んだほうが先。
+    /// `Option` の既定の順序は `None` を先に置くので、締切のところだけ手で書く。
     fn cmp(&self, other: &Self) -> Ordering {
         let by_deadline = match (self.deadline, other.deadline) {
             (Some(mine), Some(theirs)) => mine.cmp(&theirs),
@@ -230,15 +227,17 @@ impl Gate {
     }
 
     /// 枠を取れたら `Ok`。取れないときは、待つ時間が分かるなら添えて返す。
+    ///
+    /// 開くかどうかは [`Gate::opens`] が決める。ここで別に判定すると、[`Plan`] が
+    /// 答える時刻と実際に出せる時刻がずれる。
     fn take(&self, ticket: Ticket) -> Result<(), Option<Duration>> {
         let now = Instant::now();
         let mut state = self.lock();
 
-        if let Some(until) = state.closed_until {
-            if until > now {
-                return Err(Some(until - now));
-            }
-            state.closed_until = None;
+        match self.opens(&state, now) {
+            Opening::In(wait) => return Err(Some(wait)),
+            Opening::WhenOneFinishes => return Err(None),
+            Opening::Now => {}
         }
 
         if state.waiting.first() != Some(&ticket) {
@@ -246,21 +245,8 @@ impl Gate {
         }
 
         match self.measure {
-            Measure::Gap(gap) => {
-                if let Some(started) = state.started_at {
-                    let elapsed = now.saturating_duration_since(started);
-                    if elapsed < gap {
-                        return Err(Some(gap - elapsed));
-                    }
-                }
-                state.started_at = Some(now);
-            }
-            Measure::Concurrency(limit) => {
-                if state.running >= limit.get() {
-                    return Err(None);
-                }
-                state.running += 1;
-            }
+            Measure::Gap(_) => state.started_at = Some(now),
+            Measure::Concurrency(_) => state.running += 1,
         }
 
         state.waiting.remove(&ticket);
@@ -302,6 +288,7 @@ impl Gate {
         }
     }
 
+    /// 門が開くか。**[`Gate::take`] と [`Gate::plan`] の両方がここを読む。**
     fn opens(&self, state: &GateState, now: Instant) -> Opening {
         if let Some(until) = state.closed_until
             && until > now
@@ -348,7 +335,6 @@ impl Drop for Queued<'_> {
     }
 }
 
-/// 順番が回ってきたことの証。**落とすと枠が空く。**
 struct Slot<'a> {
     gate: &'a Gate,
 }
@@ -418,8 +404,6 @@ impl Gates {
 }
 
 /// 外部アクセスの総量。**要求を出す側の外に置く**（#13）。
-///
-/// プラットフォームごとに分けるのは、片方の上限がもう片方を縛らないため。
 pub struct Budget {
     youtube: Gates,
     x: Gates,
@@ -446,9 +430,6 @@ impl Budget {
     }
 
     /// いつ出すつもりかを、経路ごとに答える。
-    ///
-    /// `now` は答えを壁の時計へ写すための起点。門が測っているのは経過時間なので、
-    /// 残りをこの時刻へ足して返す。
     pub fn plan(&self, now: Timestamp) -> Vec<Plan> {
         let mut plans = Vec::new();
 
@@ -471,8 +452,8 @@ impl Budget {
 
 /// 1つの要求ぶんの順番待ち。
 ///
-/// **`escrow-external` へ渡すのはこれ。** 締切と重みはここが持ち、向こうは
-/// 「この経路の順番を待つ」しか言えない（#13 の疎結合）。
+/// **`escrow-external` へ渡すのはこれ。** 締切と重みをここが持つので、向こうへ渡るのは
+/// 「この経路の順番を待つ」だけになる。
 pub struct Turn<'a> {
     gates: &'a Gates,
     demand: Demand,
@@ -501,9 +482,21 @@ mod tests {
         Timestamp::parse(text).expect(text)
     }
 
-    /// 拒否の待ち時間を 60 秒から始め、1時間で頭打ちにする門。#2 の既定と同じ。
+    /// #2 の既定の待ち時間を持つ門。値をここへ書き写すと、既定を変えても緑のまま古びる。
     fn gate(measure: Measure) -> Gate {
-        Gate::new(measure, Duration::from_secs(60), Duration::from_secs(3600))
+        let schedule = Schedule::default();
+        Gate::new(
+            measure,
+            Duration::from_secs(u64::from(schedule.rejection_backoff_seconds.get())),
+            Duration::from_secs(u64::from(schedule.rejection_max_backoff_seconds.get())),
+        )
+    }
+
+    /// #2 の既定の、拒否されたあとの最初の待ち時間。
+    fn backoff() -> Duration {
+        Duration::from_secs(u64::from(
+            Schedule::default().rejection_backoff_seconds.get(),
+        ))
     }
 
     fn rejected(retry_after: Option<Duration>) -> AdapterError {
@@ -615,7 +608,7 @@ mod tests {
 
         let start = Instant::now();
         drop(gate.admit(Demand::weighed(weight(1))).await);
-        assert_eq!(Instant::now() - start, Duration::from_secs(60), "#2 の既定");
+        assert_eq!(Instant::now() - start, backoff(), "#2 の既定");
     }
 
     /// 相手が待ち時間を指定したら、そちらに従う。
@@ -646,26 +639,19 @@ mod tests {
             drop(slot);
         }
 
-        assert_eq!(
-            waits,
-            vec![
-                Duration::ZERO,
-                Duration::from_secs(60),
-                Duration::from_secs(120)
-            ]
-        );
+        assert_eq!(waits, vec![Duration::ZERO, backoff(), backoff() * 2]);
 
         // 通ると次の拒否は最初の待ち時間からやり直す。
         let start = Instant::now();
         let slot = gate.admit(Demand::weighed(weight(1))).await;
-        assert_eq!(Instant::now() - start, Duration::from_secs(240));
+        assert_eq!(Instant::now() - start, backoff() * 4);
         slot.report(Ok(()));
         slot.report(Err(&rejected(None)));
         drop(slot);
 
         let start = Instant::now();
         drop(gate.admit(Demand::weighed(weight(1))).await);
-        assert_eq!(Instant::now() - start, Duration::from_secs(60));
+        assert_eq!(Instant::now() - start, backoff());
     }
 
     /// 待ち時間は上限で頭打ちになる。
@@ -707,7 +693,7 @@ mod tests {
 
         let start = Instant::now();
         drop(gate.admit(Demand::weighed(weight(1))).await);
-        assert_eq!(Instant::now() - start, Duration::from_secs(120), "倍のまま");
+        assert_eq!(Instant::now() - start, backoff() * 2, "倍のまま");
     }
 
     /// 諦めた要求は列から抜ける。残ると、その門は先頭が動かなくなる。

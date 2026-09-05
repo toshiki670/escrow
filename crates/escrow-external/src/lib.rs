@@ -19,9 +19,10 @@
 //!
 //! # 外へ出る点は受付を通る
 //!
-//! ツールを叩くメソッドは crate の中でだけ見える。**外から呼べるのは
-//! [`route::Adapters`] が返す包みだけ**で、その中で [`through`] が順番を待つ（#13）。
-//! 予算を迂回する呼び出しは、この crate の外では綴れない。
+//! ツールを叩くメソッドも、引数を組み立てる関数も、プロセスを起動する `run` も、
+//! crate の中でだけ見える。**外から呼べるのは [`route::Adapters`] が返す包みだけ**で、
+//! その中で [`through`] が順番を待つ（#13）。予算を迂回する呼び出しは、この crate の
+//! 外では綴れない。
 //!
 //! # 分け方
 //!
@@ -29,23 +30,22 @@
 //!
 //! | 層 | 形 | 壊れる理由 |
 //! |---|---|---|
-//! | 引数の組み立て | 純関数 → [`Invocation`] | ツールのフラグが変わった |
+//! | 引数の組み立て | 純関数 → `Invocation` | ツールのフラグが変わった |
 //! | 出力の読み取り | 純関数 `&str -> Result<_, AdapterError>` | ツールの出力形式が変わった |
-//! | 実行 | [`run`] 1か所 | OS 側の事情 |
+//! | 実行 | `run` 1か所 | OS 側の事情 |
 //!
 //! 1つの関数に混ぜると、落ちたときにどれが原因か分からない。分けてあれば、
 //! 引数のテストはプロセスを起動せず argv を突き合わせるだけで済み、出力のテストは
 //! 実物を固めた fixture で offline に回せる。
 
 pub mod gallerydl;
-pub mod invocation;
+pub(crate) mod invocation;
 pub mod route;
 pub mod rss;
 pub mod whisper;
 pub mod ytdlp;
 
-pub use invocation::{Completed, Invocation, run};
-pub use route::{Acquirer, Adapters, Discoverer};
+pub use route::{Acquirer, Adapters, Discoverer, Prober};
 
 use std::path::Path;
 use std::pin::Pin;
