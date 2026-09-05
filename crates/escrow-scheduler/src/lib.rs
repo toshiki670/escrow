@@ -212,3 +212,60 @@ fn path(resolver: &Resolver, tool: Tool) -> Result<PathBuf, MissingTool> {
         .map(std::path::Path::to_path_buf)
         .ok_or(MissingTool(tool))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::num::NonZeroU32;
+    use std::time::Duration;
+
+    use tokio::time::Instant;
+
+    use escrow_config::{Browser, Schedule};
+    use escrow_external::gallerydl::GalleryDl;
+    use escrow_external::rss::Rss;
+    use escrow_external::ytdlp::YtDlp;
+
+    /// 起動できないパスを渡す。**外へは出ない** — 予算が掛かるのは起動より前なので、
+    /// 待ちの有無はツールが動くかどうかと関係しない。
+    fn adapters() -> Adapters {
+        Adapters::new(
+            Rss::new(),
+            YtDlp::new("/nonexistent/yt-dlp", Browser::Firefox),
+            GalleryDl::new("/nonexistent/gallery-dl", Browser::Firefox),
+        )
+    }
+
+    /// 予算が、包みを通った実際の呼び出しに掛かること。
+    ///
+    /// 門そのものの振る舞いは [`budget`] の単体テストが見る。ここが見るのは**繋がり** —
+    /// [`Turn`] → `Admit` → `through` → 包み → ツール が1本になっていること。
+    #[tokio::test(start_paused = true)]
+    async fn the_budget_applies_to_a_call_that_goes_through_the_adapters() {
+        let adapters = adapters();
+        let budget = Budget::new(&Schedule::default());
+        let url = url::normalize_item("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+            .unwrap()
+            .0;
+        let demand = Demand::weighed(NonZeroU32::MIN);
+
+        let describe = async |budget: &Budget| {
+            let turn = budget.turn(Platform::Youtube, demand);
+            adapters
+                .describe(&url, ContentType::YoutubeVideo, &turn)
+                .await
+        };
+
+        let start = Instant::now();
+        assert!(describe(&budget).await.is_err(), "起動できない");
+        assert_eq!(Instant::now() - start, Duration::ZERO, "1本目は待たない");
+
+        assert!(describe(&budget).await.is_err());
+        assert_eq!(
+            Instant::now() - start,
+            Duration::from_secs(10),
+            "2本目は #2 の describe_gap_seconds ぶん待つ"
+        );
+    }
+}
