@@ -100,16 +100,28 @@ impl Adapters {
         content_type: ContentType,
         admit: &'a dyn Admit,
     ) -> Option<Prober<'a>> {
+        if Self::has_prober(content_type) {
+            Some(Prober {
+                tool: &self.ytdlp,
+                admit,
+            })
+        } else {
+            None
+        }
+    }
+
+    /// 生存確認の担い手がいる種別か。
+    ///
+    /// 担い手そのものを組み立てずに済むので、**受付を持たない場所からも対応表へ
+    /// 訊ける**。[`Adapters::prober`] もここを読むので、答えは1か所で決まる。
+    pub const fn has_prober(content_type: ContentType) -> bool {
         match content_type {
-            ContentType::XPost => None,
+            ContentType::XPost => false,
             ContentType::YoutubeShorts
             | ContentType::YoutubeVideo
             | ContentType::YoutubeLive
             | ContentType::XSpace
-            | ContentType::XBroadcast => Some(Prober {
-                tool: &self.ytdlp,
-                admit,
-            }),
+            | ContentType::XBroadcast => true,
         }
     }
 
