@@ -1,25 +1,26 @@
 //! escrow の CLI。
 //!
 //! 外部向けは #4 の契約どおり `list` と `release` の2つ。それ以外は管理面で、
-//! GUI（Phase 6）ができるまで手で回すための口。
+//! GUI（Phase 8）ができるまで手で回すための入口。
 
 use std::num::NonZeroU32;
 
 use anyhow::{Context as _, Result, bail};
 use clap::{Parser, Subcommand};
 
-use escrow_core::adapter::{Resolution, Resolver};
-use escrow_core::config::{Config, Dirs, Paths};
-use escrow_core::content::ContentType;
-use escrow_core::handover;
-use escrow_core::item::ItemId;
-use escrow_core::pipeline::Pipeline;
-use escrow_core::source::{Monitoring, PersonId, SourceId};
-use escrow_core::state::{ReleaseReference, State, StateName};
-use escrow_core::store::{NewItem, NewSource, Store};
-use escrow_core::timestamp::Timestamp;
-use escrow_core::url::{self, TypeHint};
+use escrow_acquisition::Acquisition;
+use escrow_config::{Config, Dirs, Paths, Resolution, Resolver};
+use escrow_domain::content::ContentType;
+use escrow_domain::item::Discovered;
+use escrow_domain::item::ItemId;
+use escrow_domain::source::{Monitoring, PersonId, SourceId};
+use escrow_domain::state::{ReleaseReference, StateName};
+use escrow_domain::timestamp::Timestamp;
+use escrow_domain::url::{self, TypeHint};
+use escrow_handover::Handover;
+use escrow_ledger::{Ledger, NewSource};
 use escrow_scheduler::Scheduler;
+use escrow_transcription::Transcription;
 
 /// 配信元から失われうるものを取り込み、手元に預かる。
 #[derive(Debug, Parser)]
@@ -146,7 +147,7 @@ async fn main() -> Result<()> {
 struct App {
     config: Config,
     paths: Paths,
-    store: Store,
+    ledger: Ledger,
     resolver: Resolver,
 }
 
@@ -157,14 +158,14 @@ impl App {
         let paths = Paths::resolve(&config, &dirs);
         let resolver = Resolver::from_env(&config.extra_paths(&dirs));
 
-        let store = Store::open(&paths.db)
+        let ledger = Ledger::open(&paths.db)
             .await
             .with_context(|| format!("DB を開けない: {}", paths.db.display()))?;
 
         Ok(Self {
             config,
             paths,
-            store,
+            ledger,
             resolver,
         })
     }
@@ -176,24 +177,25 @@ impl App {
     }
 
     async fn list(&self, state: Option<String>, id: Option<i64>, json: bool) -> Result<()> {
-        let items = match (state, id) {
+        let projected = match (state, id) {
             (_, Some(id)) => self
-                .store
+                .ledger
                 .item(ItemId::new(id))
                 .await?
                 .into_iter()
                 .collect::<Vec<_>>(),
             (Some(name), None) => {
                 let name: StateName = name.parse().context("知らない状態")?;
-                self.store.items_in_state(name).await?
+                self.ledger.items_in_state(name).await?
             }
             // #4 は状態を絞らない呼び方も許す。既定は引き渡し待ち。
-            (None, None) => self.store.items_in_state(StateName::Kept).await?,
+            (None, None) => self.ledger.items_in_state(StateName::Kept).await?,
         };
+        let items: Vec<_> = projected.into_iter().map(|p| p.item).collect();
 
         let handed: Vec<_> = items
             .iter()
-            .map(|item| handover::handover(item, &self.paths.media_dir))
+            .map(|item| Handover::new(&self.ledger, &self.paths.media_dir).handed(item))
             .collect::<Result<_, _>>()?;
 
         if json {
@@ -215,20 +217,16 @@ impl App {
     }
 
     async fn release(&self, id: i64, reference: Option<String>) -> Result<()> {
-        let handed = handover::release(
-            &self.store,
-            &self.paths.media_dir,
-            ItemId::new(id),
-            reference.map(ReleaseReference::new),
-        )
-        .await?;
+        let handed = Handover::new(&self.ledger, &self.paths.media_dir)
+            .release(ItemId::new(id), reference.map(ReleaseReference::new))
+            .await?;
 
         println!("{}", serde_json::to_string_pretty(&handed)?);
         Ok(())
     }
 
     async fn add_person(&self, name: &str) -> Result<()> {
-        println!("{}", self.store.add_person(name).await?);
+        println!("{}", self.ledger.add_person(name).await?);
         Ok(())
     }
 
@@ -251,7 +249,7 @@ impl App {
         let monitoring = Monitoring::new(at(monitor_from)?, at(monitor_until)?)?;
 
         let id = self
-            .store
+            .ledger
             .add_source(&NewSource {
                 person_id: PersonId::new(person),
                 url,
@@ -284,16 +282,18 @@ impl App {
         let found = self.scheduler()?.describe(&url, content_type).await?;
 
         let id = self
-            .store
-            .add_item(&NewItem {
-                source_id: SourceId::new(source),
-                url: found.url,
-                published_at: found.published_at,
-                scheduled_start_at: found.scheduled_start_at,
-                state: State::initial(found.media),
-                state_since: Timestamp::now(),
-                content: found.content,
-            })
+            .ledger
+            .discover(
+                &Discovered {
+                    source_id: SourceId::new(source),
+                    url: found.url,
+                    published_at: found.published_at,
+                    scheduled_start_at: found.scheduled_start_at,
+                    content: found.content,
+                    media: found.media,
+                },
+                Timestamp::now(),
+            )
             .await?;
 
         println!("{id}");
@@ -303,28 +303,29 @@ impl App {
     async fn fetch(&self, id: i64) -> Result<()> {
         let id = ItemId::new(id);
         let item = self
-            .store
+            .ledger
             .item(id)
             .await?
-            .with_context(|| format!("項目 {id} が無い"))?;
-        let source = self
-            .store
-            .source(item.source_id)
-            .await?
-            .context("配信元が無い")?;
-
+            .with_context(|| format!("項目 {id} が無い"))?
+            .item;
         let scheduler = self.scheduler()?;
         // #5 の対応表が、この種別を取るのがどのツールかを決める。
         let acquirer = scheduler.acquirer(item.content_type());
 
-        let state = Pipeline::new(
-            &self.store,
-            &self.paths.media_dir,
-            &acquirer,
-            scheduler.transcriber(),
-        )
-        .run(id, source.hold_policy())
-        .await?;
+        // 預かる日数も期限も、取得が終わった瞬間に取得のスライスが決める（#1）。
+        let state = Acquisition::new(&self.ledger, &self.paths.media_dir, &acquirer)
+            .run(id)
+            .await?;
+
+        // スライスは互いを知らないので、**次に誰が拾うかは状態が決める**（#15）。
+        // 巡回するエンジンは Phase 6 なので、いまはここが状態を見て繋ぐ。
+        let state = if state.name() == StateName::Transcribing {
+            Transcription::new(&self.ledger, &self.paths.media_dir, scheduler.transcriber())
+                .run(id)
+                .await?
+        } else {
+            state
+        };
 
         println!("{id} -> {state}", state = state.as_str());
         Ok(())

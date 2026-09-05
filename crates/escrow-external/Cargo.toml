@@ -1,5 +1,5 @@
 [package]
-name = "escrow-scheduler"
+name = "escrow-external"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,10 +9,17 @@ repository.workspace = true
 [dependencies]
 escrow-domain.workspace = true
 escrow-config.workspace = true
-escrow-external.workspace = true
+chrono.workspace = true
+quick-xml.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
 
 [dev-dependencies]
+which.workspace = true
 
 [lints]
 workspace = true

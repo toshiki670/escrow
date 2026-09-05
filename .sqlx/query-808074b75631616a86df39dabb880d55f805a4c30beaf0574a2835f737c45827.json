@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE item SET state = ?, state_since = ?, hold_until = ?, release_reference = ? WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "808074b75631616a86df39dabb880d55f805a4c30beaf0574a2835f737c45827"
+}

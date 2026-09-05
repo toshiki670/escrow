@@ -1,5 +1,5 @@
 [package]
-name = "escrow-gui"
+name = "escrow-custody"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

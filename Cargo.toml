@@ -1,11 +1,19 @@
 [workspace]
 resolver = "3"
 members = [
-    "crates/escrow-core",
-    "crates/escrow-adapter",
+    "crates/escrow-domain",
+    "crates/escrow-ledger",
+    "crates/escrow-config",
+    "crates/escrow-external",
     "crates/escrow-scheduler",
+    "crates/escrow-discovery",
+    "crates/escrow-acquisition",
+    "crates/escrow-transcription",
+    "crates/escrow-custody",
+    "crates/escrow-handover",
     "crates/escrow-cli",
     "crates/escrow-gui",
+    "tests",
 ]
 
 [workspace.package]
@@ -16,12 +24,21 @@ license = "MIT"
 repository = "https://github.com/toshiki670/escrow"
 
 [workspace.dependencies]
-escrow-core = { path = "crates/escrow-core" }
-escrow-adapter = { path = "crates/escrow-adapter" }
+escrow-domain = { path = "crates/escrow-domain" }
+escrow-ledger = { path = "crates/escrow-ledger" }
+escrow-config = { path = "crates/escrow-config" }
+escrow-external = { path = "crates/escrow-external" }
 escrow-scheduler = { path = "crates/escrow-scheduler" }
+escrow-discovery = { path = "crates/escrow-discovery" }
+escrow-acquisition = { path = "crates/escrow-acquisition" }
+escrow-transcription = { path = "crates/escrow-transcription" }
+escrow-custody = { path = "crates/escrow-custody" }
+escrow-handover = { path = "crates/escrow-handover" }
 clap = { version = "4.6", features = ["derive"] }
 anyhow = "1.0"
 chrono = "0.4"
+# 識別子の newtype。const fn new と Display と i64 への変換を出す。
+derive_more = { version = "2.1", default-features = false, features = ["std", "constructor", "display", "into"] }
 directories = "6.0"
 quick-xml = { version = "0.42", features = ["serialize"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "webpki-roots", "http2", "charset"] }

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO item_event (item_id, source_id, seq, kind, occurred_at, url, content_type, published_at, scheduled_start_at, title, body, in_reply_to_url, quoted_url, media_present) VALUES (?, ?, ?, 'discovered', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 13
+    },
+    "nullable": []
+  },
+  "hash": "a00412d6f98c32e15b74f8f1b21e6cfe1710c7da42a9efbec0b9bc43414bdc8f"
+}

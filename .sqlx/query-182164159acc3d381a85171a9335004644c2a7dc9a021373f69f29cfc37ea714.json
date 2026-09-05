@@ -1,0 +1,189 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT i.id AS \"id!\", i.source_id, i.url, i.content_type, i.published_at,\n                      i.scheduled_start_at, i.hold_until, i.state, i.state_since,\n                      i.title, i.body, i.in_reply_to_url, i.quoted_url, i.release_reference,\n                      (SELECT MAX(e.seq) FROM item_event e WHERE e.item_id = i.id) AS \"seq!: i64\"\n               FROM item i WHERE i.id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "item",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "source_id",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "item",
+            "name": "source_id"
+          }
+        }
+      },
+      {
+        "name": "url",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "item",
+            "name": "url"
+          }
+        }
+      },
+      {
+        "name": "content_type",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "item",
+            "name": "content_type"
+          }
+        }
+      },
+      {
+        "name": "published_at",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "item",
+            "name": "published_at"
+          }
+        }
+      },
+      {
+        "name": "scheduled_start_at",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "item",
+            "name": "scheduled_start_at"
+          }
+        }
+      },
+      {
+        "name": "hold_until",
+        "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "item",
+            "name": "hold_until"
+          }
+        }
+      },
+      {
+        "name": "state",
+        "ordinal": 7,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "item",
+            "name": "state"
+          }
+        }
+      },
+      {
+        "name": "state_since",
+        "ordinal": 8,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "item",
+            "name": "state_since"
+          }
+        }
+      },
+      {
+        "name": "title",
+        "ordinal": 9,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "item",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "name": "body",
+        "ordinal": 10,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "item",
+            "name": "body"
+          }
+        }
+      },
+      {
+        "name": "in_reply_to_url",
+        "ordinal": 11,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "item",
+            "name": "in_reply_to_url"
+          }
+        }
+      },
+      {
+        "name": "quoted_url",
+        "ordinal": 12,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "item",
+            "name": "quoted_url"
+          }
+        }
+      },
+      {
+        "name": "release_reference",
+        "ordinal": 13,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "item",
+            "name": "release_reference"
+          }
+        }
+      },
+      {
+        "name": "seq!: i64",
+        "ordinal": 14,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "182164159acc3d381a85171a9335004644c2a7dc9a021373f69f29cfc37ea714"
+}

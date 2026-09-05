@@ -13,8 +13,13 @@ name = "escrow"
 path = "src/main.rs"
 
 [dependencies]
-escrow-core.workspace = true
+escrow-domain.workspace = true
+escrow-ledger.workspace = true
+escrow-config.workspace = true
 escrow-scheduler.workspace = true
+escrow-acquisition.workspace = true
+escrow-transcription.workspace = true
+escrow-handover.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 serde_json.workspace = true
