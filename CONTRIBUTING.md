@@ -63,7 +63,8 @@ escrow は ADR をファイルで持たず、閉じた Issue がその役をす�
 | 下の段しか見えない | escrow |
 | 段4 のスライスは互いを知らない。順序はコードの呼び出し順ではなく状態機械が持ち、スライスは投影を状態で絞って拾われる | escrow |
 | 外部アクセスの port は、段3 の crate の公開 API。段4・段5 は外部ツールの crate を名前で知らない | escrow |
-| 事象を書く道は2つだけ。投影はいつでも捨てて作り直せる | Event Sourcing / CQRS の帰結 |
+| 事象を書く道は2つだけ。投影はいつでも捨てて作り直せる | escrow |
+| 状態遷移は**全域関数1つが正本**。段1 に置き、受け皿（`_ =>`）を持たない。ここに無い遷移は通らない | escrow |
 
 **どの crate がどの段に居て、どの辺が許されているかの正本は `tests/dependency_direction.rs`。**
 この規約に写さない。
@@ -76,8 +77,8 @@ escrow は ADR をファイルで持たず、閉じた Issue がその役をす�
 
 | 対象 | 要求 |
 |---|---|
-| 公開 API の rustdoc | 下の「形」と「中身」の全部 |
-| 非公開の doc（`pub` でない項目・`pub(crate)`） | why だけ。契約の節は要らない |
+| **crate の外から到達できる** API の rustdoc | 下の「形」と「中身」に従う |
+| 外から到達できないもの（`pub(crate)`・private・**private なモジュールの中の `pub`**） | why だけ。契約の節は要らない |
 | 通常のコメント（`//`） | why だけ |
 
 ### 形（公開 API）
@@ -96,7 +97,7 @@ escrow は ADR をファイルで持たず、閉じた Issue がその役をす�
 
 | 規則 | 出典 |
 |---|---|
-| 失敗・パニック・安全性を書く | [C-FAILURE](https://rust-lang.github.io/api-guidelines/documentation.html) |
+| **該当する契約があるときに限り**、失敗・パニック・安全性を書く。返す型が `Result` でなく、panic も unsafe も無いなら、節を置かない | [C-FAILURE](https://rust-lang.github.io/api-guidelines/documentation.html) |
 | 関連するものへリンクを張る | C-LINK |
 | 実装の詳細を rustdoc に出さない | C-HIDDEN |
 
@@ -126,7 +127,7 @@ escrow は ADR をファイルで持たず、閉じた Issue がその役をす�
 | 規則 | 違反の見分け方 | 出典 |
 |---|---|---|
 | 指しているものの名前で書く | 比喩が名前になっている（「口」「窓」） | **Ubiquitous Language**（Evans, *Domain-Driven Design*, 2003） |
-| 能動態で書く | 主語が消えている | [Google developer documentation style guide](https://developers.google.com/style/voice) |
+| 能動態で書く | 「〜される」など、動作主体を不必要に隠す受動表現になっている | [Google developer documentation style guide](https://developers.google.com/style/voice) |
 | 肯定形で書く | 「〜できない」「〜しない」で始まる説明がある。「作る道は2つ」と言い換えられる | 同上（能動態の系） |
 | 根拠を仕様に置く | 根拠が依存 crate の API 名や、いまの実装の形になっている（「`sqlx` がこう返すから」） | escrow |
 | 推測は結論と同じ段落に置く | 「たぶん」が別の段落にあり、結論だけ読むと確定に見える | escrow |
@@ -196,7 +197,7 @@ escrow は ADR をファイルで持たず、閉じた Issue がその役をす�
 | カーネルの依存とモジュールの一覧 | テスト |
 | ログと投影を、同じ経路でしか書けないこと | テスト |
 | 状態遷移に受け皿（`_ =>`）を置かないこと | コンパイル |
-| 仕様の図にある遷移だけが通り、その本数が動かないこと | テスト |
+| 状態遷移の全域関数に**無い**遷移が通らず、通る本数が動かないこと | テスト |
 | 事象の順序と競合 | DB の制約 |
 
 **それぞれの正本はテスト自身。** 何をどう見ているかはテストを読む。
