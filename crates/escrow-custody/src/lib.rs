@@ -21,7 +21,7 @@ use escrow_domain::item::ItemId;
 use escrow_domain::liveness::Presence;
 use escrow_domain::state::{Event, State, StateName};
 use escrow_domain::timestamp::Timestamp;
-use escrow_ledger::{Ledger, LedgerError, Projected};
+use escrow_ledger::{Ledger, LedgerError, Projected, Seq};
 use escrow_scheduler::{AdapterError, Probe};
 use thiserror::Error;
 
@@ -96,47 +96,91 @@ impl<'a> Custody<'a> {
             None => return Ok(State::Holding { until }),
         };
 
-        let state = self.append(current, &event, now).await?;
+        let after = self.append(current, &event, now).await?;
 
         // **DB を先に更新し、ファイルは後で消す**（#7）。ここで落ちても残るのは
-        // 孤児ファイルだけで、[`Custody::remove_orphans`] が次の回で拾う。
-        if state.is_terminal() {
-            self.remove_media(id)?;
+        // 実体だけで、[`Custody::remove_orphans`] が次の回で拾う。
+        if after.item.state.is_terminal() {
+            self.remove_media(id, Some(after.seq)).await?;
         }
 
-        Ok(state)
+        Ok(after.item.state)
     }
 
-    /// 終端に達した項目の実体を消し、消したものを返す。
+    /// 終わった項目の実体を消し、消したものを返す。
     ///
     /// escrow はメディアを永続化しないので、終端の項目に対応するディレクトリは
     /// 残らない（#1）。**残っているのは、途中で落ちたか、取得しきれなかったぶん**。
     /// #7 は終端の4つを区別せずここへ載せている — 取り切れなかった断片も追跡する
     /// 相手がいないので、残せば `min_free_gib` を静かに削る。
     ///
+    /// **置き場所の側から回る。** 台帳を先に読む形だと、配信元ごと消えて行が
+    /// 残っていない項目の置き場所が、誰にも見つからない（#1 の削除の連鎖）。
+    ///
     /// # Errors
     ///
-    /// 台帳を読めないか、ディレクトリを消せないとき。
+    /// 台帳を読めないか、ディレクトリを扱えないとき。
     pub async fn remove_orphans(&self) -> Result<Vec<ItemId>, CustodyError> {
-        let mut removed = Vec::new();
+        // 消す前に落ちて、退避したまま残っているもの。
+        for (id, staged) in asset::staged(self.media_dir).map_err(|source| self.io(source))? {
+            if self.finished(id).await? {
+                asset::remove_staged(&staged).map_err(|source| self.io(source))?;
+            }
+        }
 
-        for name in StateName::ALL.into_iter().filter(|name| name.is_terminal()) {
-            for projected in self.ledger.items_in_state(name).await? {
-                let id = projected.item.id;
-                if self.remove_media(id)? {
-                    removed.push(id);
-                }
+        let mut removed = Vec::new();
+        for id in asset::item_ids(self.media_dir).map_err(|source| self.io(source))? {
+            let projected = self.ledger.item(id).await?;
+            let finished = projected
+                .as_ref()
+                .is_none_or(|projected| projected.item.state.is_terminal());
+
+            if finished && self.remove_media(id, projected.map(|p| p.seq)).await? {
+                removed.push(id);
             }
         }
 
         Ok(removed)
     }
 
-    fn remove_media(&self, id: ItemId) -> Result<bool, CustodyError> {
-        asset::remove(self.media_dir, id).map_err(|source| CustodyError::Io {
-            path: asset::item_dir(self.media_dir, id),
+    /// 実体を消す。**退避してから、台帳が動いていないことを確かめて消す。**
+    ///
+    /// 終端の項目も、人が再取得を指示すれば `waiting` から始まる（#1）。読んだ姿の
+    /// まま消しに行くと、その間に始まった取得のものまで消せてしまう。番号が動いて
+    /// いなければ再取得は1度も起きていないので、退避したのは終わった項目のもの。
+    ///
+    /// 動いていたら消さずに置く。誤って消すと戻らないが、置けば次の回で片付く
+    /// （#5 の「間違える向きを片側へ寄せる」と同じ向き）。
+    async fn remove_media(&self, id: ItemId, anchor: Option<Seq>) -> Result<bool, CustodyError> {
+        let Some(staged) =
+            asset::stage_for_removal(self.media_dir, id).map_err(|source| self.io(source))?
+        else {
+            return Ok(false);
+        };
+
+        if self.ledger.item(id).await?.map(|p| p.seq) != anchor {
+            return Ok(false);
+        }
+
+        asset::remove_staged(&staged).map_err(|source| self.io(source))?;
+        Ok(true)
+    }
+
+    /// もう手元に実体を置かない項目か。**行が無いのも終わりの1つ** — 配信元ごと
+    /// 消えた項目（#1 の削除の連鎖）。
+    async fn finished(&self, id: ItemId) -> Result<bool, CustodyError> {
+        Ok(self
+            .ledger
+            .item(id)
+            .await?
+            .is_none_or(|projected| projected.item.state.is_terminal()))
+    }
+
+    fn io(&self, source: std::io::Error) -> CustodyError {
+        CustodyError::Io {
+            path: self.media_dir.to_path_buf(),
             source,
-        })
+        }
     }
 
     async fn load(&self, id: ItemId) -> Result<Projected, CustodyError> {
@@ -155,10 +199,10 @@ impl<'a> Custody<'a> {
         current: Projected,
         event: &Event,
         at: Timestamp,
-    ) -> Result<State, CustodyError> {
+    ) -> Result<Projected, CustodyError> {
         let id = current.item.id;
         self.ledger.append(id, current.seq, event, at).await?;
-        Ok(self.load(id).await?.item.state)
+        self.load(id).await
     }
 }
 
@@ -474,6 +518,87 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    /// **退避の前後で台帳が動いていたら、消さずに置く。**
+    ///
+    /// 再取得は終端からしか始まらないので、番号が動いていれば退避したものが
+    /// 次の取得のものかもしれない（#1）。誤って消すと戻らない。
+    #[tokio::test]
+    async fn media_is_not_removed_when_the_ledger_moved_under_it() {
+        let ledger = Ledger::open_in_memory().await.unwrap();
+        let media = tempfile::tempdir().unwrap();
+        let source = seeded(&ledger).await;
+        let id = holding_item(&ledger, media.path(), source, "dQw4w9WgXcQ").await;
+
+        // 読んだ時点の姿と違う番号を渡す = 退避のあいだに誰かが動かしたのと同じ。
+        let stale = Some(Seq::FIRST);
+        assert_ne!(ledger.item(id).await.unwrap().unwrap().seq, Seq::FIRST);
+
+        let removed = Custody::new(&ledger, media.path())
+            .remove_media(id, stale)
+            .await
+            .unwrap();
+
+        assert!(!removed);
+        assert!(!media_exists(media.path(), id), "退避は済んでいる");
+        assert_eq!(
+            asset::staged(media.path()).unwrap().len(),
+            1,
+            "消さずに置く"
+        );
+    }
+
+    /// 行が無い置き場所も消える。配信元ごと消えた項目（#1 の削除の連鎖）。
+    ///
+    /// **台帳を先に読む形だと、これは誰にも見つからない。**
+    #[tokio::test]
+    async fn a_place_whose_row_is_gone_is_removed() {
+        let ledger = Ledger::open_in_memory().await.unwrap();
+        let media = tempfile::tempdir().unwrap();
+        let gone = ItemId::new(999);
+        let dir = asset::item_dir(media.path(), gone);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("video.1.mp4"), b"x").unwrap();
+
+        let removed = Custody::new(&ledger, media.path())
+            .remove_orphans()
+            .await
+            .unwrap();
+
+        assert_eq!(removed, vec![gone]);
+        assert!(!dir.exists());
+    }
+
+    /// 退避したまま残っているものは、その項目が終わっていれば片付く。
+    #[tokio::test]
+    async fn leftover_staging_is_cleared_only_for_finished_items() {
+        let ledger = Ledger::open_in_memory().await.unwrap();
+        let media = tempfile::tempdir().unwrap();
+        let source = seeded(&ledger).await;
+
+        let live = live_item(&ledger, media.path(), source, "9B7SFrpmzL0").await;
+        let of_live = asset::stage_for_removal(media.path(), live)
+            .unwrap()
+            .unwrap();
+
+        let finished = live_item(&ledger, media.path(), source, "Ks-_Mh1QhMc").await;
+        let seq = ledger.item(finished).await.unwrap().unwrap().seq;
+        ledger
+            .append(finished, seq, &Event::Deleted, deadline())
+            .await
+            .unwrap();
+        let of_finished = asset::stage_for_removal(media.path(), finished)
+            .unwrap()
+            .unwrap();
+
+        Custody::new(&ledger, media.path())
+            .remove_orphans()
+            .await
+            .unwrap();
+
+        assert!(of_live.exists(), "進行中のものは残す");
+        assert!(!of_finished.exists());
     }
 
     /// 終端の項目に残った実体を消し、進行中のものには触らない（#7）。

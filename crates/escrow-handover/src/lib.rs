@@ -126,7 +126,8 @@ impl<'a> Handover<'a> {
         let handed = self.handed(&projected.item)?;
 
         // 読んだときの番号をそのまま渡す。動いていれば追記が弾かれる（#15）。
-        self.ledger
+        let seq = self
+            .ledger
             .append(
                 id,
                 projected.seq,
@@ -135,11 +136,25 @@ impl<'a> Handover<'a> {
             )
             .await?;
 
-        // ここから先で落ちても、残るのは孤児ファイルだけ。
-        asset::remove(self.media_dir, id).map_err(|source| HandoverError::Io {
-            path: asset::item_dir(self.media_dir, id),
-            source,
-        })?;
+        // ここから先で落ちても、残るのは実体だけ。`escrow-custody` の掃除が拾う。
+        //
+        // **退避してから、台帳が動いていないことを確かめて消す。** 手放した項目も
+        // 人が再取得を指示すれば `waiting` から始まるので（#1）、読んだ姿のまま
+        // 消しに行くと、その間に始まった取得のものまで消せてしまう。
+        let staged =
+            asset::stage_for_removal(self.media_dir, id).map_err(|source| HandoverError::Io {
+                path: asset::item_dir(self.media_dir, id),
+                source,
+            })?;
+
+        if let Some(staged) = staged
+            && self.ledger.item(id).await?.map(|p| p.seq) == Some(seq)
+        {
+            asset::remove_staged(&staged).map_err(|source| HandoverError::Io {
+                path: staged.clone(),
+                source,
+            })?;
+        }
 
         Ok(handed)
     }

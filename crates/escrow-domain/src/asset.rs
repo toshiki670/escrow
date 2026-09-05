@@ -16,6 +16,7 @@ use std::fs;
 use std::io;
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use crate::item::ItemId;
 use crate::state::TranscriptNeed;
@@ -141,17 +142,86 @@ pub fn item_dir(media_dir: &Path, item: ItemId) -> PathBuf {
     media_dir.join(item.to_string())
 }
 
-/// 1つの項目の実体をまとめて消す。**在ったときだけ真**。
+/// 消す途中のものを置く場所。
+const STAGING: &str = ".removing";
+
+/// 1つの項目の実体を、その項目の置き場所から退避する。**在ったときだけ返る**。
 ///
-/// 消えていることが目的なので、無いのは成功。escrow はメディアを永続化しないので、
-/// 終端に達した項目はここを通る（#1）。**呼ぶ側は台帳を先に更新する** — 逆順にすると、
-/// 途中で落ちたときに手元に無い `kept` が残る（#7）。
-pub fn remove(media_dir: &Path, item: ItemId) -> io::Result<bool> {
-    match fs::remove_dir_all(item_dir(media_dir, item)) {
-        Ok(()) => Ok(true),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
+/// 移すだけで、消すのは [`remove_staged`]。2段にする理由が2つある。
+///
+/// - **退避は不可分**。項目の置き場所は、移す前か移した後のどちらかしか無い。
+///   `remove_dir_all` を直接当てると、途中で落ちたときに半分消えたディレクトリが
+///   項目の置き場所に残り、次の取得がその中へ書く
+/// - **移した後の置き場所は空**。消し終わるのを待たずに、次の取得が使える
+///
+/// 呼ぶ側は、**退避の前後で台帳が動いていないことを確かめてから** [`remove_staged`]
+/// を呼ぶ。動いていれば、退避したものが次の取得のものかもしれない（#1 の
+/// 「人が再取得を指示すれば `waiting` から再び始まる」）。
+pub fn stage_for_removal(media_dir: &Path, item: ItemId) -> io::Result<Option<PathBuf>> {
+    let staging = media_dir.join(STAGING);
+    fs::create_dir_all(&staging)?;
+
+    let nonce = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let to = staging.join(format!("{item}.{nonce}"));
+
+    match fs::rename(item_dir(media_dir, item), &to) {
+        Ok(()) => Ok(Some(to)),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(e),
     }
+}
+
+/// 退避したものを消す。消えていることが目的なので、無いのは成功。
+pub fn remove_staged(staged: &Path) -> io::Result<()> {
+    match fs::remove_dir_all(staged) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e),
+    }
+}
+
+/// 退避したまま残っているもの。消す前に落ちると出る。
+pub fn staged(media_dir: &Path) -> io::Result<Vec<(ItemId, PathBuf)>> {
+    let entries = match fs::read_dir(media_dir.join(STAGING)) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e),
+    };
+
+    let mut found: Vec<(ItemId, PathBuf)> = entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let name = entry.file_name();
+            let (id, _) = name.to_str()?.split_once('.')?;
+            Some((ItemId::new(id.parse().ok()?), entry.path()))
+        })
+        .collect();
+
+    found.sort();
+    Ok(found)
+}
+
+/// 手元に置き場所がある項目。
+///
+/// **台帳を見ない。** 配信元ごと消えて行が残っていない項目も、ここには出る（#1 の
+/// 削除の連鎖）。投影を先に読む形だと、その置き場所は誰にも見つからない。
+pub fn item_ids(media_dir: &Path) -> io::Result<Vec<ItemId>> {
+    let entries = match fs::read_dir(media_dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e),
+    };
+
+    let mut found: Vec<ItemId> = entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| Some(ItemId::new(entry.file_name().to_str()?.parse().ok()?)))
+        .collect();
+
+    found.sort();
+    Ok(found)
 }
 
 /// 手元にある実体を読み出す。種類、次に通し番号の順に並ぶ。
@@ -324,19 +394,52 @@ mod tests {
         );
     }
 
-    /// 消えていることが目的なので、無いのは成功。
+    /// 退避は不可分。**移した瞬間に項目の置き場所は空になる**。
     #[test]
-    fn removing_what_is_not_there_succeeds() {
+    fn staging_frees_the_items_place_at_once() {
         let media_dir = tempfile::tempdir().unwrap();
         let item = ItemId::new(7);
-
-        assert!(!remove(media_dir.path(), item).unwrap());
-
         let dir = item_dir(media_dir.path(), item);
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("video.1.mp4"), b"x").unwrap();
 
-        assert!(remove(media_dir.path(), item).unwrap());
-        assert!(!dir.exists());
+        let moved = stage_for_removal(media_dir.path(), item).unwrap().unwrap();
+
+        assert!(!dir.exists(), "項目の置き場所は空");
+        assert!(moved.join("video.1.mp4").exists(), "中身は移っただけ");
+        assert_eq!(staged(media_dir.path()).unwrap(), [(item, moved.clone())]);
+
+        remove_staged(&moved).unwrap();
+        assert!(staged(media_dir.path()).unwrap().is_empty());
+    }
+
+    /// 消えていることが目的なので、無いのは成功。
+    #[test]
+    fn staging_and_removing_what_is_not_there_succeeds() {
+        let media_dir = tempfile::tempdir().unwrap();
+
+        assert!(
+            stage_for_removal(media_dir.path(), ItemId::new(7))
+                .unwrap()
+                .is_none()
+        );
+        remove_staged(&media_dir.path().join("居ない")).unwrap();
+        assert!(staged(media_dir.path()).unwrap().is_empty());
+    }
+
+    /// 置き場所は台帳を見ずに数える。**退避の置き場所は項目ではない**。
+    #[test]
+    fn places_on_disk_are_counted_without_the_ledger() {
+        let media_dir = tempfile::tempdir().unwrap();
+        for item in [ItemId::new(2), ItemId::new(10)] {
+            fs::create_dir_all(item_dir(media_dir.path(), item)).unwrap();
+        }
+        fs::create_dir_all(media_dir.path().join(STAGING)).unwrap();
+        fs::create_dir_all(media_dir.path().join("読めない名前")).unwrap();
+
+        assert_eq!(
+            item_ids(media_dir.path()).unwrap(),
+            [ItemId::new(2), ItemId::new(10)]
+        );
     }
 }
