@@ -90,23 +90,6 @@ impl StateName {
         Self::Deleted,
         Self::Error,
     ];
-
-    /// #1 の stateDiagram の `live` 合成状態。ここからは `deleted` へ行ける。
-    ///
-    /// 伴う値を見ないので、名前の側が決める。[`State::is_live`] はここへ委ねる。
-    pub const fn is_live(self) -> bool {
-        match self {
-            Self::Waiting | Self::Acquiring | Self::Transcribing | Self::Holding | Self::Kept => {
-                true
-            }
-            Self::Discarded | Self::Released | Self::Deleted | Self::Error => false,
-        }
-    }
-
-    /// 終端。人が再取得を指示しない限り動かない。
-    pub const fn is_terminal(self) -> bool {
-        !self.is_live()
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -197,12 +180,19 @@ impl State {
 
     /// #1 の stateDiagram の `live` 合成状態。ここからは `deleted` へ行ける。
     pub const fn is_live(&self) -> bool {
-        self.name().is_live()
+        match self {
+            Self::Waiting
+            | Self::Acquiring
+            | Self::Transcribing { .. }
+            | Self::Holding { .. }
+            | Self::Kept => true,
+            Self::Discarded | Self::Released { .. } | Self::Deleted | Self::Error => false,
+        }
     }
 
     /// 終端。人が再取得を指示しない限り動かない。
     pub const fn is_terminal(&self) -> bool {
-        self.name().is_terminal()
+        !self.is_live()
     }
 }
 
