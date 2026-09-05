@@ -17,7 +17,7 @@ use escrow_domain::source::{Monitoring, PersonId, SourceId};
 use escrow_domain::state::{ReleaseReference, StateName};
 use escrow_domain::timestamp::Timestamp;
 use escrow_domain::url::{self, TypeHint};
-use escrow_handover as handover;
+use escrow_handover::Handover;
 use escrow_ledger::{Ledger, NewSource};
 use escrow_scheduler::Scheduler;
 use escrow_transcription::Transcription;
@@ -195,7 +195,7 @@ impl App {
 
         let handed: Vec<_> = items
             .iter()
-            .map(|item| handover::handover(item, &self.paths.media_dir))
+            .map(|item| Handover::new(&self.ledger, &self.paths.media_dir).handed(item))
             .collect::<Result<_, _>>()?;
 
         if json {
@@ -217,13 +217,9 @@ impl App {
     }
 
     async fn release(&self, id: i64, reference: Option<String>) -> Result<()> {
-        let handed = handover::release(
-            &self.ledger,
-            &self.paths.media_dir,
-            ItemId::new(id),
-            reference.map(ReleaseReference::new),
-        )
-        .await?;
+        let handed = Handover::new(&self.ledger, &self.paths.media_dir)
+            .release(ItemId::new(id), reference.map(ReleaseReference::new))
+            .await?;
 
         println!("{}", serde_json::to_string_pretty(&handed)?);
         Ok(())

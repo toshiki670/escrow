@@ -31,9 +31,9 @@ pub enum HandoverError {
     },
 }
 
-/// #4 が返す1件。形は `the_handover_has_exactly_the_nine_fields` が固定している。
+/// #4 が返す1件。形は `the_handed_item_has_exactly_the_nine_fields` が固定している。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct Handover {
+pub struct Handed {
     /// `release` に渡す。
     pub id: i64,
     /// ノートの名前。`Post` では `null`。
@@ -52,85 +52,99 @@ pub struct Handover {
     pub transcript_paths: Vec<String>,
 }
 
-/// 台帳の1行を、外部が受け取る形へ写す。
-pub fn handover(item: &Item, media_dir: &Path) -> Result<Handover, HandoverError> {
-    let dir = asset::item_dir(media_dir, item.id);
-    let assets = asset::scan(media_dir, item.id).map_err(|source| HandoverError::Io {
-        path: dir.clone(),
-        source,
-    })?;
-
-    let paths_of = |kinds: &[AssetKind]| -> Vec<String> {
-        assets
-            .iter()
-            .filter(|a| kinds.contains(&a.kind))
-            .map(|a| dir.join(a.file_name()).to_string_lossy().into_owned())
-            .collect()
-    };
-
-    let (title, body) = match &item.content {
-        escrow_domain::content::Content::Media { title, .. } => (Some(title.clone()), None),
-        escrow_domain::content::Content::Post { body, .. } => (None, Some(body.clone())),
-    };
-
-    Ok(Handover {
-        id: i64::from(item.id),
-        title,
-        body,
-        url: item.url.as_str().to_owned(),
-        content_type: item.content_type().as_str().to_owned(),
-        state: item.state.as_str().to_owned(),
-        published_at: item.published_at.to_text(),
-        media_paths: paths_of(&[AssetKind::Video, AssetKind::Audio, AssetKind::Image]),
-        transcript_paths: paths_of(&[AssetKind::Transcript]),
-    })
+/// #4 の `list` と `release`（#15 のスライス）。
+///
+/// 外へ出ないので、スケジューラを持たない。触るのは台帳と手元のファイルだけ。
+pub struct Handover<'a> {
+    ledger: &'a Ledger,
+    media_dir: &'a Path,
 }
 
-/// 外部が受け取り終えたことを伝える。
-///
-/// **DB を先に更新し、ファイルは後で消す**（#7）。
-pub async fn release(
-    ledger: &Ledger,
-    media_dir: &Path,
-    id: ItemId,
-    reference: Option<ReleaseReference>,
-) -> Result<Handover, HandoverError> {
-    let projected = ledger
-        .item(id)
-        .await?
-        .ok_or(HandoverError::NoSuchItem(id))?;
-
-    // #4 の「`holding` の項目も `list` に出るが、この場合 `release` は使えない」。
-    // 遷移として弾かれるが、外へ返す理由をはっきりさせるためにここでも見る。
-    if projected.item.state != State::Kept {
-        return Err(HandoverError::NotReleasable {
-            id,
-            state: projected.item.state.name(),
-        });
+impl<'a> Handover<'a> {
+    pub const fn new(ledger: &'a Ledger, media_dir: &'a Path) -> Self {
+        Self { ledger, media_dir }
     }
 
-    // 引き渡す中身は、消す前の姿で返す。受け取る側が何を持って行ったか分かる。
-    let handed = handover(&projected.item, media_dir)?;
+    /// 台帳の1行を、外部が受け取る形へ写す。
+    pub fn handed(&self, item: &Item) -> Result<Handed, HandoverError> {
+        let dir = asset::item_dir(self.media_dir, item.id);
+        let assets = asset::scan(self.media_dir, item.id).map_err(|source| HandoverError::Io {
+            path: dir.clone(),
+            source,
+        })?;
 
-    // 読んだときの番号をそのまま渡す。動いていれば追記が弾かれる（#15）。
-    ledger
-        .append(
-            id,
-            projected.seq,
-            &Event::Released { reference },
-            Timestamp::now(),
-        )
-        .await?;
+        let paths_of = |kinds: &[AssetKind]| -> Vec<String> {
+            assets
+                .iter()
+                .filter(|a| kinds.contains(&a.kind))
+                .map(|a| dir.join(a.file_name()).to_string_lossy().into_owned())
+                .collect()
+        };
 
-    // ここから先で落ちても、残るのは孤児ファイルだけ。
-    let dir = asset::item_dir(media_dir, id);
-    match std::fs::remove_dir_all(&dir) {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(source) => return Err(HandoverError::Io { path: dir, source }),
+        let (title, body) = match &item.content {
+            escrow_domain::content::Content::Media { title, .. } => (Some(title.clone()), None),
+            escrow_domain::content::Content::Post { body, .. } => (None, Some(body.clone())),
+        };
+
+        Ok(Handed {
+            id: i64::from(item.id),
+            title,
+            body,
+            url: item.url.as_str().to_owned(),
+            content_type: item.content_type().as_str().to_owned(),
+            state: item.state.as_str().to_owned(),
+            published_at: item.published_at.to_text(),
+            media_paths: paths_of(&[AssetKind::Video, AssetKind::Audio, AssetKind::Image]),
+            transcript_paths: paths_of(&[AssetKind::Transcript]),
+        })
     }
 
-    Ok(handed)
+    /// 外部が受け取り終えたことを伝える。
+    ///
+    /// **DB を先に更新し、ファイルは後で消す**（#7）。
+    pub async fn release(
+        &self,
+        id: ItemId,
+        reference: Option<ReleaseReference>,
+    ) -> Result<Handed, HandoverError> {
+        let projected = self
+            .ledger
+            .item(id)
+            .await?
+            .ok_or(HandoverError::NoSuchItem(id))?;
+
+        // #4 の「`holding` の項目も `list` に出るが、この場合 `release` は使えない」。
+        // 遷移として弾かれるが、外へ返す理由をはっきりさせるためにここでも見る。
+        if projected.item.state != State::Kept {
+            return Err(HandoverError::NotReleasable {
+                id,
+                state: projected.item.state.name(),
+            });
+        }
+
+        // 引き渡す中身は、消す前の姿で返す。受け取る側が何を持って行ったか分かる。
+        let handed = self.handed(&projected.item)?;
+
+        // 読んだときの番号をそのまま渡す。動いていれば追記が弾かれる（#15）。
+        self.ledger
+            .append(
+                id,
+                projected.seq,
+                &Event::Released { reference },
+                Timestamp::now(),
+            )
+            .await?;
+
+        // ここから先で落ちても、残るのは孤児ファイルだけ。
+        let dir = asset::item_dir(self.media_dir, id);
+        match std::fs::remove_dir_all(&dir) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(source) => return Err(HandoverError::Io { path: dir, source }),
+        }
+
+        Ok(handed)
+    }
 }
 
 #[cfg(test)]
@@ -228,12 +242,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_handover_has_exactly_the_nine_fields() {
+    async fn the_handed_item_has_exactly_the_nine_fields() {
         let (ledger, source) = seeded().await;
         let id = kept(&ledger, source).await;
         let media = tempfile::tempdir().unwrap();
 
-        let handed = handover(&item_of(&ledger, id).await, media.path()).unwrap();
+        let handed = Handover::new(&ledger, media.path())
+            .handed(&item_of(&ledger, id).await)
+            .unwrap();
         let json: serde_json::Value = serde_json::to_value(&handed).unwrap();
 
         let mut keys: Vec<_> = json.as_object().unwrap().keys().cloned().collect();
@@ -263,7 +279,9 @@ mod tests {
         let media = tempfile::tempdir().unwrap();
 
         let id = kept(&ledger, source).await;
-        let handed = handover(&item_of(&ledger, id).await, media.path()).unwrap();
+        let handed = Handover::new(&ledger, media.path())
+            .handed(&item_of(&ledger, id).await)
+            .unwrap();
         assert_eq!(handed.title.as_deref(), Some("○○の雑談配信"));
         assert_eq!(handed.body, None);
 
@@ -288,7 +306,9 @@ mod tests {
             )
             .await
             .unwrap();
-        let handed = handover(&item_of(&ledger, id).await, media.path()).unwrap();
+        let handed = Handover::new(&ledger, media.path())
+            .handed(&item_of(&ledger, id).await)
+            .unwrap();
         assert_eq!(handed.title, None);
         assert_eq!(handed.body.as_deref(), Some("明日の配信は21時から。"));
     }
@@ -309,7 +329,9 @@ mod tests {
             put(&dir, name);
         }
 
-        let handed = handover(&item_of(&ledger, id).await, media.path()).unwrap();
+        let handed = Handover::new(&ledger, media.path())
+            .handed(&item_of(&ledger, id).await)
+            .unwrap();
 
         assert_eq!(handed.media_paths.len(), 3, "動画2本と画像1枚");
         assert_eq!(handed.transcript_paths.len(), 1);
@@ -325,14 +347,13 @@ mod tests {
         put(&dir, "video.1.mp4");
         put(&dir, "transcript.1.vtt");
 
-        let handed = release(
-            &ledger,
-            media.path(),
-            id,
-            Some(ReleaseReference::new("Attachments/2026-03-01 ○○.mp4")),
-        )
-        .await
-        .unwrap();
+        let handed = Handover::new(&ledger, media.path())
+            .release(
+                id,
+                Some(ReleaseReference::new("Attachments/2026-03-01 ○○.mp4")),
+            )
+            .await
+            .unwrap();
 
         // 返すのは消す前の姿。受け取る側が何を持って行ったか分かる。
         assert_eq!(handed.media_paths.len(), 1);
@@ -364,7 +385,7 @@ mod tests {
         put(&dir, "video.1.mp4");
 
         assert!(matches!(
-            release(&ledger, media.path(), id, None).await,
+            Handover::new(&ledger, media.path()).release(id, None).await,
             Err(HandoverError::NotReleasable {
                 state: StateName::Holding,
                 ..
@@ -380,7 +401,9 @@ mod tests {
         let media = tempfile::tempdir().unwrap();
 
         assert!(matches!(
-            release(&ledger, media.path(), ItemId::new(999), None).await,
+            Handover::new(&ledger, media.path())
+                .release(ItemId::new(999), None)
+                .await,
             Err(HandoverError::NoSuchItem(_))
         ));
     }
