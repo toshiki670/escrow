@@ -14,7 +14,7 @@ impl Ledger {
         content_type: ContentType,
         enabled: bool,
     ) -> Result<ExcludeId, LedgerError> {
-        let scoped = source_id.map(SourceId::get);
+        let scoped = source_id.map(i64::from);
         let value = content_type.as_str();
         let enabled = i64::from(enabled);
 

@@ -38,7 +38,7 @@ struct Row {
 impl Ledger {
     /// `id` で1件読む。
     pub async fn item(&self, id: ItemId) -> Result<Option<Projected>, LedgerError> {
-        let key = id.get();
+        let key = i64::from(id);
         let row = sqlx::query_as!(
             Row,
             r#"SELECT i.id AS "id!", i.source_id, i.url, i.content_type, i.published_at,

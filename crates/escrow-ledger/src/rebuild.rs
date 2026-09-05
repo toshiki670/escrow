@@ -42,8 +42,8 @@ impl Ledger {
             let item = log_of(group)?.replay()?;
             let columns = Columns::of(&item.content, &item.state);
 
-            let id = item.id.get();
-            let source_id = item.source_id.get();
+            let id = i64::from(item.id);
+            let source_id = i64::from(item.source_id);
             let url = item.url.as_str();
             let content_type = item.content_type().as_str();
             let published_at = item.published_at.to_text();
@@ -198,7 +198,7 @@ mod tests {
             .await
             .unwrap();
         sqlx::query("DELETE FROM item WHERE id = ?")
-            .bind(ids[1].get())
+            .bind(i64::from(ids[1]))
             .execute(&ledger.pool)
             .await
             .unwrap();

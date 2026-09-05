@@ -40,7 +40,7 @@ impl Ledger {
     /// 1つの項目のログ全体。リトライ回数のように、畳んだ結果では答えられないものを
     /// 訊く側が使う（#1）。
     pub async fn log(&self, id: ItemId) -> Result<Option<Log>, LedgerError> {
-        let key = id.get();
+        let key = i64::from(id);
         let rows = sqlx::query_as!(
             EventRow,
             r#"SELECT item_id AS "item_id!", source_id, seq, kind, occurred_at,

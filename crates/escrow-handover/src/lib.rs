@@ -80,7 +80,7 @@ pub fn handover(item: &Item, media_dir: &Path) -> Result<Handover, HandoverError
     };
 
     Ok(Handover {
-        id: item.id.get(),
+        id: i64::from(item.id),
         title,
         body,
         url: item.url.as_str().to_owned(),

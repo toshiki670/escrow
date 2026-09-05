@@ -4,24 +4,24 @@ use std::num::NonZeroU32;
 
 use thiserror::Error;
 
+use derive_more::{Constructor, Display, Into};
+
 use crate::content::ContentType;
-use crate::id::id_type;
 use crate::state::{Hold, HoldTooFar};
 use crate::timestamp::Timestamp;
 use crate::url::NormalizedUrl;
 
-id_type! {
-    /// 配信元の持ち主の識別子。
-    PersonId
-}
-id_type! {
-    /// 配信元の識別子。
-    SourceId
-}
-id_type! {
-    /// 除外条件の識別子。
-    ExcludeId
-}
+/// 配信元の持ち主の識別子。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Constructor, Display, Into)]
+pub struct PersonId(i64);
+
+/// 配信元の識別子。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Constructor, Display, Into)]
+pub struct SourceId(i64);
+
+/// 除外条件の識別子。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Constructor, Display, Into)]
+pub struct ExcludeId(i64);
 
 /// 配信元の持ち主。同じ人物の YouTube チャンネルと X アカウントを束ねる主語（#1）。
 ///

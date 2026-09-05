@@ -27,7 +27,7 @@ impl Ledger {
         let state = discovered.initial_state();
         let columns = Columns::of(&discovered.content, &state);
 
-        let source_id = discovered.source_id.get();
+        let source_id = i64::from(discovered.source_id);
         let url = discovered.url.as_str();
         let content_type = discovered.content_type().as_str();
         let published_at = discovered.published_at.to_text();
@@ -112,7 +112,7 @@ impl Ledger {
         event: &Event,
         at: Timestamp,
     ) -> Result<Seq, LedgerError> {
-        let key = id.get();
+        let key = i64::from(id);
         let mut tx = self.pool.begin().await?;
 
         let row = sqlx::query!(

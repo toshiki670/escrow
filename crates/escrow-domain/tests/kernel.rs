@@ -12,7 +12,10 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 /// `escrow-domain` の `[dependencies]`。これ以外は入れない（#15）。
-const DEPENDENCIES: &[&str] = &["chrono", "thiserror", "url"];
+///
+/// どれも純粋な値を扱うものだけ。`derive_more` は識別子の newtype に
+/// `const fn new` と `Display` と `i64` への変換を出すだけで、実行時には何も持たない。
+const DEPENDENCIES: &[&str] = &["chrono", "derive_more", "thiserror", "url"];
 
 /// `[dev-dependencies]`。テストの中でだけ副作用を持てるなら、抜け道は在ることになる。
 ///
@@ -35,8 +38,12 @@ const KERNEL: &[&str] = &[
     "url",
 ];
 
-/// 公開しない補助。#1 の語彙ではないので [`KERNEL`] には入れず、ここで別に許す。
-const INTERNAL: &[&str] = &["id"];
+/// 公開しない補助。#1 の語彙ではないものを置くならここへ書く。
+///
+/// **いまは空。** 識別子の newtype を作るマクロが `id` に居たが、`derive_more` の
+/// 導出に置き換わって消えた。空のまま残しておくと、非公開のモジュールを生やしても
+/// 表の編集が要る。
+const INTERNAL: &[&str] = &[];
 
 fn crate_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))

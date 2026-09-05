@@ -1,19 +1,23 @@
 //! 見つけた1件と、その現在の状態。台帳を兼ね、手放した後も行は残る（#1）。
 
+use derive_more::{Constructor, Display, Into};
+
 use crate::content::{Content, ContentType};
-use crate::id::id_type;
 use crate::source::SourceId;
 use crate::state::{MediaPresence, State};
 use crate::timestamp::Timestamp;
 use crate::url::NormalizedUrl;
 
-id_type! {
-    /// `Item` の外部ハンドル。
-    ///
-    /// #4 の `escrow release <id>` が受け取る値で、実体の置き場所もここから導出される（#1）。
-    /// `url` が自然キーで、こちらは外へ見せる同一性。
-    ItemId
-}
+/// `Item` の外部ハンドル。
+///
+/// #4 の `escrow release <id>` が受け取る値で、実体の置き場所もここから導出される（#1）。
+/// `url` が自然キーで、こちらは外へ見せる同一性。
+///
+/// **`From<i64>` は出さない。** `i64` から作る道は [`ItemId::new`] だけにしておくと、
+/// `impl Into<ItemId>` を取る場所へ裸の主キーが推論で滑り込むことがない。逆向きの
+/// `i64::from` は DB へ渡すのに要るので出す。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Constructor, Display, Into)]
+pub struct ItemId(i64);
 
 /// 台帳の1行。
 ///

@@ -23,7 +23,7 @@ pub struct NewSource {
 
 impl Ledger {
     pub async fn add_source(&self, source: &NewSource) -> Result<SourceId, LedgerError> {
-        let person_id = source.person_id.get();
+        let person_id = i64::from(source.person_id);
         let url = source.url.as_str();
         let enabled = i64::from(source.enabled);
         let created_at = source.created_at.to_text();
@@ -54,7 +54,7 @@ impl Ledger {
     }
 
     pub async fn source(&self, id: SourceId) -> Result<Option<Source>, LedgerError> {
-        let key = id.get();
+        let key = i64::from(id);
         let row = sqlx::query!(
             r#"SELECT id AS "id!", person_id, url, enabled AS "enabled: bool", created_at,
                       priority, hold_days, monitor_from, monitor_until

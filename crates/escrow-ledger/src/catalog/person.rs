@@ -18,7 +18,7 @@ impl Ledger {
     }
 
     pub async fn person(&self, id: PersonId) -> Result<Option<Person>, LedgerError> {
-        let key = id.get();
+        let key = i64::from(id);
         let row = sqlx::query!(r#"SELECT id AS "id!", name FROM person WHERE id = ?"#, key)
             .fetch_optional(&self.pool)
             .await?;

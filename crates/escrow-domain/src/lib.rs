@@ -6,8 +6,6 @@
 //! 置いてよいモジュールは `tests/kernel.rs` の表が決める。入場条件は
 //! **#1 に載っていること**で、足すには表を編集するしかない。
 
-mod id;
-
 pub mod asset;
 pub mod content;
 pub mod item;
