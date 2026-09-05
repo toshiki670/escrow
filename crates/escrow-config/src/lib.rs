@@ -45,6 +45,7 @@ pub struct Config {
     pub transcribe: Transcribe,
     pub auth: Auth,
     pub tools: Tools,
+    pub schedule: Schedule,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -104,6 +105,48 @@ pub struct Auth {
     /// **生の認証情報は持たない。** cookie 本体をファイルに書かず、取り出し元だけを持つ（#2）。
     /// プラットフォームごとに分けないのは、同じブラウザにログインしているため。
     pub cookies_from: Browser,
+}
+
+/// 外部アクセスの予算（#13）。
+///
+/// **測り方は経路がコードで決め、ここは値だけを持つ。** 項目名が測り方まで言うので、
+/// 検知に同時実行数を書く形にならない。
+///
+/// 予算をプラットフォームごとに分けるのは、片方の上限がもう片方を縛らないため。
+/// 既定値は両方で同じで、差を付けるのは人の判断（#2）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Schedule {
+    /// 拒否を受けて `Retry-After` が返らなかったときに待つ秒数。
+    pub rejection_backoff_seconds: NonZeroU32,
+    /// 連続で断られるたびに待ち時間を倍にする、その上限の秒数。
+    pub rejection_max_backoff_seconds: NonZeroU32,
+    pub youtube: Limits,
+    pub x: Limits,
+}
+
+/// 1つのプラットフォームの上限。#13 の経路がそのまま並ぶ。
+///
+/// 文字起こしがここに無いのは、whisper がローカルで動き外へ要求を出さないため（#13）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Limits {
+    /// 配信元を見る間隔の下限。秒。
+    ///
+    /// YouTube の既定はフィードが返す `max-age=900` に合わせた**公表値**。X 側は
+    /// 推測で、同じ数字を置いてある（#13）。
+    pub discover_gap_seconds: NonZeroU32,
+    /// 1件のメタデータを取る間隔の下限。秒。予約枠のポーリングもここを通る。
+    pub describe_gap_seconds: NonZeroU32,
+    /// 配信元にまだ在るかを確かめる間隔の下限。秒。
+    ///
+    /// 生存確認は預かり中の全件をまとめて叩くので、この間隔が塊を散らす役も兼ねる（#13）。
+    pub probe_gap_seconds: NonZeroU32,
+    /// 同時に走らせる取得の数。
+    ///
+    /// 取得だけ間隔ではなく数で測るのは、1本が数時間・数十GBに達して回数では
+    /// 大きさを表せないため（#13）。
+    pub concurrent_acquisitions: NonZeroU32,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -239,7 +282,7 @@ impl Default for Storage {
 impl Default for Check {
     fn default() -> Self {
         Self {
-            interval_hours: NonZeroU32::new(24).expect("24 は 0 ではない"),
+            interval_hours: positive(24),
         }
     }
 }
@@ -263,6 +306,33 @@ impl Default for Auth {
     fn default() -> Self {
         Self {
             cookies_from: Browser::Firefox,
+        }
+    }
+}
+
+/// 既定値の `NonZeroU32`。構築を1か所に集める。
+fn positive(value: u32) -> NonZeroU32 {
+    NonZeroU32::new(value).expect("既定値は 0 ではない")
+}
+
+impl Default for Schedule {
+    fn default() -> Self {
+        Self {
+            rejection_backoff_seconds: positive(60),
+            rejection_max_backoff_seconds: positive(3600),
+            youtube: Limits::default(),
+            x: Limits::default(),
+        }
+    }
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            discover_gap_seconds: positive(900),
+            describe_gap_seconds: positive(10),
+            probe_gap_seconds: positive(10),
+            concurrent_acquisitions: positive(1),
         }
     }
 }
@@ -461,6 +531,22 @@ cookies_from = "firefox"
 
 [tools]
 extra_paths = []
+
+[schedule]
+rejection_backoff_seconds = 60
+rejection_max_backoff_seconds = 3600
+
+[schedule.youtube]
+discover_gap_seconds = 900
+describe_gap_seconds = 10
+probe_gap_seconds = 10
+concurrent_acquisitions = 1
+
+[schedule.x]
+discover_gap_seconds = 900
+describe_gap_seconds = 10
+probe_gap_seconds = 10
+concurrent_acquisitions = 1
 "#;
 
     fn dirs() -> Dirs {
@@ -498,6 +584,8 @@ extra_paths = []
         config.transcribe.language = Language::Auto;
         config.auth.cookies_from = Browser::Safari;
         config.tools.extra_paths = vec!["/opt/homebrew/bin".to_owned()];
+        config.schedule.youtube.concurrent_acquisitions = NonZeroU32::new(3).unwrap();
+        config.schedule.x.discover_gap_seconds = NonZeroU32::new(1800).unwrap();
 
         config.save(&path).unwrap();
         assert_eq!(Config::load(&path).unwrap(), config);
@@ -521,6 +609,32 @@ media_dirs = "~/Movies/escrow"
 interval_hours = 0
 "#;
         assert!(Config::from_toml(zero).is_err());
+    }
+
+    /// 予算に 0 も無い。0 は「無制限」ではなく「一度も出さない」に見えるので、
+    /// 読む時点で落とす。
+    #[test]
+    fn a_zero_budget_is_refused() {
+        for line in [
+            "rejection_backoff_seconds = 0",
+            "rejection_max_backoff_seconds = 0",
+        ] {
+            assert!(
+                Config::from_toml(&format!("[schedule]\n{line}\n")).is_err(),
+                "{line}"
+            );
+        }
+        for line in [
+            "discover_gap_seconds = 0",
+            "describe_gap_seconds = 0",
+            "probe_gap_seconds = 0",
+            "concurrent_acquisitions = 0",
+        ] {
+            assert!(
+                Config::from_toml(&format!("[schedule.youtube]\n{line}\n")).is_err(),
+                "{line}"
+            );
+        }
     }
 
     #[test]
