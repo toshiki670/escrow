@@ -3,27 +3,59 @@
 **規則には出典を置き、守れているかは機械が確かめる。** 出典を持たない規則は、escrow の
 判断であることを明示する。
 
-境界は1つ。**何を作るかは Issue が決め、どう作るかをここが決める。**
-
 ---
 
 ## 決定の置き場所
 
-**Architecture Decision Record**（[Nygard, 2011](https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions)）。
-決定・文脈・帰結を1か所に残す。escrow ではそれが Issue の本文にあたる — #1 データ構造、
-#2 設定、#3 配布、#4 外部インターフェース、#5 取得経路、#6 画面、#13 スケジューラ、
-#15 アーキテクチャ、#7 実装の順序。
+**Issue は作業の単位で、実装が終われば閉じる。** そこで、**閉じたあとも効き続けるものは
+この規約へ、閉じるまでの経緯は Issue へ**置く。
+
+閉じた Issue はそのまま読めるので、**決定・文脈・帰結の記録**として残り続ける。escrow は
+[**Architecture Decision Record**](https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions)
+（Nygard, 2011）をファイルで持たず、閉じた Issue がその役をする。コードからは番号で参照する。
 
 > A new person coming on to a project may be perplexed, baffled, delighted, or infuriated
 > by some past decision. Without understanding the rationale or consequences, this person
 > has only two choices: blindly accept the decision or blindly change it.
 
-**コードは Issue 番号で参照し、本文を写さない。**
-[**DRY**](https://pragprog.com/tips/)（Hunt & Thomas, *The Pragmatic Programmer*, Tip 15）—
-「Every piece of knowledge must have a single, unambiguous, authoritative representation
-within a system.」写しを作ると、Issue を直してもコードが古いまま残る経路ができる。
+**本文を写さない。** [**DRY**](https://pragprog.com/tips/)（Hunt & Thomas,
+*The Pragmatic Programmer*, Tip 15）—「Every piece of knowledge must have a single,
+unambiguous, authoritative representation within a system.」写しを作ると、片方を直しても
+もう片方が古いまま残る経路ができる。この規約自身も同じ制約を受ける。
 
-この規約も同じ制約を受ける。ここに置くのは**作り方の規則だけ**にする。
+---
+
+## アーキテクチャ
+
+| 軸 | 採るもの | 出典 |
+|---|---|---|
+| コードの分け方 | **Vertical Slice** — 技術ではなくライフサイクルの段階で切る | [Bogard, 2018](https://www.jimmybogard.com/vertical-slice-architecture/)「Minimize coupling between slices, and maximize coupling in a slice.」 |
+| 状態の持ち方 | **Event Sourcing** — 状態ではなく、状態を変えた事象を保存する | [Fowler, 2005](https://martinfowler.com/eaaDev/EventSourcing.html)「Capture all changes to an application state as a sequence of events.」 |
+| 読み書きの分け方 | **CQRS** — 書くのは事象、読むのは投影 | [Young / Fowler, 2011](https://martinfowler.com/bliki/CQRS.html)「you can use a different model to update information than the model you use to read information」 |
+
+段は5つ。**下の段しか見えず、同じ段の中も見えない。**
+
+```
+段5  escrow-cli · escrow-gui
+段4  discovery · acquisition · transcription · custody · handover
+段3  escrow-scheduler
+段2  escrow-ledger · escrow-external · escrow-config
+段1  escrow-domain
+```
+
+| 段 | 依存してよいもの |
+|---|---|
+| 1 `escrow-domain` | 外部 crate のみ。同期・純関数だけを置く |
+| 2 `escrow-config` | なし |
+| 2 `escrow-ledger` | domain |
+| 2 `escrow-external` | domain / config |
+| 3 `escrow-scheduler` | domain / config / external。**外部アクセスの port はこの crate の公開 API** |
+| 4 スライス | domain / ledger / scheduler。`handover` は外へ出ないので scheduler も要らない |
+| 5 入口 | 段1〜4。external だけは名前で知らない |
+
+書く道は `Ledger::discover` と `Ledger::append` の2つだけで、投影は捨てて作り直せる
+（`Ledger::rebuild`）。順序はコードの呼び出し順ではなく状態機械が持ち、スライスは互いを
+知らずに、投影を状態で絞って拾われる。
 
 ---
 
