@@ -6,6 +6,7 @@
 //! ネットワークへ出ない純関数にしてある。`Item.url` の `UNIQUE` が何を同一と見なすかは
 //! 行を入れる時点で確定していなければならないため。
 
+use derive_more::Display;
 use thiserror::Error;
 use url::Url;
 
@@ -15,18 +16,16 @@ use crate::content::{ContentType, Platform};
 ///
 /// 生の文字列からは作れない。`Item.url` の `UNIQUE` が何を同一と見なすかを、
 /// 約束ではなくこの型が担保する。
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+///
+/// **`Constructor` も `From` も導出しない。** どちらかを入れると `String` から作る道が
+/// 生えて、正規化を通らない値を `Item.url` に入れられるようになる。識別子の newtype
+/// とはそこが違う — あちらは包むのが仕事だが、こちらは**作る道を絞るのが仕事**。
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Display)]
 pub struct NormalizedUrl(String);
 
 impl NormalizedUrl {
     pub fn as_str(&self) -> &str {
         &self.0
-    }
-}
-
-impl std::fmt::Display for NormalizedUrl {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
     }
 }
 
