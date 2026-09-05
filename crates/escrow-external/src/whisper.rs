@@ -127,8 +127,9 @@ impl Transcribe for Whisper {
             });
         }
 
-        // `-of` は拡張子を除いた形を取るので、`transcript.1.vtt` から `.vtt` を落とす。
-        let stem = into.join(format!("{}.{ordinal}", AssetKind::Transcript));
+        // `-of` は拡張子を除いた形を取る。下の存在確認と同じ `asset` から出すので、
+        // 命名規則が動いても書き出し先と確認先がすれ違わない。
+        let stem = into.join(asset.stem());
         let transcribed = run(
             &transcribe_argv(&self.whisper, &self.model, &self.language, &wav, &stem),
             None,

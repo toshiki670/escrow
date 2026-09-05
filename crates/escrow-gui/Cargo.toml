@@ -6,16 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
-[dependencies]
-escrow-domain.workspace = true
-escrow-ledger.workspace = true
-escrow-config.workspace = true
-escrow-scheduler.workspace = true
-escrow-discovery.workspace = true
-escrow-acquisition.workspace = true
-escrow-transcription.workspace = true
-escrow-custody.workspace = true
-escrow-handover.workspace = true
+# 依存は、中身が入るときに要るものだけを足す。
 
 [lints]
 workspace = true

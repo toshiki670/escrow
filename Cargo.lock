@@ -536,8 +536,6 @@ dependencies = [
  "clap",
  "escrow-acquisition",
  "escrow-config",
- "escrow-custody",
- "escrow-discovery",
  "escrow-domain",
  "escrow-handover",
  "escrow-ledger",
@@ -562,14 +560,6 @@ dependencies = [
 [[package]]
 name = "escrow-custody"
 version = "0.1.0"
-dependencies = [
- "escrow-domain",
- "escrow-ledger",
- "escrow-scheduler",
- "tempfile",
- "thiserror 2.0.20",
- "tokio",
-]
 
 [[package]]
 name = "escrow-discovery"
@@ -578,7 +568,6 @@ dependencies = [
  "escrow-domain",
  "escrow-ledger",
  "escrow-scheduler",
- "tempfile",
  "thiserror 2.0.20",
  "tokio",
 ]
@@ -615,17 +604,6 @@ dependencies = [
 [[package]]
 name = "escrow-gui"
 version = "0.1.0"
-dependencies = [
- "escrow-acquisition",
- "escrow-config",
- "escrow-custody",
- "escrow-discovery",
- "escrow-domain",
- "escrow-handover",
- "escrow-ledger",
- "escrow-scheduler",
- "escrow-transcription",
-]
 
 [[package]]
 name = "escrow-handover"

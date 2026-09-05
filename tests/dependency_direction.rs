@@ -11,10 +11,6 @@ use std::collections::BTreeSet;
 
 use escrow_tests::members;
 
-/// #3 の依存図。左が右を依存に持ってよい、の全部。
-///
-/// 実際に使っているかは問わない（`escrow-gui` はまだ空）。ここに無い辺が
-/// 生えたら落ちる。
 /// スライスが依存してよいもの。互いの名前はここに無い。
 const SLICE: &[&str] = &["escrow-domain", "escrow-ledger", "escrow-scheduler"];
 
@@ -32,6 +28,9 @@ const ENTRY: &[&str] = &[
     "escrow-handover",
 ];
 
+/// 依存の図。左が右を依存に持ってよい、の全部。
+///
+/// 実際に使っているかは問わない。ここに無い辺が生えたら落ちる。
 const ALLOWED: &[(&str, &[&str])] = &[
     // ワークスペース全体にかかる守り。crate を1つも依存に持たない。
     ("escrow-tests", &[]),

@@ -82,7 +82,7 @@ pub enum AdapterError {
     #[error("cookie を使えない（設定の auth.cookies_from を確かめる）: {detail}")]
     Unauthenticated { detail: String },
     /// 一時的な失敗。次の回でやり直す。
-    #[error("一時的に失敗した: {detail}")]
+    #[error("{program} が一時的に失敗した: {detail}")]
     Transient { program: String, detail: String },
 }
 
@@ -145,10 +145,12 @@ pub trait Acquire {
     ///
     /// ファイル名の規則は #1 の `<kind>.<ordinal>.<ext>`。ライブが途中で切れれば
     /// 通し番号が増える。
+    ///
+    /// 種別は受け取らない。**どのツールが取るかは呼ぶ前に決まっている**ので、
+    /// ここへ渡しても決めることが残っていない。
     fn acquire(
         &self,
         url: &NormalizedUrl,
-        content_type: ContentType,
         into: &Path,
     ) -> impl Future<Output = Result<Vec<Asset>, AdapterError>> + Send;
 }

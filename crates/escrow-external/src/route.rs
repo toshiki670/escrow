@@ -101,15 +101,10 @@ pub enum Acquirer<'a> {
 }
 
 impl Acquire for Acquirer<'_> {
-    async fn acquire(
-        &self,
-        url: &NormalizedUrl,
-        content_type: ContentType,
-        into: &Path,
-    ) -> Result<Vec<Asset>, AdapterError> {
+    async fn acquire(&self, url: &NormalizedUrl, into: &Path) -> Result<Vec<Asset>, AdapterError> {
         match self {
-            Self::YtDlp(tool) => tool.acquire(url, content_type, into).await,
-            Self::GalleryDl(tool) => tool.acquire(url, content_type, into).await,
+            Self::YtDlp(tool) => tool.acquire(url, into).await,
+            Self::GalleryDl(tool) => tool.acquire(url, into).await,
         }
     }
 }

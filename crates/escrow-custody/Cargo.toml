@@ -6,15 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
-[dependencies]
-escrow-domain.workspace = true
-escrow-ledger.workspace = true
-escrow-scheduler.workspace = true
-thiserror.workspace = true
-
-[dev-dependencies]
-tempfile.workspace = true
-tokio.workspace = true
+# 依存は、中身が入るときに要るものだけを足す。
 
 [lints]
 workspace = true

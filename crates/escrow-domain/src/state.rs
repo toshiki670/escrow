@@ -11,10 +11,10 @@ use crate::timestamp::Timestamp;
 /// だが、`release_reference` を持てるのは `Released` だけ、`hold_until` を持てるのは
 /// `Transcribing` と `Holding` だけ、という対応はこの enum が保証する。
 ///
-/// 文字列から作る口はここに置かない。状態は `state` の1列では決まらず、
-/// `hold_until` と `release_reference` を揃えて初めて決まるので、1列だけ見る
-/// `FromStr` は黙って `Released { reference: None }` を作ってしまう。読み戻しは
-/// **行を丸ごと見る parse 層**の仕事で、名前だけが要る場面には [`StateName`] がある。
+/// 状態を組み直すのは、**行を丸ごと見る parse 層**の仕事。`state` の1列では決まらず、
+/// `hold_until` と `release_reference` が揃って初めて決まるので、1列だけ見る `FromStr`
+/// は黙って `Released { reference: None }` を作ってしまう。名前だけが要る場面には
+/// [`StateName`] がある。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum State {
     /// 見つけたが、まだ取得していない。

@@ -96,7 +96,7 @@ mod tests {
     use escrow_scheduler::Found;
     use std::num::NonZeroU32;
 
-    /// 配信元が返す代わりのもの。スケジューラが見せている口だけを満たす。
+    /// 配信元が返す代わりのもの。スケジューラが見せている trait だけを満たす。
     struct FakeDiscover(Vec<Found>);
 
     impl Discover for FakeDiscover {

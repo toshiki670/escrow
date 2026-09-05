@@ -24,7 +24,7 @@ use crate::invocation::{Completed, Invocation, run};
 use crate::{Acquire, AdapterError, Found, Probe};
 use escrow_config::Browser;
 use escrow_domain::asset::{self, Asset, AssetKind};
-use escrow_domain::content::{Content, ContentType, MediaType};
+use escrow_domain::content::{Content, MediaType};
 use escrow_domain::liveness::Presence;
 use escrow_domain::state::MediaPresence;
 use escrow_domain::timestamp::Timestamp;
@@ -35,7 +35,7 @@ const PROGRAM: &str = "yt-dlp";
 /// このアダプタが cookie を取り出せるブラウザ。
 ///
 /// `--cookies-from-browser` が挙げるもの。escrow の [`Browser`] がこの部分集合で
-/// あることは `adapter` のテストが確かめる。yt-dlp は `whale` も受けるが、
+/// あることは `escrow-external` の `every_configurable_browser_works_with_every_adapter` が確かめる。yt-dlp は `whale` も受けるが、
 /// 他のアダプタが受けないので [`Browser`] には入っていない。
 pub const SUPPORTED_BROWSERS: &[Browser] = &[
     Browser::Brave,
@@ -336,12 +336,7 @@ impl YtDlp {
 }
 
 impl Acquire for YtDlp {
-    async fn acquire(
-        &self,
-        url: &NormalizedUrl,
-        _content_type: ContentType,
-        into: &Path,
-    ) -> Result<Vec<Asset>, AdapterError> {
+    async fn acquire(&self, url: &NormalizedUrl, into: &Path) -> Result<Vec<Asset>, AdapterError> {
         std::fs::create_dir_all(into).map_err(|source| AdapterError::Launch {
             program: PROGRAM.to_owned(),
             source,
@@ -382,6 +377,7 @@ impl Probe for YtDlp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use escrow_domain::content::ContentType;
 
     fn program() -> PathBuf {
         PathBuf::from("/opt/homebrew/bin/yt-dlp")

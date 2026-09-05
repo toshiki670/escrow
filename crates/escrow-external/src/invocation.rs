@@ -80,7 +80,7 @@ impl Completed {
 /// 走らせて、出力を丸ごと受け取る。
 ///
 /// 検知・生存確認・文字起こしのように**終わりがある**呼び出し向け。ライブの録画は
-/// 数時間走って途中で止める必要があるので、そちらは Phase 4 で別に扱う（#7）。
+/// 数時間走って途中で止める必要があるので、そちらはエンジンが別に扱う（#7 Phase 6）。
 pub async fn run(
     invocation: &Invocation,
     working_dir: Option<&Path>,

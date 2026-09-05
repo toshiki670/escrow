@@ -69,7 +69,7 @@ fn expected(names: &[&str]) -> BTreeSet<String> {
     names.iter().map(|s| (*s).to_owned()).collect()
 }
 
-/// 依存はこの3つだけ。`sqlx` を足すと落ちる。
+/// 表に無い依存を足すと落ちる。`sqlx` で試せる。
 #[test]
 fn the_kernel_cannot_reach_the_outside_world() {
     let manifest = manifest();

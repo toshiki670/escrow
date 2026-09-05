@@ -270,7 +270,7 @@ mod tests {
 
     /// 行き先を決めるのは、状態が伴っている期限だけ（#1）。
     ///
-    /// `Transcribed` は値を運ばないので、ここで期限を渡す口が無い。
+    /// 行き先を決めるのは、状態が持っている期限だけ。`Transcribed` は値を運ばない。
     #[tokio::test]
     async fn the_destination_comes_from_the_deadline_the_state_carries() {
         for (hold, expected) in [

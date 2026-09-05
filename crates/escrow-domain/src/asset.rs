@@ -45,14 +45,10 @@ impl AssetKind {
         Self::ALL.into_iter().find(|k| k.as_str() == s)
     }
 
-    /// 拡張子から種類を当てる。
-    ///
-    /// 取得する側が自分の名前で書いたものを、#1 の命名規則へ移すときに使う。
-    /// **名前を決めるのは escrow** なので、ツールが何と呼んだかは持ち込まない。
-    /// 音が入っているか。#1 の3つのスイッチのうち「文字起こしする実体があるか」。
+    /// 音が入っているか。仕様の3つのスイッチのうち「文字起こしする実体があるか」。
     ///
     /// 画像だけの投稿は文字起こしできないので、取得の次は `holding` か `kept`
-    /// へ直行する（#1 のスイッチ表）。
+    /// へ直行する（#1）。
     pub const fn is_audible(self) -> bool {
         match self {
             Self::Video | Self::Audio => true,
@@ -60,6 +56,10 @@ impl AssetKind {
         }
     }
 
+    /// 拡張子から種類を当てる。
+    ///
+    /// 取得する側が自分の名前で書いたものを、#1 の命名規則へ移すときに使う。
+    /// **名前を決めるのは escrow** なので、ツールが何と呼んだかは持ち込まない。
     pub fn of_extension(extension: &str) -> Option<Self> {
         let lower = extension.to_ascii_lowercase();
         match lower.as_str() {
@@ -98,8 +98,13 @@ impl Asset {
         }
     }
 
+    /// 拡張子を除いた形。外部ツールが自分で拡張子を付ける場面で使う。
+    pub fn stem(&self) -> String {
+        format!("{}.{}", self.kind, self.ordinal)
+    }
+
     pub fn file_name(&self) -> String {
-        format!("{}.{}.{}", self.kind, self.ordinal, self.extension)
+        format!("{}.{}", self.stem(), self.extension)
     }
 
     pub fn path(&self, media_dir: &Path, item: ItemId) -> PathBuf {

@@ -9,12 +9,12 @@
 //!
 //! リトライ・空き容量の門・待ち行列は Phase 6（#7）。ここは1件を1回運ぶだけ。
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use escrow_domain::asset::{self, Asset, transcript_need};
 use escrow_domain::item::ItemId;
 use escrow_domain::source::SourceId;
-use escrow_domain::state::{Event, HoldTooFar, State, TranscriptNeed};
+use escrow_domain::state::{Event, HoldTooFar, State};
 use escrow_domain::timestamp::Timestamp;
 use escrow_ledger::{Ledger, LedgerError, Projected};
 use escrow_scheduler::{Acquire, AdapterError};
@@ -32,12 +32,6 @@ pub enum AcquisitionError {
     NoSuchSource(SourceId),
     #[error(transparent)]
     HoldTooFar(#[from] HoldTooFar),
-    #[error("手元の実体を扱えない: {path}")]
-    Io {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
 }
 
 pub struct Acquisition<'a, A> {
@@ -69,10 +63,7 @@ impl<'a, A: Acquire> Acquisition<'a, A> {
         let current = self.step(current, &Event::AcquisitionStarted).await?;
 
         let dir = asset::item_dir(self.media_dir, id);
-        let assets: Vec<Asset> = self
-            .acquire
-            .acquire(&current.item.url, current.item.content_type(), &dir)
-            .await?;
+        let assets: Vec<Asset> = self.acquire.acquire(&current.item.url, &dir).await?;
 
         // 何を落とせたかで、文字起こしが要るかが決まる（#1 のスイッチ表）。
         let transcript = transcript_need(&assets);
@@ -120,16 +111,11 @@ impl<'a, A: Acquire> Acquisition<'a, A> {
     }
 }
 
-/// 取得の結果、文字起こしへ回るか。呼ぶ側が次の拾い手を決めるときに使う。
-pub const fn goes_to_transcription(transcript: TranscriptNeed) -> bool {
-    matches!(transcript, TranscriptNeed::Needed)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use escrow_domain::asset::AssetKind;
-    use escrow_domain::content::{Content, ContentType, MediaType};
+    use escrow_domain::content::{Content, MediaType};
     use escrow_domain::item::Discovered;
     use escrow_domain::source::{Monitoring, SourceId};
     use escrow_domain::state::MediaPresence;
@@ -138,7 +124,7 @@ mod tests {
     use std::num::NonZeroU32;
     use std::sync::Mutex;
 
-    /// 落ちるものを置く代わりの取得。スケジューラが見せている口だけを満たす。
+    /// 落ちるものを置く代わりの取得。スケジューラが見せている trait だけを満たす。
     ///
     /// **`escrow-external` を名前で知らずに差し替えられる**こと自体が、port が
     /// スケジューラの公開 API だという確認になっている（#15）。
@@ -151,7 +137,6 @@ mod tests {
         async fn acquire(
             &self,
             _url: &NormalizedUrl,
-            _content_type: ContentType,
             into: &Path,
         ) -> Result<Vec<Asset>, AdapterError> {
             *self.calls.lock().unwrap() += 1;
@@ -169,7 +154,6 @@ mod tests {
         async fn acquire(
             &self,
             _url: &NormalizedUrl,
-            _content_type: ContentType,
             _into: &Path,
         ) -> Result<Vec<Asset>, AdapterError> {
             Err(AdapterError::Transient {
@@ -256,7 +240,6 @@ mod tests {
         assert_eq!(state.name(), escrow_domain::state::StateName::Transcribing);
         assert!(state.hold_until().is_some(), "期限を伴って文字起こしへ進む");
         assert_eq!(*acquire.calls.lock().unwrap(), 1);
-        assert!(goes_to_transcription(TranscriptNeed::Needed));
     }
 
     /// 画像だけなら文字起こしを飛ばす。行き先は期限だけが決める（#1）。
@@ -341,7 +324,6 @@ mod tests {
             async fn acquire(
                 &self,
                 _url: &NormalizedUrl,
-                _content_type: ContentType,
                 into: &Path,
             ) -> Result<Vec<Asset>, AdapterError> {
                 tokio::time::sleep(std::time::Duration::from_millis(1100)).await;

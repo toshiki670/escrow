@@ -25,7 +25,7 @@ use crate::invocation::{Completed, Invocation, run};
 use crate::{Acquire, AdapterError, Discover, Found};
 use escrow_config::Browser;
 use escrow_domain::asset::{Asset, AssetKind};
-use escrow_domain::content::{Content, ContentType};
+use escrow_domain::content::Content;
 use escrow_domain::source::Source;
 use escrow_domain::state::MediaPresence;
 use escrow_domain::timestamp::Timestamp;
@@ -35,7 +35,7 @@ const PROGRAM: &str = "gallery-dl";
 
 /// このアダプタが cookie を取り出せるブラウザ。
 ///
-/// escrow の [`Browser`] がこの部分集合であることは `adapter` のテストが確かめる。
+/// escrow の [`Browser`] がこの部分集合であることは `escrow-external` の `every_configurable_browser_works_with_every_adapter` が確かめる。
 /// gallery-dl は `floorp` / `librewolf` / `orion` / `thorium` / `zen` も受けるが、
 /// 他のアダプタが受けないので [`Browser`] には入っていない。
 pub const SUPPORTED_BROWSERS: &[Browser] = &[
@@ -337,12 +337,7 @@ impl Discover for GalleryDl {
 }
 
 impl Acquire for GalleryDl {
-    async fn acquire(
-        &self,
-        url: &NormalizedUrl,
-        _content_type: ContentType,
-        into: &Path,
-    ) -> Result<Vec<Asset>, AdapterError> {
+    async fn acquire(&self, url: &NormalizedUrl, into: &Path) -> Result<Vec<Asset>, AdapterError> {
         let io_error = |source| AdapterError::Launch {
             program: PROGRAM.to_owned(),
             source,
@@ -419,6 +414,7 @@ fn rename_into_place(from: &Path, into: &Path) -> Result<Vec<Asset>, AdapterErro
 #[cfg(test)]
 mod tests {
     use super::*;
+    use escrow_domain::content::ContentType;
 
     fn program() -> PathBuf {
         PathBuf::from("/opt/homebrew/bin/gallery-dl")

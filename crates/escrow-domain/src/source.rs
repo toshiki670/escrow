@@ -60,9 +60,8 @@ pub struct Source {
 /// X は継続監視せず、人が宣言した期間の中だけ見る（#5）。YouTube は RSS が
 /// 1チャンネル1回で済むので区切らない。
 ///
-/// **片方だけ決まった状態を作れない。** DB の `monitor_from` / `monitor_until` は
-/// 2列に分かれているが、そこに意味があるのは「両方 NULL」と「両方埋まっている」の
-/// 2つだけなので、写した先では1つの値にする。
+/// **意味があるのは「両方 NULL」と「両方埋まっている」の2つだけ。** DB の
+/// `monitor_from` / `monitor_until` は2列に分かれているが、写した先では1つの値にする。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Monitoring {
     /// 区切らず監視し続ける。
@@ -91,7 +90,6 @@ impl Monitoring {
         }
     }
 
-    /// 書き戻すときの2列。
     /// その時刻が監視の中か。
     ///
     /// 期間を持たない配信元は常に中。期間を持つ配信元は、始まりを含み終わりを
@@ -103,6 +101,7 @@ impl Monitoring {
         }
     }
 
+    /// 書き戻すときの2列。
     pub const fn columns(self) -> (Option<Timestamp>, Option<Timestamp>) {
         match self {
             Self::Continuous => (None, None),
