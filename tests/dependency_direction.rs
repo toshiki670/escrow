@@ -4,8 +4,6 @@
 //! **crate の分け方**で、外部ツールの crate を依存に持つのが `escrow-scheduler` だけ
 //! である限り、迂回はコンパイルエラーになる。その前提をここで固定する。
 //!
-//! 見るのは `Cargo.toml` で、**dev-dependencies も含める**。テストの中でだけ
-//! 迂回できるなら、迂回路は在ることになる。
 
 use std::collections::BTreeSet;
 

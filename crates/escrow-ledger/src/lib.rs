@@ -35,13 +35,9 @@ pub use catalog::NewSource;
 pub use item::{Log, Projected, Recorded};
 
 /// `migrations/` をバイナリへ埋め込む。前進のみで、down migration は持たない（#7）。
-///
-/// **入るのは事象テーブルと設定テーブルだけ。** 投影は移行の対象にしない。
 static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
 
-/// 投影の DDL。移行の対象にしないので、ここから直接流す（#15）。
-///
-/// 写しはこの1つきりで、[`Ledger::open`] も [`Ledger::rebuild`] もこれを使う。
+/// 投影の DDL。理由は `projections/item.sql` に在る。
 const PROJECTION: &str = include_str!("../projections/item.sql");
 
 /// 項目の中での事象の通し番号。1 から始まり、1 は必ず `discovered`（#1）。

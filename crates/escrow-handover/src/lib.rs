@@ -31,9 +31,7 @@ pub enum HandoverError {
     },
 }
 
-/// #4 が返す1件。**フィールドはちょうど9つ。**
-///
-/// `state_since` は返さない。期限の計算は escrow 側の仕事で、外部には関係しない（#4）。
+/// #4 が返す1件。形は `the_handover_has_exactly_the_nine_fields` が固定している。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Handover {
     /// `release` に渡す。
@@ -49,16 +47,12 @@ pub struct Handover {
     pub state: String,
     /// ノート名の日付。
     pub published_at: String,
-    /// 実体を読む・コピーする。X 投稿は画像を最大4枚持ち、ライブが途中で切れれば
-    /// 動画も断片に分かれるので、単数では返せない（#4）。
+    /// 実体を読む・コピーする。
     pub media_paths: Vec<String>,
     pub transcript_paths: Vec<String>,
 }
 
 /// 台帳の1行を、外部が受け取る形へ写す。
-///
-/// 実体のパスは `Item.id` から導出される値なので、`list` に含めてもコストがない。
-/// だから #4 は `show` を持たない。
 pub fn handover(item: &Item, media_dir: &Path) -> Result<Handover, HandoverError> {
     let dir = asset::item_dir(media_dir, item.id);
     let assets = asset::scan(media_dir, item.id).map_err(|source| HandoverError::Io {
@@ -94,10 +88,7 @@ pub fn handover(item: &Item, media_dir: &Path) -> Result<Handover, HandoverError
 
 /// 外部が受け取り終えたことを伝える。
 ///
-/// **DB を先に更新し、ファイルは後で消す**（#7）。逆順にすると、途中で落ちたときに
-/// 「`kept` なのにメディアが無い」行が残り、#4 の「`kept` は引き渡しを待つ＝手元に
-/// ある」という契約が破れる。DB を先にすれば、残るのは行と対応しない孤児ファイル
-/// だけで、これは掃除できる。
+/// **DB を先に更新し、ファイルは後で消す**（#7）。
 pub async fn release(
     ledger: &Ledger,
     media_dir: &Path,

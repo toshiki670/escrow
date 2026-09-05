@@ -111,14 +111,8 @@ impl Monitoring {
 }
 
 impl Source {
-    /// 取得が終わった時点で確定する、預かりの期限（#1）。
-    ///
-    /// `hold_days` は「これから取得するものを何日預かるか」の**既定値**で、ここで
-    /// 1つの日時になったあとは `Item` が持つ。後から日数を変えても、進行中の
-    /// 預かりは動かない。
-    ///
-    /// **渡す時刻は取得が終わった瞬間。** 取得を始めるときに前もって出しておくと、
-    /// 数時間の録画ではその長さぶん期限が早まる。
+    /// 取得が終わった時点で確定する、預かりの期限（#1）。渡す時刻の意味は
+    /// [`Hold::from_days`] が持つ。
     pub fn hold_from(&self, acquired_at: Timestamp) -> Result<Hold, HoldTooFar> {
         Hold::from_days(self.hold_days, acquired_at)
     }

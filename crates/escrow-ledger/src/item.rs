@@ -1,8 +1,6 @@
 //! 項目の事象と、その投影（#15）。
 //!
-//! 書く道は2つだけ — 誕生（[`Ledger::discover`]）と追記（[`Ledger::append`]）。
-//! どちらも事象を書いてから、同じトランザクションで投影へ反映する。投影の値は
-//! 決定ではなく**決定の写し**なので、写しだけを動かす関数は置かない。
+//! 誕生（[`Ledger::discover`]）と追記（[`Ledger::append`]）、そこから作られる投影。
 
 use escrow_domain::item::{Discovered, Item, ItemId};
 use escrow_domain::state::{Event, IllegalTransition, next};

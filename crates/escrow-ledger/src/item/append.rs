@@ -1,10 +1,9 @@
 //! 事象を書く2つの道 — 誕生と追記（#15）。
 //!
 //! どちらも1つのトランザクションで、**事象を書いてから投影へ反映する**。投影の値は
-//! 決定ではなく決定の写しなので、写しだけを動かす関数を外へ出さない。
+//! 決定ではなく決定の写し。
 //!
-//! 追記は `(item_id, seq)` の UNIQUE が競合を弾く。#7 が「状態遷移は必ず
-//! compare-and-swap にする」という**規律**で守っていたものが、**制約**になる。
+//! 追記は `(item_id, seq)` の UNIQUE が競合を弾く。
 
 use escrow_domain::item::{Discovered, ItemId};
 use escrow_domain::state::{Event, Hold, MediaPresence, TranscriptNeed, next};
