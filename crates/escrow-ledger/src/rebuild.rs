@@ -6,7 +6,7 @@ use escrow_domain::timestamp::Timestamp;
 use sqlx::Executor;
 
 use crate::item::{Columns, EventRow, log_of};
-use crate::{Ledger, LedgerError, PROJECTION};
+use crate::{Ledger, LedgerError, PROJECTION, WRITE};
 
 impl Ledger {
     /// 投影を DROP して作り直し、ログから埋め直す。
@@ -14,7 +14,7 @@ impl Ledger {
     /// 戻すのは作り直した項目の数。DDL の写しは `projections/item.sql` の1つきりで、
     /// 起動時に投影を作るのと同じものを流す。
     pub async fn rebuild(&self) -> Result<u64, LedgerError> {
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.pool.begin_with(WRITE).await?;
 
         tx.execute("DROP TABLE IF EXISTS item").await?;
         tx.execute(PROJECTION).await?;

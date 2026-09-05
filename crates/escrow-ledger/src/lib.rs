@@ -37,6 +37,17 @@ pub use item::{Log, Projected, Recorded};
 /// `migrations/` をバイナリへ埋め込む。前進のみで、down migration は持たない（#7）。
 static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
 
+/// 書き込みのトランザクションの開き方。
+///
+/// 既定の `BEGIN`（deferred）は最初の `SELECT` で読み取りの錠を取り、そのあと書き込みへ
+/// 上げようとする。**SQLite はこの上げ方に `busy_timeout` を効かせない** — 互いに待つと
+/// 解けなくなるので、待たずに `SQLITE_BUSY` を返す。それでは「読み直して決め直す」に
+/// 落ちず、`database is locked` のまま止まる（#7）。
+///
+/// 先に書き込みの錠を取れば `busy_timeout` が効き、待ったうえで
+/// `(item_id, seq)` の UNIQUE が競合を弾く。
+const WRITE: &str = "BEGIN IMMEDIATE";
+
 /// 投影の DDL。理由は `projections/item.sql` に在る。
 const PROJECTION: &str = include_str!("../projections/item.sql");
 

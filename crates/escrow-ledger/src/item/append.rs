@@ -10,7 +10,7 @@ use escrow_domain::state::{Event, Hold, MediaPresence, TranscriptNeed, next};
 use escrow_domain::timestamp::Timestamp;
 
 use super::projection::{Columns, state_of};
-use crate::{Ledger, LedgerError, Seq, timestamp};
+use crate::{Ledger, LedgerError, Seq, WRITE, timestamp};
 
 impl Ledger {
     /// 項目を起票する。
@@ -36,7 +36,7 @@ impl Ledger {
         let state_name = state.as_str();
         let seq = i64::from(Seq::FIRST.get());
 
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.pool.begin_with(WRITE).await?;
 
         // 同一性はログが持つ。投影の rowid から採ると、真実の側が捨てられる側の
         // 採番に依存することになる。
@@ -112,7 +112,7 @@ impl Ledger {
         at: Timestamp,
     ) -> Result<Seq, LedgerError> {
         let key = i64::from(id);
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.pool.begin_with(WRITE).await?;
 
         let row = sqlx::query!(
             r#"SELECT i.state, i.state_since, i.hold_until, i.release_reference,
@@ -243,5 +243,49 @@ impl Payload {
             | Event::RetriesExhausted
             | Event::ReacquisitionRequested => empty,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use escrow_domain::liveness::Presence;
+    use escrow_domain::state::Event;
+
+    use crate::testing::{a_holding_item, at, seed_into};
+    use crate::{Ledger, LedgerError};
+
+    /// 別プロセスの体で、同じファイルを2つの `Ledger` が同時に書く。
+    ///
+    /// **落ちた側は `Superseded` を受け取る**（#7）。ここが `database is locked` だと、
+    /// 呼ぶ側は「読み直して決め直す」に落ちず、何が起きたかも分からないまま止まる。
+    /// 既定の `BEGIN` では実際にそうなるので、書き込みは `BEGIN IMMEDIATE` で開く。
+    ///
+    /// in-memory では試せない — `sqlite::memory:` は接続ごとに別の DB になる。
+    #[tokio::test]
+    async fn two_writers_on_one_file_leave_one_superseded() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("escrow.db");
+
+        let engine = Ledger::open(&path).await.unwrap();
+        let source = seed_into(&engine).await;
+        let id = a_holding_item(&engine, source).await;
+
+        // もう1つの担い手が同じファイルを開き、同じ姿を読む。
+        let cli = Ledger::open(&path).await.unwrap();
+        let seen = engine.item(id).await.unwrap().unwrap().seq;
+        assert_eq!(cli.item(id).await.unwrap().unwrap().seq, seen);
+
+        let confirmed = Event::PresenceConfirmed(Presence::Present.confirmed().unwrap());
+        let gone = Event::SourceGone;
+        let (first, second) = tokio::join!(
+            engine.append(id, seen, &confirmed, at("2026-03-03T04:00:00+09:00")),
+            cli.append(id, seen, &gone, at("2026-03-03T04:00:01+09:00")),
+        );
+
+        assert!(first.is_ok(), "{first:?}");
+        assert!(matches!(second, Err(LedgerError::Superseded)), "{second:?}");
+
+        // 通ったほうだけがログに入り、投影も1件ぶんしか動いていない。
+        assert_eq!(engine.log(id).await.unwrap().unwrap().rest.len(), 3);
     }
 }
