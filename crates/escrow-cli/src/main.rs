@@ -313,7 +313,7 @@ impl App {
         let acquirer = scheduler.acquirer(item.content_type());
 
         // 預かる日数も期限も、取得が終わった瞬間に取得のスライスが決める（#1）。
-        let state = Acquisition::new(&self.ledger, &self.paths.media_dir, &acquirer)
+        let state = Acquisition::new(&self.ledger, &self.paths.media_dir, acquirer.as_ref())
             .run(id)
             .await?;
 

@@ -33,14 +33,18 @@ pub enum TranscriptionError {
     },
 }
 
-pub struct Transcription<'a, T> {
+pub struct Transcription<'a> {
     ledger: &'a Ledger,
     media_dir: &'a Path,
-    transcribe: &'a T,
+    transcribe: &'a dyn Transcribe,
 }
 
-impl<'a, T: Transcribe> Transcription<'a, T> {
-    pub const fn new(ledger: &'a Ledger, media_dir: &'a Path, transcribe: &'a T) -> Self {
+impl<'a> Transcription<'a> {
+    pub const fn new(
+        ledger: &'a Ledger,
+        media_dir: &'a Path,
+        transcribe: &'a dyn Transcribe,
+    ) -> Self {
         Self {
             ledger,
             media_dir,
@@ -103,6 +107,7 @@ mod tests {
     use escrow_domain::state::{Hold, MediaPresence, TranscriptNeed};
     use escrow_domain::url;
     use escrow_ledger::{NewSource, Seq};
+    use escrow_scheduler::BoxFuture;
     use std::num::NonZeroU32;
     use std::sync::Mutex;
 
@@ -112,20 +117,22 @@ mod tests {
     }
 
     impl Transcribe for FakeTranscribe {
-        async fn transcribe(
-            &self,
-            media: &Path,
-            into: &Path,
+        fn transcribe<'a>(
+            &'a self,
+            media: &'a Path,
+            into: &'a Path,
             ordinal: std::num::NonZeroU32,
-        ) -> Result<Asset, AdapterError> {
-            self.calls
-                .lock()
-                .unwrap()
-                .push(media.file_name().unwrap().to_string_lossy().into_owned());
+        ) -> BoxFuture<'a, Result<Asset, AdapterError>> {
+            Box::pin(async move {
+                self.calls
+                    .lock()
+                    .unwrap()
+                    .push(media.file_name().unwrap().to_string_lossy().into_owned());
 
-            let asset = Asset::new(AssetKind::Transcript, ordinal, "vtt");
-            std::fs::write(into.join(asset.file_name()), b"WEBVTT\n").unwrap();
-            Ok(asset)
+                let asset = Asset::new(AssetKind::Transcript, ordinal, "vtt");
+                std::fs::write(into.join(asset.file_name()), b"WEBVTT\n").unwrap();
+                Ok(asset)
+            })
         }
     }
 
@@ -304,15 +311,17 @@ mod tests {
     async fn a_failed_transcription_leaves_the_item_where_it_stopped() {
         struct Failing;
         impl Transcribe for Failing {
-            async fn transcribe(
-                &self,
-                _media: &Path,
-                _into: &Path,
+            fn transcribe<'a>(
+                &'a self,
+                _media: &'a Path,
+                _into: &'a Path,
                 _ordinal: std::num::NonZeroU32,
-            ) -> Result<Asset, AdapterError> {
-                Err(AdapterError::Transient {
-                    program: "whisper-cli".to_owned(),
-                    detail: "落ちた".to_owned(),
+            ) -> BoxFuture<'a, Result<Asset, AdapterError>> {
+                Box::pin(async move {
+                    Err(AdapterError::Transient {
+                        program: "whisper-cli".to_owned(),
+                        detail: "落ちた".to_owned(),
+                    })
                 })
             }
         }

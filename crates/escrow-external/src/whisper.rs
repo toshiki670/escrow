@@ -17,7 +17,7 @@ use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 
 use crate::invocation::{Invocation, run};
-use crate::{AdapterError, Transcribe};
+use crate::{AdapterError, BoxFuture, Transcribe};
 use escrow_config::Language;
 use escrow_domain::asset::{Asset, AssetKind};
 
@@ -104,54 +104,56 @@ pub fn transcript_asset(ordinal: NonZeroU32) -> Asset {
 // ------------------------------------------------------------------ 実行
 
 impl Transcribe for Whisper {
-    async fn transcribe(
-        &self,
-        media: &Path,
-        into: &Path,
+    fn transcribe<'a>(
+        &'a self,
+        media: &'a Path,
+        into: &'a Path,
         ordinal: NonZeroU32,
-    ) -> Result<Asset, AdapterError> {
-        let asset = transcript_asset(ordinal);
+    ) -> BoxFuture<'a, Result<Asset, AdapterError>> {
+        Box::pin(async move {
+            let asset = transcript_asset(ordinal);
 
-        // 変換したものは残さない。落ちても消える場所へ置く。
-        let scratch = tempfile::tempdir().map_err(|source| AdapterError::Launch {
-            program: FFMPEG.to_owned(),
-            source,
-        })?;
-        let wav = scratch.path().join("audio.wav");
-
-        let converted = run(&convert_argv(&self.ffmpeg, media, &wav), None).await?;
-        if !converted.success {
-            return Err(AdapterError::Transient {
+            // 変換したものは残さない。落ちても消える場所へ置く。
+            let scratch = tempfile::tempdir().map_err(|source| AdapterError::Launch {
                 program: FFMPEG.to_owned(),
-                detail: converted.stderr_tail(),
-            });
-        }
+                source,
+            })?;
+            let wav = scratch.path().join("audio.wav");
 
-        // `-of` は拡張子を除いた形を取る。下の存在確認と同じ `asset` から出すので、
-        // 命名規則が動いても書き出し先と確認先がすれ違わない。
-        let stem = into.join(asset.stem());
-        let transcribed = run(
-            &transcribe_argv(&self.whisper, &self.model, &self.language, &wav, &stem),
-            None,
-        )
-        .await?;
+            let converted = run(&convert_argv(&self.ffmpeg, media, &wav), None).await?;
+            if !converted.success {
+                return Err(AdapterError::Transient {
+                    program: FFMPEG.to_owned(),
+                    detail: converted.stderr_tail(),
+                });
+            }
 
-        if !transcribed.success {
-            return Err(AdapterError::Transient {
-                program: WHISPER.to_owned(),
-                detail: transcribed.stderr_tail(),
-            });
-        }
+            // `-of` は拡張子を除いた形を取る。下の存在確認と同じ `asset` から出すので、
+            // 命名規則が動いても書き出し先と確認先がすれ違わない。
+            let stem = into.join(asset.stem());
+            let transcribed = run(
+                &transcribe_argv(&self.whisper, &self.model, &self.language, &wav, &stem),
+                None,
+            )
+            .await?;
 
-        // 成功と言われても、書かれていなければ文字起こしは無い。
-        let written = into.join(asset.file_name());
-        if !written.is_file() {
-            return Err(AdapterError::Parse {
-                program: WHISPER.to_owned(),
-                detail: format!("成功したが {} が無い", asset.file_name()),
-            });
-        }
-        Ok(asset)
+            if !transcribed.success {
+                return Err(AdapterError::Transient {
+                    program: WHISPER.to_owned(),
+                    detail: transcribed.stderr_tail(),
+                });
+            }
+
+            // 成功と言われても、書かれていなければ文字起こしは無い。
+            let written = into.join(asset.file_name());
+            if !written.is_file() {
+                return Err(AdapterError::Parse {
+                    program: WHISPER.to_owned(),
+                    detail: format!("成功したが {} が無い", asset.file_name()),
+                });
+            }
+            Ok(asset)
+        })
     }
 }
 

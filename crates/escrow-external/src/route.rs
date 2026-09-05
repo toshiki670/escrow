@@ -17,7 +17,7 @@ use std::path::Path;
 use crate::gallerydl::GalleryDl;
 use crate::rss::Rss;
 use crate::ytdlp::YtDlp;
-use crate::{Acquire, AdapterError, Discover, Found};
+use crate::{Acquire, AdapterError, BoxFuture, Discover, Found};
 use escrow_domain::asset::Asset;
 use escrow_domain::content::{Content, ContentType, Platform};
 use escrow_domain::source::Source;
@@ -101,11 +101,17 @@ pub enum Acquirer<'a> {
 }
 
 impl Acquire for Acquirer<'_> {
-    async fn acquire(&self, url: &NormalizedUrl, into: &Path) -> Result<Vec<Asset>, AdapterError> {
-        match self {
-            Self::YtDlp(tool) => tool.acquire(url, into).await,
-            Self::GalleryDl(tool) => tool.acquire(url, into).await,
-        }
+    fn acquire<'a>(
+        &'a self,
+        url: &'a NormalizedUrl,
+        into: &'a Path,
+    ) -> BoxFuture<'a, Result<Vec<Asset>, AdapterError>> {
+        Box::pin(async move {
+            match self {
+                Self::YtDlp(tool) => tool.acquire(url, into).await,
+                Self::GalleryDl(tool) => tool.acquire(url, into).await,
+            }
+        })
     }
 }
 
@@ -123,15 +129,17 @@ pub enum Discoverer<'a> {
 }
 
 impl Discover for Discoverer<'_> {
-    async fn discover(
-        &self,
-        source: &Source,
+    fn discover<'a>(
+        &'a self,
+        source: &'a Source,
         since: Timestamp,
-    ) -> Result<Vec<Found>, AdapterError> {
-        match self {
-            Self::Youtube { rss, ytdlp } => discover_youtube(rss, ytdlp, source, since).await,
-            Self::GalleryDl(tool) => tool.discover(source, since).await,
-        }
+    ) -> BoxFuture<'a, Result<Vec<Found>, AdapterError>> {
+        Box::pin(async move {
+            match self {
+                Self::Youtube { rss, ytdlp } => discover_youtube(rss, ytdlp, source, since).await,
+                Self::GalleryDl(tool) => tool.discover(source, since).await,
+            }
+        })
     }
 }
 

@@ -31,7 +31,7 @@ use escrow_external::ytdlp::YtDlp;
 ///
 /// `escrow-external` で定義されたものを、そのままここから見せる。写しを作らないので
 /// 型は1つきりで、変換の層も要らない。
-pub use escrow_external::{Acquire, AdapterError, Discover, Found, Probe, Transcribe};
+pub use escrow_external::{Acquire, AdapterError, BoxFuture, Discover, Found, Probe, Transcribe};
 
 /// 要るツールが見つからなかった。
 ///
@@ -79,12 +79,12 @@ impl Scheduler {
     }
 
     /// この種別を取るもの。#5 の対応表が決める。
-    pub fn acquirer(&self, content_type: ContentType) -> impl Acquire + use<'_> {
-        self.adapters.acquirer(content_type)
+    pub fn acquirer(&self, content_type: ContentType) -> Box<dyn Acquire + '_> {
+        Box::new(self.adapters.acquirer(content_type))
     }
 
     /// 文字起こしをするもの。
-    pub const fn transcriber(&self) -> &impl Transcribe {
+    pub const fn transcriber(&self) -> &dyn Transcribe {
         &self.whisper
     }
 }

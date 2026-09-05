@@ -42,6 +42,7 @@ pub use invocation::{Completed, Invocation, run};
 pub use route::{Acquirer, Adapters, Discoverer};
 
 use std::path::Path;
+use std::pin::Pin;
 
 use thiserror::Error;
 
@@ -51,6 +52,14 @@ use escrow_domain::liveness::Presence;
 use escrow_domain::source::Source;
 use escrow_domain::timestamp::Timestamp;
 use escrow_domain::url::NormalizedUrl;
+
+/// [`Discover`] / [`Acquire`] / [`Transcribe`] / [`Probe`] が返す future。
+///
+/// **`Box` へ入れると、この4つを `dyn` にできる**（#7）。`impl Future` を返す形は
+/// `dyn` にできず、型引数が呼ぶ側へ伝播して入口まで届く。`Box` にすれば入口の型が
+/// 具象のままになり、払うのは呼び出し1回あたりの確保1回だけ — 相手はプロセス起動か
+/// HTTP なので、その1回は測れる大きさに届かない。
+pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// 外部ツールが期待どおりに働かなかったとき。
 ///
@@ -132,11 +141,11 @@ pub trait Discover {
     ///
     /// #1 のとおり監視対象は `Source.created_at` 以降なので、それより古いものは
     /// 返さない。既に台帳に在るかの判定は呼ぶ側（`Item.url` の一意キー）。
-    fn discover(
-        &self,
-        source: &Source,
+    fn discover<'a>(
+        &'a self,
+        source: &'a Source,
         since: Timestamp,
-    ) -> impl Future<Output = Result<Vec<Found>, AdapterError>> + Send;
+    ) -> BoxFuture<'a, Result<Vec<Found>, AdapterError>>;
 }
 
 /// 項目の実体を手元へ落とす。
@@ -148,33 +157,31 @@ pub trait Acquire {
     ///
     /// 種別は受け取らない。**どのツールが取るかは呼ぶ前に決まっている**ので、
     /// ここへ渡しても決めることが残っていない。
-    fn acquire(
-        &self,
-        url: &NormalizedUrl,
-        into: &Path,
-    ) -> impl Future<Output = Result<Vec<Asset>, AdapterError>> + Send;
+    fn acquire<'a>(
+        &'a self,
+        url: &'a NormalizedUrl,
+        into: &'a Path,
+    ) -> BoxFuture<'a, Result<Vec<Asset>, AdapterError>>;
 }
 
 /// 手元の実体を文字起こしする。
 pub trait Transcribe {
     /// 断片ごとに1本作る。断片間の空白時間が分からないので、通しのタイムスタンプに
     /// 繋げられないため（#1）。
-    fn transcribe(
-        &self,
-        media: &Path,
-        into: &Path,
+    fn transcribe<'a>(
+        &'a self,
+        media: &'a Path,
+        into: &'a Path,
         ordinal: std::num::NonZeroU32,
-    ) -> impl Future<Output = Result<Asset, AdapterError>> + Send;
+    ) -> BoxFuture<'a, Result<Asset, AdapterError>>;
 }
 
 /// 配信元にまだ在るかを確かめる。
 pub trait Probe {
     /// #5 のとおり、**在ることを確かめられたときだけ** [`Presence::Present`]。
     /// 分からなければ [`Presence::Unknown`] で、判定は次の回へ回る。
-    fn probe(
-        &self,
-        url: &NormalizedUrl,
-    ) -> impl Future<Output = Result<Presence, AdapterError>> + Send;
+    fn probe<'a>(&'a self, url: &'a NormalizedUrl)
+    -> BoxFuture<'a, Result<Presence, AdapterError>>;
 }
 
 #[cfg(test)]

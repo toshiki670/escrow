@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 
 use crate::invocation::{Completed, Invocation, run};
-use crate::{Acquire, AdapterError, Discover, Found};
+use crate::{Acquire, AdapterError, BoxFuture, Discover, Found};
 use escrow_config::Browser;
 use escrow_domain::asset::{Asset, AssetKind};
 use escrow_domain::content::Content;
@@ -310,48 +310,57 @@ impl GalleryDl {
 }
 
 impl Discover for GalleryDl {
-    async fn discover(
-        &self,
-        source: &Source,
+    fn discover<'a>(
+        &'a self,
+        source: &'a Source,
         since: Timestamp,
-    ) -> Result<Vec<Found>, AdapterError> {
-        let timeline = timeline_url(&source.url).ok_or_else(|| AdapterError::Parse {
-            program: PROGRAM.to_owned(),
-            detail: format!("X の配信元として読めない: {}", source.url),
-        })?;
+    ) -> BoxFuture<'a, Result<Vec<Found>, AdapterError>> {
+        Box::pin(async move {
+            let timeline = timeline_url(&source.url).ok_or_else(|| AdapterError::Parse {
+                program: PROGRAM.to_owned(),
+                detail: format!("X の配信元として読めない: {}", source.url),
+            })?;
 
-        let completed = run(&timeline_argv(&self.program, &timeline, self.browser), None).await?;
-        if !completed.success {
-            return Err(classify(&completed));
-        }
+            let completed =
+                run(&timeline_argv(&self.program, &timeline, self.browser), None).await?;
+            if !completed.success {
+                return Err(classify(&completed));
+            }
 
-        let mut found = parse_timeline(&completed.stdout)?;
-        found.retain(|f| f.published_at >= since);
-        Ok(found)
+            let mut found = parse_timeline(&completed.stdout)?;
+            found.retain(|f| f.published_at >= since);
+            Ok(found)
+        })
     }
 }
 
 impl Acquire for GalleryDl {
-    async fn acquire(&self, url: &NormalizedUrl, into: &Path) -> Result<Vec<Asset>, AdapterError> {
-        let io_error = |source| AdapterError::Launch {
-            program: PROGRAM.to_owned(),
-            source,
-        };
+    fn acquire<'a>(
+        &'a self,
+        url: &'a NormalizedUrl,
+        into: &'a Path,
+    ) -> BoxFuture<'a, Result<Vec<Asset>, AdapterError>> {
+        Box::pin(async move {
+            let io_error = |source| AdapterError::Launch {
+                program: PROGRAM.to_owned(),
+                source,
+            };
 
-        // gallery-dl は自分の規則で名前を付けるので、いったん別の場所へ受ける。
-        let scratch = tempfile::tempdir().map_err(io_error)?;
-        std::fs::create_dir_all(into).map_err(io_error)?;
+            // gallery-dl は自分の規則で名前を付けるので、いったん別の場所へ受ける。
+            let scratch = tempfile::tempdir().map_err(io_error)?;
+            std::fs::create_dir_all(into).map_err(io_error)?;
 
-        let completed = run(
-            &download_argv(&self.program, url, scratch.path(), self.browser),
-            None,
-        )
-        .await?;
-        if !completed.success {
-            return Err(classify(&completed));
-        }
+            let completed = run(
+                &download_argv(&self.program, url, scratch.path(), self.browser),
+                None,
+            )
+            .await?;
+            if !completed.success {
+                return Err(classify(&completed));
+            }
 
-        rename_into_place(scratch.path(), into)
+            rename_into_place(scratch.path(), into)
+        })
     }
 }
 

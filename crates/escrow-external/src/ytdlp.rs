@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 
 use crate::invocation::{Completed, Invocation, run};
-use crate::{Acquire, AdapterError, Found, Probe};
+use crate::{Acquire, AdapterError, BoxFuture, Found, Probe};
 use escrow_config::Browser;
 use escrow_domain::asset::{self, Asset, AssetKind};
 use escrow_domain::content::{Content, MediaType};
@@ -327,41 +327,52 @@ impl YtDlp {
 }
 
 impl Acquire for YtDlp {
-    async fn acquire(&self, url: &NormalizedUrl, into: &Path) -> Result<Vec<Asset>, AdapterError> {
-        std::fs::create_dir_all(into).map_err(|source| AdapterError::Launch {
-            program: PROGRAM.to_owned(),
-            source,
-        })?;
-
-        let invocation = download_argv(&self.program, url, into, self.browser);
-        let completed = run(&invocation, None).await?;
-
-        if !completed.success {
-            return Err(classify(&completed, url));
-        }
-
-        // 何が落ちたかは、決め打ちせずディレクトリから読む。拡張子は yt-dlp が決める。
-        let assets = asset::scan_dir(into).map_err(|source| AdapterError::Launch {
-            program: PROGRAM.to_owned(),
-            source,
-        })?;
-
-        if assets.is_empty() {
-            return Err(AdapterError::Parse {
+    fn acquire<'a>(
+        &'a self,
+        url: &'a NormalizedUrl,
+        into: &'a Path,
+    ) -> BoxFuture<'a, Result<Vec<Asset>, AdapterError>> {
+        Box::pin(async move {
+            std::fs::create_dir_all(into).map_err(|source| AdapterError::Launch {
                 program: PROGRAM.to_owned(),
-                detail: "成功したが実体が置かれていない".to_owned(),
-            });
-        }
-        Ok(assets)
+                source,
+            })?;
+
+            let invocation = download_argv(&self.program, url, into, self.browser);
+            let completed = run(&invocation, None).await?;
+
+            if !completed.success {
+                return Err(classify(&completed, url));
+            }
+
+            // 何が落ちたかは、決め打ちせずディレクトリから読む。拡張子は yt-dlp が決める。
+            let assets = asset::scan_dir(into).map_err(|source| AdapterError::Launch {
+                program: PROGRAM.to_owned(),
+                source,
+            })?;
+
+            if assets.is_empty() {
+                return Err(AdapterError::Parse {
+                    program: PROGRAM.to_owned(),
+                    detail: "成功したが実体が置かれていない".to_owned(),
+                });
+            }
+            Ok(assets)
+        })
     }
 }
 
 impl Probe for YtDlp {
-    async fn probe(&self, url: &NormalizedUrl) -> Result<Presence, AdapterError> {
-        let invocation = probe_argv(&self.program, url, self.browser);
-        let completed = run(&invocation, None).await?;
+    fn probe<'a>(
+        &'a self,
+        url: &'a NormalizedUrl,
+    ) -> BoxFuture<'a, Result<Presence, AdapterError>> {
+        Box::pin(async move {
+            let invocation = probe_argv(&self.program, url, self.browser);
+            let completed = run(&invocation, None).await?;
 
-        Ok(parse_probe(&completed))
+            Ok(parse_probe(&completed))
+        })
     }
 }
 

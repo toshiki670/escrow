@@ -21,13 +21,13 @@ pub enum DiscoveryError {
     Adapter(#[from] AdapterError),
 }
 
-pub struct Discovery<'a, D> {
+pub struct Discovery<'a> {
     ledger: &'a Ledger,
-    discover: &'a D,
+    discover: &'a dyn Discover,
 }
 
-impl<'a, D: Discover> Discovery<'a, D> {
-    pub const fn new(ledger: &'a Ledger, discover: &'a D) -> Self {
+impl<'a> Discovery<'a> {
+    pub const fn new(ledger: &'a Ledger, discover: &'a dyn Discover) -> Self {
         Self { ledger, discover }
     }
 
@@ -93,6 +93,7 @@ mod tests {
     use escrow_domain::state::MediaPresence;
     use escrow_domain::url;
     use escrow_ledger::NewSource;
+    use escrow_scheduler::BoxFuture;
     use escrow_scheduler::Found;
     use std::num::NonZeroU32;
 
@@ -100,12 +101,12 @@ mod tests {
     struct FakeDiscover(Vec<Found>);
 
     impl Discover for FakeDiscover {
-        async fn discover(
-            &self,
-            _source: &Source,
+        fn discover<'a>(
+            &'a self,
+            _source: &'a Source,
             _since: Timestamp,
-        ) -> Result<Vec<Found>, AdapterError> {
-            Ok(self.0.clone())
+        ) -> BoxFuture<'a, Result<Vec<Found>, AdapterError>> {
+            Box::pin(async move { Ok(self.0.clone()) })
         }
     }
 
