@@ -138,7 +138,10 @@ impl Rss {
     }
 
     /// 配信元のフィードを読む。
-    pub async fn sightings(&self, source: &NormalizedUrl) -> Result<Vec<Sighting>, AdapterError> {
+    pub(crate) async fn sightings(
+        &self,
+        source: &NormalizedUrl,
+    ) -> Result<Vec<Sighting>, AdapterError> {
         let feed = feed_url(source).ok_or_else(|| {
             parse_error(&format!(
                 "YouTube の配信元として読めない: {}",

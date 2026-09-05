@@ -294,7 +294,7 @@ fn classify(completed: &Completed) -> AdapterError {
 
 impl GalleryDl {
     /// 1件の中身を取る。人が URL を登録するときの入口（#5）。
-    pub async fn describe(&self, url: &NormalizedUrl) -> Result<Found, AdapterError> {
+    pub(crate) async fn describe(&self, url: &NormalizedUrl) -> Result<Found, AdapterError> {
         let completed = run(&describe_argv(&self.program, url, self.browser), None).await?;
         if !completed.success {
             return Err(classify(&completed));

@@ -300,7 +300,7 @@ fn classify(completed: &Completed, url: &NormalizedUrl) -> AdapterError {
 
 impl YtDlp {
     /// 検知の追加取得。フィードに無い2つを取る（#5）。
-    pub async fn schedule(&self, url: &NormalizedUrl) -> Result<Schedule, AdapterError> {
+    pub(crate) async fn schedule(&self, url: &NormalizedUrl) -> Result<Schedule, AdapterError> {
         let invocation = schedule_argv(&self.program, url);
         let completed = run(&invocation, None).await?;
 
@@ -311,7 +311,7 @@ impl YtDlp {
     }
 
     /// 人が登録した1件の中身を取る。
-    pub async fn describe(
+    pub(crate) async fn describe(
         &self,
         url: &NormalizedUrl,
         media_type: MediaType,
