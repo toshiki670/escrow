@@ -1,4 +1,4 @@
-//! `macro_rules!` を禁じる（`CONTRIBUTING.md`）。
+//! `macro_rules!` を禁じる（`docs/rules/construction.md`）。
 
 use escrow_tests::members;
 
