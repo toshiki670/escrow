@@ -1,4 +1,4 @@
-# 動かす
+# 手元での実行
 
 [escrow 規約](../../CONTRIBUTING.md) の一部。
 

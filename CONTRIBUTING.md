@@ -12,9 +12,9 @@
 | 業務 | 読むファイル |
 |---|---|
 | **設計** | [記録の置き場所](docs/rules/records.md) / [設計](docs/rules/design.md) / [アーキテクチャ](docs/rules/architecture.md) / [ドキュメント](docs/rules/documentation.md) / [規約の変更](docs/rules/amendment.md) |
-| **実装** | [記録の置き場所](docs/rules/records.md) / [アーキテクチャ](docs/rules/architecture.md) / [実装](docs/rules/construction.md) / [ドキュメント](docs/rules/documentation.md) / [動かす](docs/rules/running.md) / [規約の変更](docs/rules/amendment.md) |
+| **実装** | [記録の置き場所](docs/rules/records.md) / [アーキテクチャ](docs/rules/architecture.md) / [実装](docs/rules/construction.md) / [ドキュメント](docs/rules/documentation.md) / [手元での実行](docs/rules/running.md) / [規約の変更](docs/rules/amendment.md) |
 | **レビュー** | **全部** |
-| **QA** | [QA](docs/rules/qa.md) / [アーキテクチャ](docs/rules/architecture.md) / [動かす](docs/rules/running.md) / [規約の変更](docs/rules/amendment.md) |
+| **QA** | [QA](docs/rules/qa.md) / [アーキテクチャ](docs/rules/architecture.md) / [手元での実行](docs/rules/running.md) / [規約の変更](docs/rules/amendment.md) |
 
 **レビューだけ絞らない。** 判断が割れたときに引く役なので、全部を引く。
 
