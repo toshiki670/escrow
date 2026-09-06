@@ -215,5 +215,3 @@ cargo test --workspace --doc      # nextest は doctest を実行しない
 ```
 
 SQL を変えたら `.sqlx/` を取り直す。手順は `.cargo/config.toml` の先頭にある。
-
-<!-- 守りを破る検証。直後に消す。 -->
