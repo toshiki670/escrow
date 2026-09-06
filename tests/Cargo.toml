@@ -8,7 +8,7 @@ repository.workspace = true
 publish = false
 autotests = false
 
-# ワークスペース全体にかかる守り。escrow の crate を1つも依存に持たず、読むのは
+# ワークスペース全体にかかるテスト。escrow の crate を1つも依存に持たず、読むのは
 # `Cargo.toml` とソース、そして規約のファイルだけ。
 [lib]
 name = "escrow_tests"
