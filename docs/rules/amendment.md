@@ -2,6 +2,8 @@
 
 [escrow 規約](../../CONTRIBUTING.md) の一部。
 
+## 変える前に踏む手順
+
 **提案として出し、合意を得てから書く**（RFC プロセス — [IETF RFC 2026](https://www.rfc-editor.org/rfc/rfc2026.html) / Rust RFC）。
 
 1. **規約の中で実現する案を使い切る。** 置き場所の候補を並べ、却下したものは規約のどの行に

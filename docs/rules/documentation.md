@@ -36,7 +36,7 @@
 |---|---|---|
 | コメントは **why**、コードが **how** | コードを読めば分かることを日本語にしている | McConnell, *Code Complete* 32章「As you're about to add a comment, ask yourself, 'How can I improve the code so that this comment isn't needed?'」 |
 | 補足が増えたら、まず設計を疑う | 置き場所・構造・名前で解けるものを日本語で補っている | escrow |
-| 次にここを触る人が間違えることだけ残す | レビューや相談で説明のために作った比較・言い換え・経緯が残っている | escrow |
+| 次にここを触る人が間違えることだけ残す（「[記録の置き場所](records.md)」） | レビューや相談で説明のために作った比較・言い換え・経緯が残っている | escrow |
 
 ```rust
 // 良い — その形にした理由
