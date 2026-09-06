@@ -25,6 +25,8 @@ jobs:
   rules-untouched:
     name: doc/docs 以外の PR は規約ファイルを変えない
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
     steps:
       - env:
           TITLE: ${{ github.event.pull_request.title }}
@@ -32,18 +34,27 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          type=$(printf '%s' "$TITLE" | sed -E 's/^([a-z]+).*/\1/')
+          # type は上のジョブと同じ正規表現から取る。緩い取り方だと、`doc thing` の
+          # ように Conventional Commits でないタイトルから doc を拾えてしまう。
+          # 形に合わなければ空になり、doc/docs 以外として検査へ回る。
+          type=$(printf '%s' "$TITLE" | sed -nE 's/^([a-z]+)(\([^)]+\))?!?: .+/\1/p')
           if [ "$type" = doc ] || [ "$type" = docs ]; then
             echo "type=$type なので規約ファイルを変えてよい"
             exit 0
           fi
 
-          touched=$(gh pr diff "$PR" --name-only \
+          # gh の失敗を「触れていない」と取り違えると、守りが合格の側へ倒れる。
+          if ! changed=$(gh pr diff "$PR" --name-only); then
+            echo "gh pr diff が失敗しました。差分を確かめられないので落とします。" >&2
+            exit 1
+          fi
+
+          touched=$(printf '%s\n' "$changed" \
             | grep -E '^(CONTRIBUTING\.md|CLAUDE\.md|docs/rules/.*\.md)$' || true)
 
           if [ -n "$touched" ]; then
-            echo "type=$type の PR が規約ファイルを変えています:" >&2
-            printf '  %s\n' $touched >&2
+            echo "type=${type:-（Conventional Commits の形ではない）} の PR が規約ファイルを変えています:" >&2
+            printf '%s\n' "$touched" | sed 's/^/  /' >&2
             echo "規約を変える差分は type を doc / docs にして分けてください（docs/rules/amendment.md）。" >&2
             exit 1
           fi
