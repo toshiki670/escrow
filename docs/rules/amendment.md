@@ -42,5 +42,6 @@
 | 規則を置く前に**名宛人**を見る。その業務の実施者が取る行動なら業務のファイルへ、規約を書く人が取る行動なら**このファイル**へ | primary rules / secondary rules（[Hart, *The Concept of Law*](https://global.oup.com/academic/product/the-concept-of-law-9780199644704), 1961） |
 | 規則は主題ごとに1ファイルへ置き、業務は `CONTRIBUTING.md` の索引で絞る。業務ごとに規則を割ると、複数の業務が読むものが写しになる | [Information Hiding](https://dl.acm.org/doi/10.1145/361598.361623)（Parnas, 1972） |
 | 規則の本文は、規約のファイル群だけで読める形にする | escrow |
+| 規約ファイルを足したら、`CONTRIBUTING.md` の索引へ載せる。載っていないファイルは、どの業務も読まない | escrow |
 | 正本が規約の外にあるものは、規約へ写さず正本を指す | DRY（「[記録の置き場所](records.md)」） |
 | **「これは破れない」と規約へ書く前に、破るコードを書いて落ちることを見る。** 落ちなければ、主張のほうを実態に合わせて狭める | escrow |
