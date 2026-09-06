@@ -16,4 +16,3 @@
 | 決定には理由を添える。理由が無いと、次の人は盲目的に受け入れるか盲目的に変えるかしかできない | [ADR](https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions)（Nygard, 2011） |
 
 escrow は ADR をファイルで持たず、閉じた Issue がその役をする。
-
