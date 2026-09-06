@@ -1,0 +1,50 @@
+# 規約の守り。何を守っているかは docs/rules/amendment.md の「差分を分ける」。
+name: Rules
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+jobs:
+  pr-title:
+    name: PR タイトルが Conventional Commits に従う
+    runs-on: ubuntu-latest
+    steps:
+      # タイトルは外から来るので、展開せず環境変数で渡す。
+      - env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          if printf '%s' "$TITLE" | grep -Eq '^[a-z]+(\([^)]+\))?!?: .+'; then
+            echo "OK: $TITLE"
+          else
+            echo "PR タイトルが Conventional Commits の形ではありません: $TITLE" >&2
+            echo "形: <type>(<scope>)!: <description>  例: docs: 規約を分ける" >&2
+            exit 1
+          fi
+
+  rules-untouched:
+    name: doc/docs 以外の PR は規約ファイルを変えない
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          TITLE: ${{ github.event.pull_request.title }}
+          PR: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          type=$(printf '%s' "$TITLE" | sed -E 's/^([a-z]+).*/\1/')
+          if [ "$type" = doc ] || [ "$type" = docs ]; then
+            echo "type=$type なので規約ファイルを変えてよい"
+            exit 0
+          fi
+
+          touched=$(gh pr diff "$PR" --name-only \
+            | grep -E '^(CONTRIBUTING\.md|CLAUDE\.md|docs/rules/.*\.md)$' || true)
+
+          if [ -n "$touched" ]; then
+            echo "type=$type の PR が規約ファイルを変えています:" >&2
+            printf '  %s\n' $touched >&2
+            echo "規約を変える差分は type を doc / docs にして分けてください（docs/rules/amendment.md）。" >&2
+            exit 1
+          fi
+          echo "OK: 規約ファイルに触れていません"
