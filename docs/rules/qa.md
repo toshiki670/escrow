@@ -2,8 +2,9 @@
 
 [escrow 規約](../../CONTRIBUTING.md) の一部。
 
-**守らせたい約束は、破ったときに落ちる形へ持っていく。** 規約に「Xをするな」と書くだけなら
-訓練であり、訓練は劣化する（[Poka-yoke](https://en.wikipedia.org/wiki/Poka-yoke)、新郷重夫）。
+**守り**は、規約の約束を破ったときに落ちる仕組み。**守らせたい約束は、この形へ持っていく。**
+規約に「Xをするな」と書くだけなら訓練であり、訓練は劣化する
+（[Poka-yoke](https://en.wikipedia.org/wiki/Poka-yoke)、新郷重夫）。
 
 **ワークスペース全体にかかるものは `tests/` に置く。** member の一覧を `Cargo.toml` から
 読むので、crate をどこへ置いても届く。1つの crate に閉じたものは、その crate の `tests/` へ。
