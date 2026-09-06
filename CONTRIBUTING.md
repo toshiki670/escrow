@@ -9,17 +9,17 @@
 
 ## 業務と、読むファイル
 
+**業務ごとに、その行のファイルを全部読む。**
+
 | 業務 | 読むファイル |
 |---|---|
+| **全業務** | このファイル（下の「検査の3層」） |
 | **設計** | [記録の置き場所](docs/rules/records.md) / [設計](docs/rules/design.md) / [アーキテクチャ](docs/rules/architecture.md) / [ドキュメント](docs/rules/documentation.md) / [規約の変更](docs/rules/amendment.md) |
 | **実装** | [記録の置き場所](docs/rules/records.md) / [アーキテクチャ](docs/rules/architecture.md) / [実装](docs/rules/construction.md) / [ドキュメント](docs/rules/documentation.md) / [手元での実行](docs/rules/running.md) / [規約の変更](docs/rules/amendment.md) |
 | **レビュー** | **全部** |
 | **QA** | [QA](docs/rules/qa.md) / [アーキテクチャ](docs/rules/architecture.md) / [手元での実行](docs/rules/running.md) / [規約の変更](docs/rules/amendment.md) |
 
 **レビューだけ絞らない。** 判断が割れたときに引く役なので、全部を引く。
-
-**このファイルも全業務が読む** — 下の「検査の3層」はここにしかない。業務名と同じ名前の
-ファイルがあるが、読むのはその行のファイル全部。
 
 ---
 
@@ -28,7 +28,7 @@
 | 層 | 中身 | 破ったとき |
 |---|---|---|
 | 一般的な品質検査 | `cargo fmt` / `cargo clippy -D warnings` / `cargo nextest` / `cargo test --doc` | CI が落ちる |
-| **規約固有の守り** | 規約の一部を機械で見る（「[QA](docs/rules/qa.md)」） | CI が落ちる |
+| **規約固有の守り** | 規約の一部を機械で見る。作り方は「[QA](docs/rules/qa.md)」 | CI が落ちる |
 | 手動レビュー | 上の2層で見られない規則すべて | レビューで指摘する |
 
 **規約の大半は3層目。** 機械で見ているのは規約のごく一部で、何をどう見ているかは守り自身が
