@@ -50,7 +50,7 @@ jobs:
           fi
 
           touched=$(printf '%s\n' "$changed" \
-            | grep -E '^(CONTRIBUTING\.md|CLAUDE\.md|docs/rules/.*\.md)$' || true)
+            | grep -E '^(CONTRIBUTING\.md|docs/rules/.*\.md)$' || true)
 
           if [ -n "$touched" ]; then
             echo "type=${type:-（Conventional Commits の形ではない）} の PR が規約ファイルを変えています:" >&2
