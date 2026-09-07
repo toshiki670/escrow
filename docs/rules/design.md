@@ -10,9 +10,26 @@
 | 規則 | 出典 |
 |---|---|
 | 層で切らない。水平分割は1つの層だけを変えるので、**他の層と組み合わせるまで利用者に見える価値がない** | [Vertical / Horizontal Slicing](https://www.visual-paradigm.com/scrum/user-story-splitting-vertical-slice-vs-horizontal-slice/)。「[アーキテクチャ](architecture.md)」の Vertical Slice を Issue の分け方へ当てたもの |
-| 最初の1本は端から端まで細く通す。最終のアーキテクチャでなくてよいが、主要な部品を繋ぐ | [Walking Skeleton](https://www.oreilly.com/library/view/97-things-every/9780596800611/ch60.html)（Cockburn） |
-| 完成したものが、実際の利用者の必要を満たす | [INVEST](https://en.wikipedia.org/wiki/INVEST_(mnemonic)) の **V**（Wake, 2003） |
+| 最初の1本は端から端まで細く通す。最終のアーキテクチャでなくてよいが、主要な部品を繋ぐ | Walking Skeleton（[Cockburn, *Crystal Clear*, 2004](https://books.google.com/books/about/Crystal_Clear.html?id=O_cMM5ztyMIC)） |
+| **骨は1本目で完成しない。** 骨を組み直す差分は、利用者に見える価値を1つ増やす Issue の中に置く。骨だけを直す Issue を立てない | Incremental Rearchitecture（同上）。Walking Skeleton の対で、開発を止めて骨を直すのではなく、動かしたまま段階的に組み直す |
 | 1つの Issue が別々の理由で書き換わるようになったら分ける。分けるかどうかは、設計中に内容を見て判断する | [Divergent Change](https://refactoring.guru/refactoring/smells)（Fowler, *Refactoring*） |
+
+**骨の行は、機能を作る Issue に掛かる。** 依存 crate の破壊的変更への追随・toolchain の更新・
+規約の改修そのものは、利用者に見える価値を増やさなくてよい。
+
+### INVEST
+
+**Issue が切れているかは6つで見る**（[INVEST](https://en.wikipedia.org/wiki/INVEST_(mnemonic))、Wake, 2003）。
+原則そのものは出典を見る。ここは escrow での読み方だけを置く索引。
+
+| 文字 | escrow での読み方 |
+|---|---|
+| **I**ndependent | 受け入れを、閉じた Issue の成果だけで確かめられる。確かめられないものは「前提」へ書き出す |
+| **N**egotiable | 本文は契約ではなく、発注側と受注側が詰める場。詰め方は下の「起票と合意」 |
+| **V**aluable | 完成したものが、実際の利用者の必要を満たす |
+| **E**stimable | 着手する前に、何を作れば閉じるかが本文から読める |
+| **S**mall | 「作るもの」は、「受け入れ」を成立させる分に収まる |
+| **T**estable | 本文だけで、閉じた判定ができる。「受け入れ」を持つ |
 
 ## 起票と合意
 
