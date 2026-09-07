@@ -10,12 +10,19 @@
 | 規則 | 出典 |
 |---|---|
 | 層で切らない。水平分割は1つの層だけを変えるので、**他の層と組み合わせるまで利用者に見える価値がない** | [Vertical / Horizontal Slicing](https://www.visual-paradigm.com/scrum/user-story-splitting-vertical-slice-vs-horizontal-slice/)。「[アーキテクチャ](architecture.md)」の Vertical Slice を Issue の分け方へ当てたもの |
-| 最初の1本は端から端まで細く通す。最終のアーキテクチャでなくてよいが、主要な部品を繋ぐ | Walking Skeleton（[Cockburn, *Crystal Clear*, 2004](https://books.google.com/books/about/Crystal_Clear.html?id=O_cMM5ztyMIC)） |
-| **アーキテクチャは1本目で決まらない。** アーキテクチャを組み直す差分は、利用者に見える価値を1つ増やす Issue の中に置く。アーキテクチャだけを直す Issue を立てない | Incremental Rearchitecture（同上）。Walking Skeleton の対で、開発を止めて直すのではなく、動かしたまま段階的に組み直す |
+| 最初の1本は端から端まで細く通す。最終のアーキテクチャでなくてよいが、主要な部品を繋ぐ | [Walking Skeleton](https://web.archive.org/web/20170214035145/http://alistair.cockburn.us/Walking+skeleton)（Cockburn, *Crystal Clear*, 2004） |
+| **アーキテクチャの組み直しで、価値が増えるのを止めない。** 組み直しは段階に分け、その間も利用者に見える価値が増え続ける | [Incremental Rearchitecture](https://web.archive.org/web/20170629015916/http://alistair.cockburn.us/Incremental+Rearchitecture)（同上）。Walking Skeleton の対 |
 | 1つの Issue が別々の理由で書き換わるようになったら分ける。分けるかどうかは、設計中に内容を見て判断する | [Divergent Change](https://refactoring.guru/refactoring/smells)（Fowler, *Refactoring*） |
 
-**アーキテクチャの行は、機能を作る Issue に掛かる。** 依存 crate の破壊的変更への追随・toolchain の更新・
-規約の改修そのものは、利用者に見える価値を増やさなくてよい。
+### Issue 本文の節
+
+| 節 | 中身 |
+|---|---|
+| 前提 | 着手する前に閉じている Issue。無ければ「無し」と書く |
+| 作るもの | この Issue で作るもの |
+| 決めること | 閉じるまでに決める未決 |
+| 受け入れ | 閉じた判定。目視か実行で確かめられる形で書く |
+| 関連 | 経緯が読める Issue |
 
 ### INVEST
 
@@ -24,12 +31,12 @@
 
 | 文字 | escrow での読み方 |
 |---|---|
-| **I**（Independent） | 受け入れを、閉じた Issue の成果だけで確かめられる。確かめられないものは「前提」へ書き出す |
-| **N**（Negotiable） | 本文は契約ではなく、発注側と受注側が詰める場。詰め方は下の「起票と合意」 |
+| **I**（Independent） | 「受け入れ」の確認に要る Issue を「前提」へ書き、**前提が閉じてから着手する** |
+| **N**（Negotiable） | 下の「起票と合意」が果たす |
 | **V**（Valuable） | 完成したものが、実際の利用者の必要を満たす |
-| **E**（Estimable） | 着手する前に、何を作れば閉じるかが本文から読める |
-| **S**（Small） | 「作るもの」は、「受け入れ」を成立させる分に収まる |
-| **T**（Testable） | 本文だけで、閉じた判定ができる。「受け入れ」を持つ |
+| **E**（Estimable） | 「作るもの」を書き切れる。書けない部分は「決めること」へ出す |
+| **S**（Small） | 「作るもの」が、閉じた Issue の成果への追加に収まる。何も無いところから複数の部品を同時に立ち上げるなら分ける |
+| **T**（Testable） | 「受け入れ」の各行を、目視か実行で確かめられる |
 
 ## 起票と合意
 
