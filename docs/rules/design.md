@@ -11,14 +11,16 @@
 |---|---|
 | 層で切らない。水平分割は1つの層だけを変えるので、**他の層と組み合わせるまで利用者に見える価値がない** | [Vertical / Horizontal Slicing](https://www.visual-paradigm.com/scrum/user-story-splitting-vertical-slice-vs-horizontal-slice/)。「[アーキテクチャ](architecture.md)」の Vertical Slice を Issue の分け方へ当てたもの |
 | 最初の1本は端から端まで細く通す。最終のアーキテクチャでなくてよいが、主要な部品を繋ぐ | [Walking Skeleton](https://web.archive.org/web/20170214035145/http://alistair.cockburn.us/Walking+skeleton)（Cockburn, *Crystal Clear*, 2004） |
-| **アーキテクチャの組み直しで、価値が増えるのを止めない。** 組み直しは段階に分け、その間も利用者に見える価値が増え続ける | [Incremental Rearchitecture](https://web.archive.org/web/20170629015916/http://alistair.cockburn.us/Incremental+Rearchitecture)（同上）。Walking Skeleton の対 |
+| **アーキテクチャの組み直しで、価値が増えるのを止めない。** 組み直しは段階に分け、その間も利用者に見える価値が増え続ける | [Incremental Rearchitecture](https://web.archive.org/web/20170629015916/http://alistair.cockburn.us/Incremental+Rearchitecture)（同上）。Walking Skeleton の対。原文の「開発を止めない」を Vertical Slice の語彙へ当てたもの（escrow） |
 | 1つの Issue が別々の理由で書き換わるようになったら分ける。分けるかどうかは、設計中に内容を見て判断する | [Divergent Change](https://refactoring.guru/refactoring/smells)（Fowler, *Refactoring*） |
 
 ### Issue 本文の節
 
+**中身が無い節は置かない。**「前提」だけは、無ければ「無し」と書く。
+
 | 節 | 中身 |
 |---|---|
-| 前提 | 着手する前に閉じている Issue。無ければ「無し」と書く |
+| 前提 | 着手する前に閉じている Issue |
 | 作るもの | この Issue で作るもの |
 | 決めること | 閉じるまでに決める未決 |
 | 受け入れ | 閉じた判定。目視か実行で確かめられる形で書く |
@@ -31,12 +33,12 @@
 
 | 文字 | escrow での読み方 |
 |---|---|
-| **I**（Independent） | 「受け入れ」の確認に要る Issue を「前提」へ書き、**前提が閉じてから着手する** |
+| **I**（Independent） | 「受け入れ」の確認に要る Issue が、上の「前提」に在る |
 | **N**（Negotiable） | 下の「起票と合意」が果たす |
 | **V**（Valuable） | 完成したものが、実際の利用者の必要を満たす |
 | **E**（Estimable） | 「作るもの」を書き切れる。書けない部分は「決めること」へ出す |
-| **S**（Small） | 「作るもの」が、閉じた Issue の成果への追加に収まる。何も無いところから複数の部品を同時に立ち上げるなら分ける |
-| **T**（Testable） | 「受け入れ」の各行を、目視か実行で確かめられる |
+| **S**（Small） | **いま「受け入れ」を確かめる分だけ作る。** 最終の形まで作り込むなら、要らない分を次の Issue へ送る |
+| **T**（Testable） | 上の「受け入れ」が果たす |
 
 ## 起票と合意
 
