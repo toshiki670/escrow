@@ -15,10 +15,10 @@
 | 業務 | 読むファイル |
 |---|---|
 | **全業務** | このファイル（下の「検査の3層」） |
-| **設計** | [記録の置き場所](docs/rules/records.md) / [設計](docs/rules/design.md) / [アーキテクチャ](docs/rules/architecture.md) / [ドキュメント](docs/rules/documentation.md) / [規約の変更](docs/rules/amendment.md) |
-| **実装** | [記録の置き場所](docs/rules/records.md) / [アーキテクチャ](docs/rules/architecture.md) / [実装](docs/rules/construction.md) / [ドキュメント](docs/rules/documentation.md) / [手元での実行](docs/rules/running.md) / [規約の変更](docs/rules/amendment.md) |
+| **設計** | [記録の置き場所](docs/rules/records.md) / [設計](docs/rules/design.md) / [アーキテクチャ](docs/rules/architecture.md) / [ドキュメント](docs/rules/documentation.md) / [規約の変更](docs/rules/amendment.md) / [レビュー](docs/rules/review.md) |
+| **実装** | [記録の置き場所](docs/rules/records.md) / [アーキテクチャ](docs/rules/architecture.md) / [実装](docs/rules/construction.md) / [ドキュメント](docs/rules/documentation.md) / [手元での実行](docs/rules/running.md) / [規約の変更](docs/rules/amendment.md) / [レビュー](docs/rules/review.md) |
 | **レビュー** | **全部** |
-| **QA** | [記録の置き場所](docs/rules/records.md) / [QA](docs/rules/qa.md) / [アーキテクチャ](docs/rules/architecture.md) / [ドキュメント](docs/rules/documentation.md) / [手元での実行](docs/rules/running.md) / [規約の変更](docs/rules/amendment.md) |
+| **QA** | [記録の置き場所](docs/rules/records.md) / [QA](docs/rules/qa.md) / [アーキテクチャ](docs/rules/architecture.md) / [ドキュメント](docs/rules/documentation.md) / [手元での実行](docs/rules/running.md) / [規約の変更](docs/rules/amendment.md) / [レビュー](docs/rules/review.md) |
 
 **レビューだけ絞らない。** 判断が割れたときに引く役なので、全部を引く。
 
@@ -30,6 +30,6 @@
 |---|---|---|
 | 一般的な品質検査 | `cargo fmt` / `cargo clippy -D warnings` / `cargo nextest` / `cargo test --doc` | CI が落ちる |
 | **規約固有の守り** | 規約の一部を機械で見る。作り方は「[QA](docs/rules/qa.md)」 | CI が落ちる |
-| 手動レビュー | 上の2層で見られない規則すべて | レビューで指摘する |
+| 手動レビュー | 上の2層で見られない規則すべて | レビューで指摘する（「[レビュー](docs/rules/review.md)」） |
 
 **規約の大半は3層目。** 機械で見ているのは規約のごく一部で、残りは人が読んで判断する。
