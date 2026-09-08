@@ -4,9 +4,9 @@
 
 | 軸 | 採るもの | 出典 |
 |---|---|---|
-| コードの分け方 | **Vertical Slice** — 技術ではなくライフサイクルの段階で切る | [Bogard, 2018](https://www.jimmybogard.com/vertical-slice-architecture/)「Minimize coupling between slices, and maximize coupling in a slice.」 |
+| コードの分け方 | **Vertical Slice** — 技術ではなくライフサイクルの段階で切る | [Bogard, 2018](https://www.jimmybogard.com/vertical-slice-architecture/)「Minimize coupling between slices, and maximize coupling in a slice.」「In this style, my architecture is built around distinct **requests**」。**原文が単位に置くのは request。escrow は順序を状態機械が持つので、ライフサイクルの段階を単位にした（escrow）** |
 | 状態の持ち方 | **Event Sourcing** — 状態ではなく、状態を変えた事象を保存する | [Fowler, 2005](https://martinfowler.com/eaaDev/EventSourcing.html)「Capture all changes to an application state as a sequence of events.」 |
-| 読み書きの分け方 | **CQRS** — 書くのは事象、読むのは投影 | [Young / Fowler, 2011](https://martinfowler.com/bliki/CQRS.html)「you can use a different model to update information than the model you use to read information」 |
+| 読み書きの分け方 | **CQRS** — 書くのは事象、読むのは投影 | [Young / Fowler, 2011](https://martinfowler.com/bliki/CQRS.html)「split that conceptual model into separate models for update and display, which it refers to as **Command** and **Query** respectively」。**escrow は Command の model を上の Event Sourcing の "events"（事象）で、Query の model を投影で置いた。投影は escrow の語（escrow）** |
 
 段は5つ。**役割で決まる**ので、crate の名前が変わっても動かない。
 

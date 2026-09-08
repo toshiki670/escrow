@@ -12,7 +12,7 @@
 | 層で切らない。水平分割は1つの層だけを変えるので、**他の層と組み合わせるまで利用者に見える価値がない** | [Vertical / Horizontal Slicing](https://www.visual-paradigm.com/scrum/user-story-splitting-vertical-slice-vs-horizontal-slice/)。「[アーキテクチャ](architecture.md)」の Vertical Slice を Issue の分け方へ当てたもの |
 | 最初の1本は端から端まで細く通す。最終のアーキテクチャでなくてよいが、主要な部品を繋ぐ | [Walking Skeleton](https://web.archive.org/web/20170214035145/http://alistair.cockburn.us/Walking+skeleton)（Cockburn, *Crystal Clear*, 2004） |
 | **アーキテクチャの組み直しで、価値が増えるのを止めない。** 組み直しは段階に分け、その間も利用者に見える価値が増え続ける | [Incremental Rearchitecture](https://web.archive.org/web/20170629015916/http://alistair.cockburn.us/Incremental+Rearchitecture)（同上）。Walking Skeleton の対。原文の「開発を止めない」を Vertical Slice の語彙へ当てたもの（escrow） |
-| 1つの Issue が別々の理由で書き換わるようになったら分ける。分けるかどうかは、設計中に内容を見て判断する | [Divergent Change](https://refactoring.guru/refactoring/smells)（Fowler, *Refactoring*） |
+| 1つの Issue が別々の理由で書き換わるようになったら分ける。分けるかどうかは、設計中に内容を見て判断する | [Divergent Change](https://refactoring.guru/smells/divergent-change)（refactoring.guru）「Divergent Change is when many changes are made to a single **class**」。**原文の単位は class。Issue の分け方へ当てたもの（escrow）** |
 
 ### Issue 本文の節
 

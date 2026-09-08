@@ -14,9 +14,9 @@
 ## マクロを禁じる
 
 **`macro_rules!` はワークスペース全体で禁じている**（`tests/` が守っている）。`derive`・generics・trait で書ける形を
-採る。**目的に足りる範囲で最も弱い道具を選ぶ**という
-[Rule of Least Power](https://www.w3.org/2001/tag/doc/leastPower.html)（W3C TAG, 2006）の
-適用で、弱い道具ほど外から中身を読み解ける。
+採る。**目的に足りる範囲で最も弱い language を選ぶ**という
+[Rule of Least Power](https://www.w3.org/2001/tag/doc/leastPower.html)（W3C TAG, 2006）を
+Rust の道具立てへ当てたもので（escrow）、弱い language ほど外から中身を読み解ける。
 
 本当に要るものが出てきたときの道は2つ。
 
