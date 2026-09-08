@@ -24,6 +24,6 @@
 
 | 規則 | 出典 |
 |---|---|
-| 既定は2周 — レビューと、直しを確かめる周 | Fagan の Rework と Follow-up（同上） |
+| 既定は2周 — レビューと、直しを確かめる周 | 同上。Fagan の **Inspection meeting** が1周目、**Follow-up** が2周目に当たる。**原典の Rework は author が直す段で、周に数えない。inspection の会議が無いので、Inspection meeting をレビューの業務へ当てた（escrow）** |
 | 3周目に入るのは、指摘を受けて**規則や決定の本文が変わったとき**だけ。字句や PR 本文だけの直しでは回さない | 同上「In non-trivial cases, a full re-inspection is performed by the inspection team (not only the moderator)」 |
 | **3周を越えたら、レビューを続けずに発注側へ返す。** 出すか、設計へ戻すかを決めるのは発注側 | escrow |
