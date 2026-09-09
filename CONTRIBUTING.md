@@ -8,13 +8,21 @@
 
 **Issue は経緯の保存先。** 規則の意味をそこから補わない。
 
+## 決める人
+
+発注側と受注側の定めは「[設計](docs/rules/design.md)」の「起票と合意」。
+
+| 規則 | 出典 |
+|---|---|
+| **判断を発注側へ返すのは3つの場合だけ** —— 規約・出典・既に決めたことのどれもその問いに当たらない／当たる行が「発注側が決める」と定めている／**既に決まっていることを変えようとしている**（「[規約の変更](docs/rules/amendment.md)」の手順、「[設計](docs/rules/design.md)」の「要件を足すときは、書き換える前に合意を取る」）。それ以外は受注側が決め、当たる行を示す | [Subsidiarity](https://en.wikipedia.org/wiki/Subsidiarity)（Oxford English Dictionary の定義と Article 5(3) TEU の本文を、このページから採った）「a central authority should have a subsidiary function, performing only those tasks which cannot be performed at a more local level」「Under the principle of subsidiarity, **in areas which do not fall within its exclusive competence**, the Union shall act only if…」（`its` は the Union ＝ central authority）。**原文が置くのは能力の有無（cannot be performed）と、それを上書きする留保領域（exclusive competence）。escrow は前者を「誰が決めると定めているか」へ、後者を2つ目の場合へ当て、central authority を発注側、more local level を受注側へ当てた。3つ目の場合は escrow の判断（escrow）** |
+
 ## 業務と、読むファイル
 
 **業務ごとに、その行のファイルを全部読む。**
 
 | 業務 | 読むファイル |
 |---|---|
-| **全業務** | このファイル（下の「検査の3層」） |
+| **全業務** | このファイル（上の「決める人」と下の「検査の3層」） |
 | **設計** | [記録の置き場所](docs/rules/records.md) / [設計](docs/rules/design.md) / [アーキテクチャ](docs/rules/architecture.md) / [ドキュメント](docs/rules/documentation.md) / [規約の変更](docs/rules/amendment.md) / [レビュー](docs/rules/review.md) |
 | **実装** | [記録の置き場所](docs/rules/records.md) / [アーキテクチャ](docs/rules/architecture.md) / [実装](docs/rules/construction.md) / [ドキュメント](docs/rules/documentation.md) / [手元での実行](docs/rules/running.md) / [規約の変更](docs/rules/amendment.md) / [レビュー](docs/rules/review.md) |
 | **レビュー** | **全部** |
