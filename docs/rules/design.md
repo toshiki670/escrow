@@ -36,7 +36,7 @@
 | **user-goal（"blue"）** | customer（原文は primary actor）が1つの仕事を片づけ、そこで手を止められる高さ |
 | subfunction（"indigo" / "black"） | 要るときだけ書く。**"black" は、これ以上展開せず上位の Issue へ畳む印** |
 
-出典は [Goal Levels](https://people.inf.elte.hu/molnarba/Informaciorendszerek_ELTE/Writing_effective_Use_cases_Cockburn.pdf)（Cockburn, *Writing Effective Use Cases*、1999年の草稿 p.46-52。刊行は 2001年）。
+出典は [Goal Levels](https://people.inf.elte.hu/molnarba/Informaciorendszerek_ELTE/Writing_effective_Use_cases_Cockburn.pdf)（Cockburn, *Writing Effective Use Cases*、1999年の草稿 p.46-51。刊行は 2001年）。
 
 **段は語ではなく、片づく仕事で決まる**（同上 p.51「Every sentence will be written as a goal, and every goal could be unfolded into its own use case. We cannot tell by looking at the writing which sentences have been unfolded into separate use cases, and which have not」、p.50「Both are blue goals at different times」）。原文が indigo の例に挙げる "Find a product" / "Find a Customer" のような形でも、**escrow の customer がそれで1つの仕事を片づけるなら "blue" に置く（escrow）。**
 
