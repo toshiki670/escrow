@@ -64,5 +64,5 @@
 | 肯定形で書く | 「〜できない」「〜しない」で始まる説明がある。「作る道は2つ」と言い換えられる | 同上（能動態の系） |
 | 根拠を仕様に置く | 根拠が依存 crate の API 名や、いまの実装の形になっている（「`sqlx` がこう返すから」） | escrow |
 | 推測は結論と同じ段落に置く | 「たぶん」が別の段落にあり、結論だけ読むと確定に見える | escrow |
-| **規約を指すときは、ファイル名と、節が在れば節名、無ければ引用文で指す** | **いまの**規約を行番号で指している。**過去の観測は、それを過去にした変更を名指しする**（「#53 が持っていた `design.md:48`」「#48 のマージ前は」） | [Cool URIs don't change](https://www.w3.org/Provider/Style/URI)（Berners-Lee, W3C, 1998）「**URIs change when there is some information in them which changes**」。**原文が扱うのは URI。escrow は規約の中の行を指す参照へ当てた（escrow）** |
+| **規約を指すときは、ファイル名と、節が在れば節名、無ければ引用文で指す** | **いまの**規約を行番号で指している。**過去の観測は、いつの時点かを名指しする** —— その位置を過去にした変更か、その参照を持っていた成果物 | [Cool URIs don't change](https://www.w3.org/Provider/Style/URI)（Berners-Lee, W3C, 1998）「**URIs change when there is some information in them which changes**」。**原文が扱うのは URI。escrow は規約の中の行を指す参照へ当てた（escrow）** |
 | 型で締めなかった所は、そう書く | 緩い型に理由が無い。**「決めて緩めた」と「締め忘れた」が区別できなくなる** | escrow |
