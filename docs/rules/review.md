@@ -23,6 +23,7 @@
 
 | 規則 | 出典 |
 |---|---|
+| **周は成果物ごとに数える。** 進むのは、その周で**渡した**成果物の側（上の「渡すものと、回す契機」が定める、**出した側が渡す**行為）。**読んだだけの成果物の数は進まない。** 通算では数えない。**満たすべきものが変わっても数え直さない** | [Fagan inspection](https://en.wikipedia.org/wiki/Fagan_inspection)（Criteria と Typical operations は Fagan, *Advances in Software Inspections*, 1986）「The exit criteria are specified in a high-level document, which is then used as the standard to which the operation result (**low-level document**) is compared during the inspection」「the **low-level document** is corrected until the requirements in the high-level document are met」「If verification fails, go back to the rework process」（**Follow-up 節にページは出典を付けていない**）。**原文の low-level document を escrow の成果物へ、high-level document をその成果物が満たすべきもの（Issue 本文なら発注側の指示と規約、PR なら Issue 本文と規約、守りなら規約）へ当てた（escrow）** |
 | 既定は2周 — レビューと、直しを確かめる周 | [Fagan inspection](https://en.wikipedia.org/wiki/Fagan_inspection)（段階は Fagan, *Advances in Software Inspections*, 1986）。**Preparation と Inspection meeting が1周目、Follow-up が2周目に当たる。escrow のレビューは1回の読みで、材料を読むこと（Preparation）と欠陥を挙げること（Inspection meeting）を両方行うので2段を1周へまとめ、原典で Follow-up を確かめる moderator の役をレビューの業務へ当てた（escrow）。** 原典の Rework は author が直す段で、周に数えない |
 | 3周目に入るのは、指摘を受けて**規則や決定の本文が変わったとき**だけ。字句や PR 本文だけの直しでは回さない | 同上の Follow-up 節「In non-trivial cases, a full re-inspection is performed by the inspection team (not only the moderator)」。**ページはこの一文に出典を付けていない。** 原典の "non-trivial" を「規則や決定の本文が変わったとき」と定め、再検査を行う inspection team の役をレビューの業務へ当てた（escrow） |
 | **3周を越えたら、レビューを続けずに発注側へ返す。** 出すか、設計へ戻すかを決めるのは発注側 | escrow |
