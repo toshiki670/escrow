@@ -42,8 +42,11 @@ pub struct Ready {
 }
 
 /// `Person` を選んだときのメイン。
+///
+/// ダッシュボードと設定を選んでも、直前に読んだ中身がそのまま残る。そちらは
+/// 一覧を出さないので画面には現れない。
 pub enum Listing {
-    /// 読んでいる最中。`Person` 以外を選んでいる間もここに居る。
+    /// 読んでいる最中。台帳を開いた直後もここから始まる。
     Loading,
     Loaded(Vec<Listed>),
     Failed(String),
