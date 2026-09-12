@@ -14,7 +14,7 @@
 
 | 規則 | 出典 |
 |---|---|
-| **判断を発注側へ返すのは3つの場合だけ** —— 規約・出典・既に決めたことのどれもその問いに当たらない／当たる行が「発注側が決める」と定めている／**既に決まっていることを変えようとしている**（「[規約の変更](docs/rules/amendment.md)」の手順、「[設計](docs/rules/design.md)」の「要件を足すときは、書き換える前に合意を取る」）。それ以外は受注側が決め、当たる行を示す | [Subsidiarity](https://en.wikipedia.org/wiki/Subsidiarity)（Oxford English Dictionary の定義と Article 5(3) TEU の本文を、このページから採った）「a central authority should have a subsidiary function, performing only those tasks which cannot be performed at a more local level」「Under the principle of subsidiarity, **in areas which do not fall within its exclusive competence**, the Union shall act only if…」（`its` は the Union ＝ central authority）。**原文が置くのは能力の有無（cannot be performed）と、それを上書きする留保領域（exclusive competence）。escrow は前者を「誰が決めると定めているか」へ、後者を2つ目の場合へ当て、central authority を発注側、more local level を受注側へ当てた。3つ目の場合は escrow の判断（escrow）** |
+| **判断を発注側へ返すのは次の場合だけ** —— 規約・出典・既に決めたことのどれもその問いに当たらない／当たる行が「発注側が決める」と定めている／**既に決まっていることを変えようとしている**（「[規約の変更](docs/rules/amendment.md)」の手順、「[設計](docs/rules/design.md)」の「要件を足すときは、書き換える前に合意を取る」）。それ以外は受注側が決め、当たる行を示す | [Subsidiarity](https://en.wikipedia.org/wiki/Subsidiarity)（Oxford English Dictionary の定義と Article 5(3) TEU の本文を、このページから採った）「a central authority should have a subsidiary function, performing only those tasks which cannot be performed at a more local level」「Under the principle of subsidiarity, **in areas which do not fall within its exclusive competence**, the Union shall act only if…」（`its` は the Union ＝ central authority）。**原文が置くのは能力の有無（cannot be performed）と、それを上書きする留保領域（exclusive competence）。escrow は前者を「誰が決めると定めているか」へ、後者を、当たる行が「発注側が決める」と定めている場合へ当て、central authority を発注側、more local level を受注側へ当てた。既に決まっていることを変えようとしている場合は escrow の判断（escrow）** |
 
 ## 業務と、読むファイル
 

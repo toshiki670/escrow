@@ -18,7 +18,7 @@
 [Rule of Least Power](https://www.w3.org/2001/tag/doc/leastPower.html)（W3C TAG, 2006）を
 Rust の道具立てへ当てたもので（escrow）、弱い language ほど外から中身を読み解ける。
 
-本当に要るものが出てきたときの道は2つ。
+本当に要るものが出てきたときの道は次のとおり。
 
 1. **escrow から独立した crate にする。** マクロで解くほど一般的な仕組みなら、escrow に
    閉じている理由が無いことが多い
