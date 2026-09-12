@@ -233,6 +233,9 @@ mod tests {
     /// CLI の `person add` → `source add` → `item add` → `fetch` が作る形を、台帳へ直接置く。
     ///
     /// ○○ は配信1本（`holding`）と投稿1件（`kept`）、□□ は項目を持たない。
+    ///
+    /// **新しいほうを後から見つける。** 投影は id の順で返るので、こうしないと
+    /// 「並べ替えを忘れた」が「たまたま合っている」に化ける。
     async fn seeded() -> (Ledger, Vec<Person>) {
         let ledger = Ledger::open_in_memory().await.unwrap();
 
@@ -244,6 +247,28 @@ mod tests {
         )
         .await;
         let x = a_source_for(&ledger, owner, "https://x.com/i/user/12").await;
+
+        // 本文だけの投稿は、取るものが無いのでそのまま kept から始まる（#1）。
+        ledger
+            .discover(
+                &Discovered {
+                    source_id: x,
+                    url: url::normalize_item("https://x.com/jack/status/20")
+                        .unwrap()
+                        .0,
+                    published_at: at("2026-03-01T12:00:00+09:00"),
+                    scheduled_start_at: None,
+                    content: Content::Post {
+                        body: "明日の配信は21時から。".to_owned(),
+                        in_reply_to: None,
+                        quoted: None,
+                    },
+                    media: MediaPresence::Absent,
+                },
+                at("2026-03-01T12:01:00+09:00"),
+            )
+            .await
+            .unwrap();
 
         let live = ledger
             .discover(
@@ -282,28 +307,6 @@ mod tests {
                     hold: Hold::Until(at("2026-03-09T00:30:00+09:00")),
                 },
                 at("2026-03-02T00:30:00+09:00"),
-            )
-            .await
-            .unwrap();
-
-        // 本文だけの投稿は、取るものが無いのでそのまま kept から始まる（#1）。
-        ledger
-            .discover(
-                &Discovered {
-                    source_id: x,
-                    url: url::normalize_item("https://x.com/jack/status/20")
-                        .unwrap()
-                        .0,
-                    published_at: at("2026-03-01T12:00:00+09:00"),
-                    scheduled_start_at: None,
-                    content: Content::Post {
-                        body: "明日の配信は21時から。".to_owned(),
-                        in_reply_to: None,
-                        quoted: None,
-                    },
-                    media: MediaPresence::Absent,
-                },
-                at("2026-03-01T12:01:00+09:00"),
             )
             .await
             .unwrap();
@@ -371,6 +374,18 @@ mod tests {
         simulator(view(app)).find(text).is_ok()
     }
 
+    /// 描いた画面での、その文字の上端。
+    ///
+    /// 並び順は `Listed` の順ではなく**描いた結果**で見る。一覧まで届いていない
+    /// 並べ替えは、持っているだけで誰の役にも立たない。
+    fn top_of(app: &App, text: &str) -> f32 {
+        simulator(view(app))
+            .find(text)
+            .unwrap_or_else(|e| panic!("画面に {text} が無い: {e:?}"))
+            .bounds()
+            .y
+    }
+
     /// #30 の受け入れ — 入れた項目が `Person` を選んだときの一覧に出る。
     /// 状態と種別は #1 の表の値そのまま。
     #[tokio::test]
@@ -388,8 +403,11 @@ mod tests {
         press(&mut app, "○○").await;
 
         // 見出しは Media なら title、Post なら body の先頭（#6）。
-        assert!(shows(&app, "○○の雑談配信"));
-        assert!(shows(&app, "明日の配信は21時から。"));
+        // 新しいものが上（#6 のモック）。配信は 20:00+09:00、投稿は 12:00+09:00。
+        assert!(
+            top_of(&app, "○○の雑談配信") < top_of(&app, "明日の配信は21時から。"),
+            "新しい項目が上に来る"
+        );
         // 状態と種別は #1 の表の値。
         assert!(shows(&app, "holding"));
         assert!(shows(&app, "kept"));
