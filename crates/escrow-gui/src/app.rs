@@ -328,29 +328,47 @@ mod tests {
         app
     }
 
-    /// サイドバーの1つを押し、出た事象をそのまま流す。
+    /// サイドバーの1つを押し、そこから走る読み出しまで流す。
     ///
-    /// `Selected` が返す [`Task`] を走らせるのは iced なので、読み出しはこのあと
-    /// 呼ぶ側が [`list`] で回す。
-    fn press(app: &mut App, name: &str) {
-        let messages: Vec<Message> = {
+    /// 出荷時に [`Task`] を走らせるのは iced なので、ここではテストが同じことをする。
+    async fn press(app: &mut App, name: &str) {
+        let clicked: Vec<Message> = {
             let mut ui = simulator(view(app));
             ui.click(name)
                 .unwrap_or_else(|e| panic!("サイドバーに {name} が無い: {e:?}"));
             ui.into_messages().collect()
         };
 
-        for message in messages {
-            let _ = update(app, message);
+        for message in clicked {
+            let task = update(app, message);
+            for message in run(task).await {
+                let _ = update(app, message);
+            }
         }
+    }
+
+    /// [`Task`] を最後まで回して、出てきた事象を集める。
+    async fn run(task: Task<Message>) -> Vec<Message> {
+        use iced::futures::StreamExt as _;
+        use iced_test::runtime::{Action, task};
+
+        let Some(stream) = task::into_stream(task) else {
+            return Vec::new();
+        };
+
+        stream
+            .filter_map(|action| async move {
+                match action {
+                    Action::Output(message) => Some(message),
+                    _ => None,
+                }
+            })
+            .collect()
+            .await
     }
 
     fn shows(app: &App, text: &str) -> bool {
         simulator(view(app)).find(text).is_ok()
-    }
-
-    fn person_named<'a>(persons: &'a [Person], name: &str) -> &'a Person {
-        persons.iter().find(|p| p.name == name).expect(name)
     }
 
     /// #30 の受け入れ — 入れた項目が `Person` を選んだときの一覧に出る。
@@ -359,8 +377,7 @@ mod tests {
     async fn the_items_of_the_selected_person_appear_in_the_list() {
         let (ledger, persons) = seeded().await;
         let media = tempfile::tempdir().unwrap();
-        let owner = person_named(&persons, "○○").id;
-        let mut app = opened(ledger, media.path(), persons.clone());
+        let mut app = opened(ledger, media.path(), persons);
 
         // #6 の骨格。サイドバーはダッシュボードと持ち主と設定だけ。
         assert!(shows(&app, "ダッシュボード"));
@@ -368,14 +385,7 @@ mod tests {
         assert!(shows(&app, "○○"));
         assert!(shows(&app, "□□"));
 
-        press(&mut app, "○○");
-        let App::Ready(ready) = &app else {
-            panic!("台帳は開いている")
-        };
-        let listed = list(Arc::clone(&ready.ledger), ready.media_dir.clone(), owner)
-            .await
-            .unwrap();
-        let _ = update(&mut app, Message::Listed(owner, Ok(listed)));
+        press(&mut app, "○○").await;
 
         // 見出しは Media なら title、Post なら body の先頭（#6）。
         assert!(shows(&app, "○○の雑談配信"));
@@ -394,20 +404,10 @@ mod tests {
     async fn a_person_without_items_still_draws() {
         let (ledger, persons) = seeded().await;
         let media = tempfile::tempdir().unwrap();
-        let alone = person_named(&persons, "□□").id;
+        let mut app = opened(ledger, media.path(), persons);
 
-        let mut app = opened(ledger, media.path(), persons.clone());
+        press(&mut app, "□□").await;
 
-        press(&mut app, "□□");
-        let App::Ready(ready) = &app else {
-            panic!("台帳は開いている")
-        };
-        let listed = list(Arc::clone(&ready.ledger), ready.media_dir.clone(), alone)
-            .await
-            .unwrap();
-        assert!(listed.is_empty());
-
-        let _ = update(&mut app, Message::Listed(alone, Ok(listed)));
         assert!(shows(&app, "□□"));
         assert!(shows(&app, "項目はまだ無い"));
     }
