@@ -8,7 +8,7 @@
 
 use escrow_domain::content::{Content, ContentType};
 use escrow_domain::item::{Item, ItemId};
-use escrow_domain::source::SourceId;
+use escrow_domain::source::{PersonId, SourceId};
 use escrow_domain::state::{Hold, ReleaseReference, State, StateName};
 use escrow_domain::timestamp::Timestamp;
 use escrow_domain::url::NormalizedUrl;
@@ -70,6 +70,31 @@ impl Ledger {
         .await?;
 
         row.map(Projected::try_from).transpose().map_err(Into::into)
+    }
+
+    /// 持ち主で絞って読む。配信元をまたいで、その人の項目がすべて出る（#6）。
+    ///
+    /// 並べ替えは呼ぶ側の仕事。`published_at` は時差を保つ text なので（#1）、
+    /// SQL で並べると字面の順になり、時差の違う行が時刻の順に並ばない。
+    pub async fn items_of_person(&self, person: PersonId) -> Result<Vec<Projected>, LedgerError> {
+        let key = i64::from(person);
+        let rows = sqlx::query_as!(
+            Row,
+            r#"SELECT i.id AS "id!", i.source_id, i.url, i.content_type, i.published_at,
+                      i.scheduled_start_at, i.hold_until, i.state, i.state_since,
+                      i.title, i.body, i.in_reply_to_url, i.quoted_url, i.release_reference,
+                      (SELECT MAX(e.seq) FROM item_event e WHERE e.item_id = i.id) AS "seq!: i64"
+               FROM item i JOIN source s ON s.id = i.source_id
+               WHERE s.person_id = ? ORDER BY i.id"#,
+            key
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(Projected::try_from)
+            .collect::<Result<_, _>>()
+            .map_err(Into::into)
     }
 
     /// 状態で絞って読む。エンジンはこれで拾ったものを、対応するスライスへ渡す（#15）。
@@ -308,8 +333,78 @@ impl Columns {
 
 #[cfg(test)]
 mod tests {
-    use crate::testing::{a_holding_item, a_post, at, seeded};
-    use crate::{LedgerError, RowError};
+    use std::num::NonZeroU32;
+
+    use escrow_domain::item::ItemId;
+    use escrow_domain::source::{Monitoring, PersonId, SourceId};
+    use escrow_domain::url;
+
+    use crate::testing::{a_holding_item, a_live, a_post, at, item_url, seeded};
+    use crate::{Ledger, LedgerError, NewSource, RowError};
+
+    async fn a_source_for(ledger: &Ledger, person: PersonId, raw: &str) -> SourceId {
+        ledger
+            .add_source(&NewSource {
+                person_id: person,
+                url: url::normalize_source(raw).expect(raw),
+                enabled: true,
+                created_at: at("2026-01-01T00:00:00+09:00"),
+                hold_days: None,
+                priority: NonZeroU32::MIN,
+                monitoring: Monitoring::Continuous,
+            })
+            .await
+            .unwrap()
+    }
+
+    async fn an_item_at(ledger: &Ledger, source: SourceId, raw: &str) -> ItemId {
+        let mut found = a_live(source);
+        found.url = item_url(raw);
+        ledger
+            .discover(&found, at("2026-03-01T20:05:00+09:00"))
+            .await
+            .unwrap()
+    }
+
+    /// 持ち主で絞ると、配信元をまたいでその人の項目だけが出る（#6）。
+    #[tokio::test]
+    async fn lists_the_items_of_one_person_across_their_sources() {
+        let (ledger, first_source) = seeded().await;
+        let owner = ledger
+            .source(first_source)
+            .await
+            .unwrap()
+            .unwrap()
+            .person_id;
+
+        let second_source = a_source_for(&ledger, owner, "https://x.com/i/user/12").await;
+        let mine = [
+            a_holding_item(&ledger, first_source).await,
+            an_item_at(&ledger, second_source, "https://x.com/i/status/21").await,
+        ];
+
+        let other = ledger.add_person("△△").await.unwrap();
+        let theirs = a_source_for(&ledger, other, "https://x.com/i/user/34").await;
+        an_item_at(&ledger, theirs, "https://x.com/i/status/35").await;
+
+        let listed: Vec<ItemId> = ledger
+            .items_of_person(owner)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|p| p.item.id)
+            .collect();
+        assert_eq!(listed, mine);
+    }
+
+    /// 項目を1つも持たない持ち主は、空で返る。画面はこれを受けて空の一覧を出す（#30）。
+    #[tokio::test]
+    async fn a_person_without_items_comes_back_empty() {
+        let ledger = Ledger::open_in_memory().await.unwrap();
+        let alone = ledger.add_person("□□").await.unwrap();
+
+        assert!(ledger.items_of_person(alone).await.unwrap().is_empty());
+    }
 
     /// 崩し方ごとに、どのエラーになるはずかを見る述語。
     type Expected = fn(&RowError) -> bool;

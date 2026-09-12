@@ -25,6 +25,7 @@ const PUBLIC_API: &[&str] = &[
     "item",
     "item_by_url",
     "items_in_state",
+    "items_of_person",
     // ログを読む
     "log",
     "replay",
@@ -34,6 +35,7 @@ const PUBLIC_API: &[&str] = &[
     // 設定（catalog）
     "add_person",
     "person",
+    "persons",
     "add_source",
     "source",
     "add_exclude",

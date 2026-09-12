@@ -17,6 +17,23 @@ impl Ledger {
         Ok(PersonId::new(id))
     }
 
+    /// 登録された持ち主を、登録した順に挙げる。
+    ///
+    /// サイドバーに並ぶのはこれ（#6）。
+    pub async fn persons(&self) -> Result<Vec<Person>, LedgerError> {
+        let rows = sqlx::query!(r#"SELECT id AS "id!", name FROM person ORDER BY id"#)
+            .fetch_all(&self.pool)
+            .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| Person {
+                id: PersonId::new(row.id),
+                name: row.name,
+            })
+            .collect())
+    }
+
     pub async fn person(&self, id: PersonId) -> Result<Option<Person>, LedgerError> {
         let key = i64::from(id);
         let row = sqlx::query!(r#"SELECT id AS "id!", name FROM person WHERE id = ?"#, key)
@@ -34,7 +51,26 @@ impl Ledger {
 mod tests {
     use escrow_domain::state::StateName;
 
+    use crate::Ledger;
     use crate::testing::{a_holding_item, seeded};
+
+    /// サイドバーに並ぶ順は、登録した順（#6）。
+    #[tokio::test]
+    async fn lists_the_persons_in_the_order_they_were_added() {
+        let ledger = Ledger::open_in_memory().await.unwrap();
+        for name in ["○○", "△△", "□□"] {
+            ledger.add_person(name).await.unwrap();
+        }
+
+        let names: Vec<String> = ledger
+            .persons()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|person| person.name)
+            .collect();
+        assert_eq!(names, ["○○", "△△", "□□"]);
+    }
 
     /// #1 の削除の連鎖。`PERSON` を消すと、その `SOURCE`・`ITEM`・`ITEM_EVENT` が消える。
     ///
