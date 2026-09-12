@@ -10,6 +10,7 @@
 |---|---|
 | **業務ごとに渡す。** 設計は Issue 本文を実装へ渡す前に、実装は PR をマージする前に、QA は守りを作ったら、レビューへ渡す。**始めるのは出した側。** 差分だけでは渡さない | escrow（招集の置き換えは下の行） |
 | **author と reader を別の業務が担う。** 業務を兼ねること自体は禁じない | [Fagan inspection](https://en.wikipedia.org/wiki/Fagan_inspection)（役は Fagan, *Design and Code Inspections to Reduce Errors in Program Development*, 1976 と Eickelmann ら 2003。このページから採った）。author と reader は別の役で、reader が成果物を paraphrase する。**escrow に inspection の会議は無いので reader の役をレビューの業務へ当て、原典で招集する moderator の役を出した側へ当てた（escrow）** |
+| **渡したら、渡した成果物へコメントを1件残す。** 何周目かと、渡したものを書く —— 設計の成果物なら Issue へ、実装と QA の成果物なら PR へ | escrow |
 
 ## 見る範囲
 
