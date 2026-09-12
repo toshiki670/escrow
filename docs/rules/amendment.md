@@ -14,7 +14,7 @@
 
 ## 「規約の中では実現できない」と主張するとき
 
-3つを揃える（[Toulmin model](https://www.humanities.mcmaster.ca/~hitchckd/Toulminswarrants.pdf) — Toulmin, *The Uses of Argument*, 1958）。
+次を揃える（[Toulmin model](https://www.humanities.mcmaster.ca/~hitchckd/Toulminswarrants.pdf) — Toulmin, *The Uses of Argument*, 1958）。
 
 | Toulmin | 揃えるもの |
 |---|---|
