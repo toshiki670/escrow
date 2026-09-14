@@ -2,25 +2,14 @@
 //!
 //! 外部向けは #4 の契約どおり `list` と `release` の2つ。それ以外は管理面で、
 //! GUI（Phase 8）ができるまで手で回すための入口。
+//!
+//! 台帳を開く手順と読む・書く関数は `escrow-app` が持つ（#82）。ここに在るのは
+//! 引数の受け取りと、出力の形だけ。
 
-use std::num::NonZeroU32;
-
-use anyhow::{Context as _, Result, bail};
+use anyhow::{Result, anyhow};
 use clap::{Parser, Subcommand};
 
-use escrow_acquisition::Acquisition;
-use escrow_config::{Config, Dirs, Paths, Resolution, Resolver};
-use escrow_domain::content::ContentType;
-use escrow_domain::item::Discovered;
-use escrow_domain::item::ItemId;
-use escrow_domain::source::{Monitoring, PersonId, SourceId};
-use escrow_domain::state::{ReleaseReference, StateName};
-use escrow_domain::timestamp::Timestamp;
-use escrow_domain::url::{self, TypeHint};
-use escrow_handover::Handover;
-use escrow_ledger::{Ledger, NewSource};
-use escrow_scheduler::{Demand, Scheduler};
-use escrow_transcription::Transcription;
+use escrow_app::{App, AppError};
 
 /// 配信元から失われうるものを取り込み、手元に預かる。
 #[derive(Debug, Parser)]
@@ -112,9 +101,16 @@ async fn main() -> Result<()> {
     let app = App::open().await?;
 
     match cli.command {
-        Command::List { state, id, json } => app.list(state, id, json).await,
-        Command::Release { id, reference } => app.release(id, reference).await,
-        Command::Person(PersonCommand::Add { name }) => app.add_person(&name).await,
+        Command::List { state, id, json } => list(&app, state.as_deref(), id, json).await,
+        Command::Release { id, reference } => {
+            let handed = app.release(id, reference.as_deref()).await?;
+            println!("{}", serde_json::to_string_pretty(&handed)?);
+            Ok(())
+        }
+        Command::Person(PersonCommand::Add { name }) => {
+            println!("{}", app.add_person(&name).await?);
+            Ok(())
+        }
         Command::Source(SourceCommand::Add {
             person,
             url,
@@ -123,238 +119,99 @@ async fn main() -> Result<()> {
             monitor_until,
             hold_days,
         }) => {
-            app.add_source(
-                person,
-                &url,
-                priority,
-                monitor_from.as_deref(),
-                monitor_until.as_deref(),
-                hold_days,
-            )
-            .await
+            let id = app
+                .add_source(
+                    person,
+                    &url,
+                    priority,
+                    monitor_from.as_deref(),
+                    monitor_until.as_deref(),
+                    hold_days,
+                )
+                .await?;
+            println!("{id}");
+            Ok(())
         }
         Command::Item(ItemCommand::Add {
             source,
             r#type,
             url,
-        }) => app.add_item(source, r#type.as_deref(), &url).await,
-        Command::Fetch { id } => app.fetch(id).await,
-        Command::Doctor => app.doctor(),
-    }
-}
-
-/// 設定と置き場所を解決した状態。
-struct App {
-    config: Config,
-    paths: Paths,
-    ledger: Ledger,
-    resolver: Resolver,
-}
-
-impl App {
-    async fn open() -> Result<Self> {
-        let dirs = Dirs::discover().context("設定の置き場所を決められない")?;
-        let config = Config::load(&dirs.config_file()).context("設定を読めない")?;
-        let paths = Paths::resolve(&config, &dirs);
-        let resolver = Resolver::from_env(&config.extra_paths(&dirs));
-
-        let ledger = Ledger::open(&paths.db)
-            .await
-            .with_context(|| format!("DB を開けない: {}", paths.db.display()))?;
-
-        Ok(Self {
-            config,
-            paths,
-            ledger,
-            resolver,
-        })
-    }
-
-    /// 外部アクセスの受付。外へ出る呼び出しはすべてここを通る（#13）。
-    fn scheduler(&self) -> Result<Scheduler> {
-        Scheduler::new(&self.config, &self.paths, &self.resolver)
-            .map_err(|missing| anyhow::anyhow!("{missing}。`escrow doctor` で確かめる"))
-    }
-
-    async fn list(&self, state: Option<String>, id: Option<i64>, json: bool) -> Result<()> {
-        let projected = match (state, id) {
-            (_, Some(id)) => self
-                .ledger
-                .item(ItemId::new(id))
-                .await?
-                .into_iter()
-                .collect::<Vec<_>>(),
-            (Some(name), None) => {
-                let name: StateName = name.parse().context("知らない状態")?;
-                self.ledger.items_in_state(name).await?
-            }
-            // #4 は状態を絞らない呼び方も許す。既定は引き渡し待ち。
-            (None, None) => self.ledger.items_in_state(StateName::Kept).await?,
-        };
-        let items: Vec<_> = projected.into_iter().map(|p| p.item).collect();
-
-        let handed: Vec<_> = items
-            .iter()
-            .map(|item| Handover::new(&self.ledger, &self.paths.media_dir).handed(item))
-            .collect::<Result<_, _>>()?;
-
-        if json {
-            println!("{}", serde_json::to_string_pretty(&handed)?);
-        } else {
-            for entry in &handed {
-                let headline = entry
-                    .title
-                    .as_deref()
-                    .or(entry.body.as_deref())
-                    .unwrap_or("");
-                println!(
-                    "{:>5}  {:<12} {:<15} {}",
-                    entry.id, entry.state, entry.content_type, headline
-                );
-            }
+        }) => {
+            let id = app
+                .add_item(source, r#type.as_deref(), &url)
+                .await
+                .map_err(hinted)?;
+            println!("{id}");
+            Ok(())
         }
-        Ok(())
+        Command::Fetch { id } => {
+            let state = app.fetch(id).await.map_err(hinted)?;
+            println!("{id} -> {state}", state = state.as_str());
+            Ok(())
+        }
+        Command::Doctor => {
+            doctor(&app);
+            Ok(())
+        }
     }
+}
 
-    async fn release(&self, id: i64, reference: Option<String>) -> Result<()> {
-        let handed = Handover::new(&self.ledger, &self.paths.media_dir)
-            .release(ItemId::new(id), reference.map(ReleaseReference::new))
-            .await?;
+/// 直し方が CLI の語になる失敗に、その語を足す。
+///
+/// ツールが無いなら `escrow doctor`、種別を決められないなら `--type`。どちらも
+/// この入口の名前なので、`escrow-app` は持たない。
+fn hinted(error: AppError) -> anyhow::Error {
+    match error {
+        AppError::MissingTool(_) => anyhow!("{error}。`escrow doctor` で確かめる"),
+        AppError::UndecidableType => {
+            anyhow!("{error}。--type で指定する（youtube_video / youtube_live / youtube_shorts）")
+        }
+        _ => error.into(),
+    }
+}
 
+/// #4 の `list`。JSON でないときは、見出しに `title` か `body` をそのまま出す。
+async fn list(app: &App, state: Option<&str>, id: Option<i64>, json: bool) -> Result<()> {
+    let handed = app.list(state, id).await?;
+
+    if json {
         println!("{}", serde_json::to_string_pretty(&handed)?);
-        Ok(())
-    }
-
-    async fn add_person(&self, name: &str) -> Result<()> {
-        println!("{}", self.ledger.add_person(name).await?);
-        Ok(())
-    }
-
-    async fn add_source(
-        &self,
-        person: i64,
-        raw_url: &str,
-        priority: u32,
-        monitor_from: Option<&str>,
-        monitor_until: Option<&str>,
-        hold_days: Option<u32>,
-    ) -> Result<()> {
-        let url = url::normalize_source(raw_url)?;
-        let priority = NonZeroU32::new(priority).context("重みは1以上")?;
-        let hold_days = hold_days
-            .map(|d| NonZeroU32::new(d).context("預かる日数は1日以上"))
-            .transpose()?;
-
-        let at = |text: Option<&str>| text.map(Timestamp::parse).transpose();
-        let monitoring = Monitoring::new(at(monitor_from)?, at(monitor_until)?)?;
-
-        let id = self
-            .ledger
-            .add_source(&NewSource {
-                person_id: PersonId::new(person),
-                url,
-                enabled: true,
-                created_at: Timestamp::now(),
-                priority,
-                monitoring,
-                hold_days,
-            })
-            .await?;
-
-        println!("{id}");
-        Ok(())
-    }
-
-    async fn add_item(&self, source: i64, kind: Option<&str>, raw_url: &str) -> Result<()> {
-        let (url, hint) = url::normalize_item(raw_url)?;
-
-        // 種別は正規化する前の入口から決める（#1）。入口が語らない形なら人に訊く。
-        let content_type = match (hint, kind) {
-            (_, Some(given)) => given.parse::<ContentType>()?,
-            (TypeHint::Known(known), None) => known,
-            (TypeHint::YoutubeUnknown, None) => bail!(
-                "この URL からは種別を決められない。--type で指定する（youtube_video / \
-                 youtube_live / youtube_shorts）"
-            ),
-        };
-
-        // 中身を取るツールも #5 の対応表が決める。人が待っているので最優先で通す（#13）。
-        let found = self
-            .scheduler()?
-            .describe(&url, content_type, Demand::interactive(Timestamp::now()))
-            .await?;
-
-        let id = self
-            .ledger
-            .discover(
-                &Discovered {
-                    source_id: SourceId::new(source),
-                    url: found.url,
-                    published_at: found.published_at,
-                    scheduled_start_at: found.scheduled_start_at,
-                    content: found.content,
-                    media: found.media,
-                },
-                Timestamp::now(),
-            )
-            .await?;
-
-        println!("{id}");
-        Ok(())
-    }
-
-    async fn fetch(&self, id: i64) -> Result<()> {
-        let id = ItemId::new(id);
-        let item = self
-            .ledger
-            .item(id)
-            .await?
-            .with_context(|| format!("項目 {id} が無い"))?
-            .item;
-        let scheduler = self.scheduler()?;
-        let acquirer =
-            scheduler.acquirer(item.content_type(), Demand::interactive(Timestamp::now()));
-
-        // 預かる日数も期限も、取得が終わった瞬間に取得のスライスが決める（#1）。
-        let state = Acquisition::new(&self.ledger, &self.paths.media_dir, acquirer.as_ref())
-            .run(id)
-            .await?;
-
-        // スライスは互いを知らないので、**次に誰が拾うかは状態が決める**（#15）。
-        // 巡回するエンジンは Phase 6 なので、いまはここが状態を見て繋ぐ。
-        let state = if state.name() == StateName::Transcribing {
-            Transcription::new(&self.ledger, &self.paths.media_dir, scheduler.transcriber())
-                .run(id)
-                .await?
-        } else {
-            state
-        };
-
-        println!("{id} -> {state}", state = state.as_str());
-        Ok(())
-    }
-
-    fn doctor(&self) -> Result<()> {
-        for (tool, resolution) in self.resolver.resolve_all() {
-            match resolution.path() {
-                Some(path) => println!("  {tool:<12} {}  ✓", path.display()),
-                None => println!("  {tool:<12} 見つかりません                 ✗"),
-            }
+    } else {
+        for entry in &handed {
+            let headline = entry
+                .title
+                .as_deref()
+                .or(entry.body.as_deref())
+                .unwrap_or("");
+            println!(
+                "{:>5}  {:<12} {:<15} {}",
+                entry.id, entry.state, entry.content_type, headline
+            );
         }
+    }
+    Ok(())
+}
 
-        let model = Resolution::of_file(&self.paths.transcribe_model);
-        match model.path() {
-            Some(path) => println!("\n  文字起こしモデル  {}  ✓", path.display()),
-            None => println!(
-                "\n  文字起こしモデル  {}  ✗",
-                self.paths.transcribe_model.display()
-            ),
-        }
+fn doctor(app: &App) {
+    let diagnosis = app.doctor();
 
-        println!("\n  探した場所");
-        for dir in self.resolver.directories() {
-            println!("    {}", dir.display());
+    for (tool, resolution) in &diagnosis.tools {
+        match resolution.path() {
+            Some(path) => println!("  {tool:<12} {}  ✓", path.display()),
+            None => println!("  {tool:<12} 見つかりません                 ✗"),
         }
-        Ok(())
+    }
+
+    match diagnosis.transcribe_model.path() {
+        Some(path) => println!("\n  文字起こしモデル  {}  ✓", path.display()),
+        None => println!(
+            "\n  文字起こしモデル  {}  ✗",
+            diagnosis.transcribe_model_path.display()
+        ),
+    }
+
+    println!("\n  探した場所");
+    for dir in &diagnosis.directories {
+        println!("    {}", dir.display());
     }
 }

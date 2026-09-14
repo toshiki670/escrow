@@ -12,9 +12,9 @@ use escrow_tests::members;
 /// スライスが依存してよいもの。互いの名前はここに無い。
 const SLICE: &[&str] = &["escrow-domain", "escrow-ledger", "escrow-scheduler"];
 
-/// 入口が依存してよいもの。**緩めて「全部」にしない** — 緩めた瞬間に段5 の検査が
-/// 消え、`escrow-external` を直接呼ぶ経路が生える。
-const ENTRY: &[&str] = &[
+/// 組み立てる crate が依存してよいもの。**緩めて「全部」にしない** — 緩めた瞬間に
+/// 段5 の検査が消え、`escrow-external` を直接呼ぶ経路が生える。
+const APP: &[&str] = &[
     "escrow-domain",
     "escrow-ledger",
     "escrow-config",
@@ -25,6 +25,11 @@ const ENTRY: &[&str] = &[
     "escrow-custody",
     "escrow-handover",
 ];
+
+/// 入口が依存してよいもの。組み立てる crate だけ（#82）。**緩めて `APP` にしない** —
+/// 緩めた瞬間に、入口ごとに台帳を開いて組み立て直す経路が生え、画面ごとに足す関数が
+/// 1つの入口にしか届かなくなる。
+const ENTRY: &[&str] = &["escrow-app"];
 
 /// 依存の図。左が右を依存に持ってよい、の全部。
 ///
@@ -50,7 +55,10 @@ const ALLOWED: &[(&str, &[&str])] = &[
     ("escrow-transcription", SLICE),
     ("escrow-custody", SLICE),
     ("escrow-handover", &["escrow-domain", "escrow-ledger"]),
-    // 段5 — 入口。すべてを組み立てるが、external だけは名前で知らない。
+    // 段5 — 組み立てる crate。すべてを組み立てるが、external だけは名前で知らない。
+    ("escrow-app", APP),
+    // 段5 — 入口。組み立てる crate だけを見る（#82）。同じ段の中の辺で、前例は
+    // escrow-external → escrow-config。
     ("escrow-cli", ENTRY),
     ("escrow-gui", ENTRY),
 ];

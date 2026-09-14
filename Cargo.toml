@@ -11,6 +11,7 @@ members = [
     "crates/escrow-transcription",
     "crates/escrow-custody",
     "crates/escrow-handover",
+    "crates/escrow-app",
     "crates/escrow-cli",
     "crates/escrow-gui",
     "tests",
@@ -34,6 +35,7 @@ escrow-acquisition = { path = "crates/escrow-acquisition" }
 escrow-transcription = { path = "crates/escrow-transcription" }
 escrow-custody = { path = "crates/escrow-custody" }
 escrow-handover = { path = "crates/escrow-handover" }
+escrow-app = { path = "crates/escrow-app" }
 clap = { version = "4.6", features = ["derive"] }
 anyhow = "1.0"
 chrono = "0.4"

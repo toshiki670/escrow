@@ -2,12 +2,12 @@
 //!
 //! ダッシュボードと設定は項目だけ置く。中身は別のスライス（#30）。
 
-use escrow_domain::source::Person;
+use escrow_app::{Listed, Person};
 use iced::widget::{button, column, container, row, rule, scrollable, space, table, text};
 use iced::{Element, Fill};
 
 use crate::app::{App, Listing, Message, Ready, Selection};
-use crate::listing::Listed;
+use crate::listing;
 
 /// サイドバーの幅。#6 の骨格のとおり、メインより狭い固定幅。
 const SIDEBAR_WIDTH: f32 = 200.0;
@@ -96,7 +96,10 @@ fn items(listed: &[Listed]) -> Element<'_, Message> {
     table(
         [
             table::column(text("日付"), |item: &Listed| text(item.published_on())).width(110.0),
-            table::column(text("項目"), |item: &Listed| text(item.headline())).width(Fill),
+            table::column(text("項目"), |item: &Listed| {
+                text(listing::cut(item.headline()))
+            })
+            .width(Fill),
             table::column(text("状態"), |item: &Listed| text(item.state())).width(110.0),
             table::column(text("種別"), |item: &Listed| text(item.content_type())).width(140.0),
         ],
