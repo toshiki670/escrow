@@ -254,11 +254,20 @@ mod tests {
     use crate::testing::{a_holding_item, at, seed_into};
     use crate::{Ledger, LedgerError};
 
-    /// 別プロセスの体で、同じファイルを2つの `Ledger` が同時に書く。
+    /// 別プロセスを模して、同じファイルを2つの `Ledger` が同時に書く。
     ///
-    /// **落ちた側は `Superseded` を受け取る**（#7）。ここが `database is locked` だと、
-    /// 呼ぶ側は「読み直して決め直す」に落ちず、何が起きたかも分からないまま止まる。
-    /// 既定の `BEGIN` では実際にそうなるので、書き込みは `BEGIN IMMEDIATE` で開く。
+    /// **loser が受け取るのは `SQLITE_BUSY` ではなく `Superseded`**（#7）。`SQLITE_BUSY`
+    /// （`database is locked`）は「誰かが先に書いた」ことを伝えないので、呼ぶ側が re-read
+    /// して決め直す道へ入れない。**deferred transaction は read transaction で始まり、
+    /// write transaction へ upgrade する段で `SQLITE_BUSY` を返す**（[BEGIN] の
+    /// 「Subsequent write statements will upgrade the transaction to a write transaction
+    /// if possible, or return SQLITE_BUSY」）ので、書き込みは `BEGIN IMMEDIATE` で開く。
+    ///
+    /// [BEGIN]: https://www.sqlite.org/lang_transaction.html
+    ///
+    /// **write lock の獲得順は nondeterministic。** どちらが勝つかを assert すると
+    /// flaky test になる（#78）。`BEGIN IMMEDIATE` と `busy_timeout` が決めるのは
+    /// 「片方が通り、もう片方が `Superseded`」まで。
     ///
     /// in-memory では試せない — `sqlite::memory:` は接続ごとに別の DB になる。
     #[tokio::test]
@@ -282,10 +291,12 @@ mod tests {
             cli.append(id, seen, &gone, at("2026-03-03T04:00:01+09:00")),
         );
 
-        assert!(first.is_ok(), "{first:?}");
-        assert!(matches!(second, Err(LedgerError::Superseded)), "{second:?}");
+        match (&first, &second) {
+            (Ok(_), Err(LedgerError::Superseded)) | (Err(LedgerError::Superseded), Ok(_)) => {}
+            _ => panic!("片方が通り、もう片方が Superseded: {first:?} / {second:?}"),
+        }
 
-        // 通ったほうだけがログに入り、投影も1件ぶんしか動いていない。
+        // ログは1件しか増えていない。
         assert_eq!(engine.log(id).await.unwrap().unwrap().rest.len(), 3);
     }
 }
