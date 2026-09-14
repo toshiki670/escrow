@@ -5,8 +5,11 @@
 //! （`println!`・画面）だけを持つ。画面ごとに足す関数もここに置くので、入口が増えても
 //! 書く場所は1つ。
 //!
-//! 入口が使う型は、この crate の path から届く。`escrow-domain` / `escrow-handover` /
-//! `escrow-config` の型は `pub use` で見せる。
+//! 入口が使う型は `pub use` でここから見せる。入口が名前で知る crate はこれ1つ
+//! （`tests/dependency_direction.rs`）。
+//!
+//! 引数は text と `i64` で受ける。**型で締めていない**のは、#79 の UniFFI が運ぶ形を
+//! そのまま保つため。
 
 use std::num::NonZeroU32;
 use std::path::PathBuf;

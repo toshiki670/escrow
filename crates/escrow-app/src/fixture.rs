@@ -1,6 +1,6 @@
 //! 入口のテストが台帳へ置く形（#82）。feature `fixture` で公開する。
 //!
-//! 入口は `escrow-ledger` を名前で知らない（`tests/dependency_direction.rs`）ので、
+//! 入口が名前で知る crate は `escrow-app` だけ（`tests/dependency_direction.rs`）なので、
 //! 台帳を仕込むのもここの仕事。入口のテストは [`App`] を受け取り、描いた結果だけを見る。
 
 use std::num::NonZeroU32;
@@ -45,8 +45,8 @@ impl App {
     /// 「並べ替えを忘れた」が「たまたま合っている」に化ける。
     ///
     /// 台帳はメモリの上に在り、実体の置き場所だけを `media_dir` で受ける。設定は既定で、
-    /// 外部ツールは1つも見つからない — **支えるのは読む側だけ**で、`add_item` と `fetch`
-    /// はここでは通らない。
+    /// 外部ツールを探す場所は空 — **支えるのは読む側だけ**で、外へ出る `add_item` と
+    /// `fetch` は [`crate::AppError::MissingTool`] で止まる。
     pub async fn seeded(media_dir: &Path) -> Self {
         let ledger = Ledger::open_in_memory().await.unwrap();
 

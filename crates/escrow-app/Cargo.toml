@@ -22,7 +22,7 @@ tempfile.workspace = true
 tokio.workspace = true
 
 [features]
-# 入口のテストが台帳へ置く形（#82）。入口は `escrow-ledger` を名前で知らないので、
+# 入口のテストが台帳へ置く形（#82）。入口が名前で知る crate はこれ1つなので、
 # 仕込みもここが持つ。
 fixture = []
 

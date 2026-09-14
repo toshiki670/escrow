@@ -159,7 +159,7 @@ async fn main() -> Result<()> {
 /// 直し方が CLI の語になる失敗に、その語を足す。
 ///
 /// ツールが無いなら `escrow doctor`、種別を決められないなら `--type`。どちらも
-/// この入口の名前なので、`escrow-app` は持たない。
+/// この入口の名前なので、足すのはここ。
 fn hinted(error: AppError) -> anyhow::Error {
     match error {
         AppError::MissingTool(_) => anyhow!("{error}。`escrow doctor` で確かめる"),
@@ -170,7 +170,10 @@ fn hinted(error: AppError) -> anyhow::Error {
     }
 }
 
-/// #4 の `list`。JSON でないときは、見出しに `title` か `body` をそのまま出す。
+/// #4 の `list`。文の表では、見出しに `title` か `body` の全文をそのまま出す。
+///
+/// `escrow-app` の `items_of` は `body` の1行目を見出しにするが、#4 の出力の形は
+/// そのまま（#82）。
 async fn list(app: &App, state: Option<&str>, id: Option<i64>, json: bool) -> Result<()> {
     let handed = app.list(state, id).await?;
 

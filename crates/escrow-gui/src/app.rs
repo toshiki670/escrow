@@ -159,8 +159,8 @@ async fn open() -> Result<Opened, String> {
 
 /// 失敗の理由を、原因まで繋いで1つの文にする。
 ///
-/// `escrow-app` の失敗は「設定を読めない」のように段階を言い、何が悪かったかは原因の
-/// 側が持つ。外側だけ出すと、直す先が画面から読めない。
+/// `escrow-app` の失敗は「設定を読めない」のように段階を言い、直す先（設定ファイルか
+/// DB か）を言うのは原因の側。そこまで出して、画面が直す先を示す。
 fn why(error: impl std::error::Error) -> String {
     let mut text = error.to_string();
     let mut cause = error.source();
@@ -296,7 +296,7 @@ mod tests {
         assert!(shows(&app, "項目はまだ無い"));
     }
 
-    /// 失敗は原因まで繋いで出す。外側の段階だけでは、直す先が画面から読めない。
+    /// 失敗は原因まで繋いで出す。直す先を言うのは原因の側。
     #[test]
     fn a_failure_reads_down_to_its_cause() {
         /// 「段階: 原因」の2段。`escrow-app` の `Config` / `Open` と同じ形。
