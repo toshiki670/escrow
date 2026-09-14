@@ -40,6 +40,11 @@ chrono = "0.4"
 # 識別子の newtype。const fn new と Display と i64 への変換を出す。
 derive_more = { version = "2.1", default-features = false, features = ["std", "constructor", "display", "into"] }
 directories = "6.0"
+# GUI。tokio feature を指定するのは、既定の executor が futures の thread-pool で、
+# sqlx の tokio と噛み合わないため（#7）。
+iced = { version = "0.14", features = ["tokio"] }
+# 画面を窓なしで動かして確かめる。iced と同じ版で、同じ repository が出している。
+iced_test = "0.14"
 quick-xml = { version = "0.42", features = ["serialize"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "webpki-roots", "http2", "charset"] }
 serde = { version = "1.0", features = ["derive"] }
