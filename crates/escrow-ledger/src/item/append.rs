@@ -260,9 +260,9 @@ mod tests {
     /// 呼ぶ側は「読み直して決め直す」に落ちず、何が起きたかも分からないまま止まる。
     /// 既定の `BEGIN` では実際にそうなるので、書き込みは `BEGIN IMMEDIATE` で開く。
     ///
-    /// **錠を先に取ったほうが通る。その順は負荷しだいで入れ替わる**ので、どちらが通るかで
-    /// 見ると、負荷が上がった日に落ちる（#78）。`BEGIN IMMEDIATE` と `busy_timeout` が
-    /// 決めるのは「片方が通り、もう片方が `Superseded`」まで。
+    /// **write lock の獲得順は nondeterministic。** どちらが勝つかを assert すると
+    /// flaky test になる（#78）。`BEGIN IMMEDIATE` と `busy_timeout` が決めるのは
+    /// 「片方が通り、もう片方が `Superseded`」まで。
     ///
     /// in-memory では試せない — `sqlite::memory:` は接続ごとに別の DB になる。
     #[tokio::test]
