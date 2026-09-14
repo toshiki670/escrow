@@ -260,6 +260,10 @@ mod tests {
     /// 呼ぶ側は「読み直して決め直す」に落ちず、何が起きたかも分からないまま止まる。
     /// 既定の `BEGIN` では実際にそうなるので、書き込みは `BEGIN IMMEDIATE` で開く。
     ///
+    /// **錠を先に取ったほうが通る。** `BEGIN IMMEDIATE` と `busy_timeout` が決めるのは
+    /// 「片方が通り、もう片方が `Superseded`」までなので、どちらが通るかで見ると、
+    /// 負荷が上がった日に落ちる（#78）。
+    ///
     /// in-memory では試せない — `sqlite::memory:` は接続ごとに別の DB になる。
     #[tokio::test]
     async fn two_writers_on_one_file_leave_one_superseded() {
@@ -282,8 +286,10 @@ mod tests {
             cli.append(id, seen, &gone, at("2026-03-03T04:00:01+09:00")),
         );
 
-        assert!(first.is_ok(), "{first:?}");
-        assert!(matches!(second, Err(LedgerError::Superseded)), "{second:?}");
+        match (&first, &second) {
+            (Ok(_), Err(LedgerError::Superseded)) | (Err(LedgerError::Superseded), Ok(_)) => {}
+            _ => panic!("片方が通り、もう片方が Superseded: {first:?} / {second:?}"),
+        }
 
         // 通ったほうだけがログに入り、投影も1件ぶんしか動いていない。
         assert_eq!(engine.log(id).await.unwrap().unwrap().rest.len(), 3);
