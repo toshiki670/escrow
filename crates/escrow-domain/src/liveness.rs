@@ -36,7 +36,7 @@ impl Presence {
 
 /// 配信元に在ることを確かめた証。
 ///
-/// [`Presence::confirmed`] からしか作れない。`holding` から `discarded` へ進む事象が
+/// [`Presence::confirmed`] からしか作れない。`holding` から `discarded` へ進むイベントが
 /// これを要求することで、#1 の「期限まで**在った**」— 沈黙は確認ではない — が
 /// 約束ではなく型で効く。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

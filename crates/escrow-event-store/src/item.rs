@@ -1,6 +1,7 @@
-//! 項目の事象と、その投影（#15）。
+//! 項目のイベントと、そのリードモデル（#15）。
 //!
-//! 誕生（[`Ledger::discover`]）と追記（[`Ledger::append`]）、そこから作られる投影。
+//! 誕生（[`EventStore::discover`]）と追記（[`EventStore::append`]）、そこから作られる
+//! リードモデル。
 
 use escrow_domain::item::{Discovered, Item, ItemId};
 use escrow_domain::state::{Event, IllegalTransition, next};
@@ -9,19 +10,19 @@ use escrow_domain::timestamp::Timestamp;
 use crate::Seq;
 
 mod append;
-mod projection;
+mod read_model;
 mod replay;
 
-pub(crate) use projection::Columns;
+pub(crate) use read_model::Columns;
 pub(crate) use replay::{EventRow, log_of};
 
-/// 投影から読んだ1件と、その姿を決めた最後の事象の番号。
+/// リードモデルから読んだ1件と、その姿を決めた最後のイベントの番号。
 ///
-/// 次の事象を書くときにこの `seq` を渡すので、**読んでから書くまでの間に誰かが
+/// 次のイベントを書くときにこの `seq` を渡すので、**読んでから書くまでの間に誰かが
 /// 動かしていれば弾かれる**。読み出しが必ず番号を連れてくるので、根拠を持たずに
 /// 書く経路がそもそも作れない。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Projected {
+pub struct ReadModelRow {
     pub item: Item,
     pub seq: Seq,
 }
@@ -44,17 +45,17 @@ pub struct Log {
     pub id: ItemId,
     pub discovered: Discovered,
     pub discovered_at: Timestamp,
-    /// 誕生のあとに続く事象。`seq` の順。
+    /// 誕生のあとに続くイベント。`seq` の順。
     pub rest: Vec<Recorded>,
 }
 
 impl Log {
-    /// ログを畳んで、いまの姿を作る。
+    /// ログをリプレイして、いまの姿を作る。
     ///
-    /// 畳む関数は #1 の状態遷移そのもの。事象を保存する形にしたので、手で書いた
+    /// リプレイする関数は #1 の状態遷移そのもの。イベントを保存する形にしたので、手で書いた
     /// 全域関数がそのままここで使える（#15）。
     ///
-    /// `state_since` は**状態が変わった**事象の時刻だけを取る。生存確認や1回の
+    /// `state_since` は**状態が変わった**イベントの時刻だけを取る。生存確認や1回の
     /// 失敗を書いても、`holding` になった日時は動かない。
     pub fn replay(&self) -> Result<Item, IllegalTransition> {
         let mut state = self.discovered.initial_state();
@@ -80,9 +81,9 @@ impl Log {
         })
     }
 
-    /// 直近の「状態を変えた事象」より後ろの失敗の本数。
+    /// 直近の「状態を変えたイベント」より後ろの失敗の本数。
     ///
-    /// #1 の「リトライ回数そのものは数えず、事象から導出する」。カウンタを持たない
+    /// #1 の「リトライ回数そのものは数えず、イベントから導出する」。カウンタを持たない
     /// ので、書き忘れて実際とずれることが起きない。
     pub fn failures_since_the_state_moved(&self) -> Result<usize, IllegalTransition> {
         let mut state = self.discovered.initial_state();

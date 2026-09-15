@@ -5,8 +5,8 @@
 //!
 //! # 確かめられたときだけ書く
 //!
-//! 判定の規則は [`escrow_domain::liveness`]。ここが足すのは、**その規則が台帳の
-//! 行数に出る**こと — 在ることを確かめた回だけ事象が増え、確かめられなかった回は
+//! 判定の規則は [`escrow_domain::liveness`]。ここが足すのは、**その規則がイベントログの
+//! 行数に出る**こと — 在ることを確かめた回だけイベントが増え、確かめられなかった回は
 //! 何も残らない。
 //!
 //! # どの項目をいつ確かめるかは持たない
@@ -21,14 +21,14 @@ use escrow_domain::item::ItemId;
 use escrow_domain::liveness::Presence;
 use escrow_domain::state::{Event, State, StateName};
 use escrow_domain::timestamp::Timestamp;
-use escrow_ledger::{Ledger, LedgerError, Projected};
+use escrow_event_store::{EventStore, EventStoreError, ReadModelRow};
 use escrow_scheduler::{AdapterError, Probe};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum CustodyError {
     #[error(transparent)]
-    Ledger(#[from] LedgerError),
+    EventStore(#[from] EventStoreError),
     #[error(transparent)]
     Adapter(#[from] AdapterError),
     #[error("項目 {0} が無い")]
@@ -44,13 +44,13 @@ pub enum CustodyError {
 }
 
 pub struct Custody<'a> {
-    ledger: &'a Ledger,
+    store: &'a EventStore,
     media_dir: &'a Path,
 }
 
 impl<'a> Custody<'a> {
-    pub const fn new(ledger: &'a Ledger, media_dir: &'a Path) -> Self {
-        Self { ledger, media_dir }
+    pub const fn new(store: &'a EventStore, media_dir: &'a Path) -> Self {
+        Self { store, media_dir }
     }
 
     /// `holding` の1件を配信元と突き合わせ、判定がついたら次の状態まで進める。
@@ -61,7 +61,7 @@ impl<'a> Custody<'a> {
     ///
     /// # Errors
     ///
-    /// 「消えた」と断定できない失敗は、種類を問わずそのまま返す。台帳の側は #5 の
+    /// 「消えた」と断定できない失敗は、種類を問わずそのまま返す。イベントストアの側は #5 の
     /// 判定保留のまま — 何も書かず `holding` に残る — で、**返すのは呼ぶ側が失敗の
     /// 種類で動けるようにするため**。cookie の失効はプラットフォーム全体を止め、
     /// 出力を読めないのは仕様変更の疑いになる。
@@ -110,25 +110,25 @@ impl<'a> Custody<'a> {
         Ok(state)
     }
 
-    async fn load(&self, id: ItemId) -> Result<Projected, CustodyError> {
-        self.ledger
+    async fn load(&self, id: ItemId) -> Result<ReadModelRow, CustodyError> {
+        self.store
             .item(id)
             .await?
             .ok_or(CustodyError::NoSuchItem(id))
     }
 
-    /// 事象を1つ追記し、書けた状態を返す。
+    /// イベントを1つ追記し、書けた状態を返す。
     ///
     /// 読んだときの `seq` をそのまま渡すので、途中で誰かが動かしていれば
-    /// [`LedgerError::Superseded`] で落ちる（#15）。
+    /// [`EventStoreError::Superseded`] で落ちる（#15）。
     async fn append(
         &self,
-        current: Projected,
+        current: ReadModelRow,
         event: &Event,
         at: Timestamp,
     ) -> Result<State, CustodyError> {
         let id = current.item.id;
-        self.ledger.append(id, current.seq, event, at).await?;
+        self.store.append(id, current.seq, event, at).await?;
         Ok(self.load(id).await?.item.state)
     }
 }
@@ -141,7 +141,7 @@ mod tests {
     use escrow_domain::source::{Monitoring, SourceId};
     use escrow_domain::state::{Hold, MediaPresence, TranscriptNeed};
     use escrow_domain::url::{self, NormalizedUrl};
-    use escrow_ledger::{NewSource, Seq};
+    use escrow_event_store::{NewSource, Seq};
     use escrow_scheduler::BoxFuture;
     use std::num::NonZeroU32;
 
@@ -179,9 +179,9 @@ mod tests {
     }
 
     /// 持ち主と配信元を1つ用意する。
-    async fn seeded(ledger: &Ledger) -> SourceId {
-        let person = ledger.add_person("○○").await.unwrap();
-        ledger
+    async fn seeded(store: &EventStore) -> SourceId {
+        let person = store.add_person("○○").await.unwrap();
+        store
             .add_source(&NewSource {
                 person_id: person,
                 url: url::normalize_source(
@@ -200,12 +200,12 @@ mod tests {
 
     /// 起票しただけの項目と、その実体を用意する。
     async fn live_item(
-        ledger: &Ledger,
+        store: &EventStore,
         media_dir: &Path,
         source: SourceId,
         video_id: &str,
     ) -> ItemId {
-        let id = ledger
+        let id = store
             .discover(
                 &Discovered {
                     source_id: source,
@@ -235,17 +235,17 @@ mod tests {
 
     /// 取得まで済ませ、期限を伴う `holding` の項目にする。
     ///
-    /// 事象は台帳へ直接書く。取得のスライスを呼ばないのは、**スライス同士が互いを
+    /// イベントはイベントストアへ直接書く。取得のスライスを呼ばないのは、**スライス同士が互いを
     /// 知らない**ことをテストの側でも守るため（#15）。
     async fn holding_item(
-        ledger: &Ledger,
+        store: &EventStore,
         media_dir: &Path,
         source: SourceId,
         video_id: &str,
     ) -> ItemId {
-        let id = live_item(ledger, media_dir, source, video_id).await;
+        let id = live_item(store, media_dir, source, video_id).await;
 
-        let seq = ledger
+        let seq = store
             .append(
                 id,
                 Seq::FIRST,
@@ -254,7 +254,7 @@ mod tests {
             )
             .await
             .unwrap();
-        ledger
+        store
             .append(
                 id,
                 seq,
@@ -270,9 +270,9 @@ mod tests {
         id
     }
 
-    /// 台帳に積まれた事象の本数。誕生を除く。
-    async fn recorded(ledger: &Ledger, id: ItemId) -> usize {
-        ledger.log(id).await.unwrap().unwrap().rest.len()
+    /// イベントログに積まれたイベントの本数。誕生を除く。
+    async fn recorded(store: &EventStore, id: ItemId) -> usize {
+        store.log(id).await.unwrap().unwrap().rest.len()
     }
 
     fn media_exists(media_dir: &Path, id: ItemId) -> bool {
@@ -282,12 +282,12 @@ mod tests {
     /// 期限まで在った → `discarded`。手元の実体も消える（#1）。
     #[tokio::test]
     async fn present_at_the_deadline_is_discarded() {
-        let ledger = Ledger::open_in_memory().await.unwrap();
+        let store = EventStore::open_in_memory().await.unwrap();
         let media = tempfile::tempdir().unwrap();
-        let source = seeded(&ledger).await;
-        let id = holding_item(&ledger, media.path(), source, "dQw4w9WgXcQ").await;
+        let source = seeded(&store).await;
+        let id = holding_item(&store, media.path(), source, "dQw4w9WgXcQ").await;
 
-        let state = Custody::new(&ledger, media.path())
+        let state = Custody::new(&store, media.path())
             .check(id, Some(&FakeProbe(Ok(Presence::Present))), deadline())
             .await
             .unwrap();
@@ -299,12 +299,12 @@ mod tests {
     /// 消えた → `kept`。手元のものは残る（#1）。
     #[tokio::test]
     async fn a_source_that_is_gone_leaves_the_copy_kept() {
-        let ledger = Ledger::open_in_memory().await.unwrap();
+        let store = EventStore::open_in_memory().await.unwrap();
         let media = tempfile::tempdir().unwrap();
-        let source = seeded(&ledger).await;
-        let id = holding_item(&ledger, media.path(), source, "dQw4w9WgXcQ").await;
+        let source = seeded(&store).await;
+        let id = holding_item(&store, media.path(), source, "dQw4w9WgXcQ").await;
 
-        let state = Custody::new(&ledger, media.path())
+        let state = Custody::new(&store, media.path())
             .check(
                 id,
                 Some(&FakeProbe(Ok(Presence::Gone))),
@@ -320,12 +320,12 @@ mod tests {
     /// 「消えた」と断定できる失敗も、消えたとして扱う（#5）。
     #[tokio::test]
     async fn a_failure_that_proves_absence_counts_as_gone() {
-        let ledger = Ledger::open_in_memory().await.unwrap();
+        let store = EventStore::open_in_memory().await.unwrap();
         let media = tempfile::tempdir().unwrap();
-        let source = seeded(&ledger).await;
-        let id = holding_item(&ledger, media.path(), source, "dQw4w9WgXcQ").await;
+        let source = seeded(&store).await;
+        let id = holding_item(&store, media.path(), source, "dQw4w9WgXcQ").await;
 
-        let state = Custody::new(&ledger, media.path())
+        let state = Custody::new(&store, media.path())
             .check(
                 id,
                 Some(&FakeProbe(Err(AdapterError::Unavailable {
@@ -342,13 +342,13 @@ mod tests {
     /// 期限前に在ることを確かめたら、`presence_confirmed` を1つ書いて `holding` のまま。
     #[tokio::test]
     async fn a_confirmation_before_the_deadline_only_records_the_fact() {
-        let ledger = Ledger::open_in_memory().await.unwrap();
+        let store = EventStore::open_in_memory().await.unwrap();
         let media = tempfile::tempdir().unwrap();
-        let source = seeded(&ledger).await;
-        let id = holding_item(&ledger, media.path(), source, "dQw4w9WgXcQ").await;
-        let before = recorded(&ledger, id).await;
+        let source = seeded(&store).await;
+        let id = holding_item(&store, media.path(), source, "dQw4w9WgXcQ").await;
+        let before = recorded(&store, id).await;
 
-        let state = Custody::new(&ledger, media.path())
+        let state = Custody::new(&store, media.path())
             .check(
                 id,
                 Some(&FakeProbe(Ok(Presence::Present))),
@@ -358,58 +358,58 @@ mod tests {
             .unwrap();
 
         assert_eq!(state, State::Holding { until: deadline() });
-        assert_eq!(recorded(&ledger, id).await, before + 1);
+        assert_eq!(recorded(&store, id).await, before + 1);
     }
 
     /// 確かめられなければ、期限を過ぎていても捨てない。**行も増えない**（#5）。
     #[tokio::test]
     async fn an_unconfirmed_item_survives_its_deadline() {
-        let ledger = Ledger::open_in_memory().await.unwrap();
+        let store = EventStore::open_in_memory().await.unwrap();
         let media = tempfile::tempdir().unwrap();
-        let source = seeded(&ledger).await;
-        let id = holding_item(&ledger, media.path(), source, "dQw4w9WgXcQ").await;
-        let before = recorded(&ledger, id).await;
+        let source = seeded(&store).await;
+        let id = holding_item(&store, media.path(), source, "dQw4w9WgXcQ").await;
+        let before = recorded(&store, id).await;
         let long_past = at("2026-12-31T00:00:00+09:00");
 
-        let state = Custody::new(&ledger, media.path())
+        let state = Custody::new(&store, media.path())
             .check(id, Some(&FakeProbe(Ok(Presence::Unknown))), long_past)
             .await
             .unwrap();
 
         assert_eq!(state, State::Holding { until: deadline() });
-        assert_eq!(recorded(&ledger, id).await, before, "沈黙は残らない");
+        assert_eq!(recorded(&store, id).await, before, "沈黙は残らない");
         assert!(media_exists(media.path(), id));
     }
 
     /// 確かめる手段を持たない種別（#5 の X 投稿）も、同じ道を通る。
     #[tokio::test]
     async fn a_type_with_no_way_to_check_takes_the_same_path() {
-        let ledger = Ledger::open_in_memory().await.unwrap();
+        let store = EventStore::open_in_memory().await.unwrap();
         let media = tempfile::tempdir().unwrap();
-        let source = seeded(&ledger).await;
-        let id = holding_item(&ledger, media.path(), source, "dQw4w9WgXcQ").await;
-        let before = recorded(&ledger, id).await;
+        let source = seeded(&store).await;
+        let id = holding_item(&store, media.path(), source, "dQw4w9WgXcQ").await;
+        let before = recorded(&store, id).await;
         let long_past = at("2026-12-31T00:00:00+09:00");
 
-        let state = Custody::new(&ledger, media.path())
+        let state = Custody::new(&store, media.path())
             .check(id, None, long_past)
             .await
             .unwrap();
 
         assert_eq!(state, State::Holding { until: deadline() });
-        assert_eq!(recorded(&ledger, id).await, before);
+        assert_eq!(recorded(&store, id).await, before);
     }
 
     /// cookie の失効は項目の問題ではないので、握りつぶさず返す（#5）。
     #[tokio::test]
     async fn an_expired_cookie_reaches_the_caller() {
-        let ledger = Ledger::open_in_memory().await.unwrap();
+        let store = EventStore::open_in_memory().await.unwrap();
         let media = tempfile::tempdir().unwrap();
-        let source = seeded(&ledger).await;
-        let id = holding_item(&ledger, media.path(), source, "dQw4w9WgXcQ").await;
-        let before = recorded(&ledger, id).await;
+        let source = seeded(&store).await;
+        let id = holding_item(&store, media.path(), source, "dQw4w9WgXcQ").await;
+        let before = recorded(&store, id).await;
 
-        let result = Custody::new(&ledger, media.path())
+        let result = Custody::new(&store, media.path())
             .check(
                 id,
                 Some(&FakeProbe(Err(AdapterError::Unauthenticated {
@@ -423,18 +423,18 @@ mod tests {
             result,
             Err(CustodyError::Adapter(AdapterError::Unauthenticated { .. }))
         ));
-        assert_eq!(recorded(&ledger, id).await, before);
+        assert_eq!(recorded(&store, id).await, before);
     }
 
     /// 預かり中でないものは受け取らない。
     #[tokio::test]
     async fn only_a_held_item_is_checked() {
-        let ledger = Ledger::open_in_memory().await.unwrap();
+        let store = EventStore::open_in_memory().await.unwrap();
         let media = tempfile::tempdir().unwrap();
-        let source = seeded(&ledger).await;
-        let id = live_item(&ledger, media.path(), source, "dQw4w9WgXcQ").await;
+        let source = seeded(&store).await;
+        let id = live_item(&store, media.path(), source, "dQw4w9WgXcQ").await;
 
-        let result = Custody::new(&ledger, media.path())
+        let result = Custody::new(&store, media.path())
             .check(id, Some(&FakeProbe(Ok(Presence::Present))), deadline())
             .await;
 

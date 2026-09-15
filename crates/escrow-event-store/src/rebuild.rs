@@ -1,23 +1,23 @@
-//! 投影を捨てて作り直す（#15）。
+//! リードモデルを捨てて作り直す（#15）。
 //!
-//! 投影のスキーマを変えたいときは、移行ではなくこれを走らせる。
+//! リードモデルのスキーマを変えたいときは、移行ではなくこれを走らせる。
 
 use escrow_domain::timestamp::Timestamp;
 use sqlx::Executor;
 
 use crate::item::{Columns, EventRow, log_of};
-use crate::{Ledger, LedgerError, PROJECTION, WRITE};
+use crate::{EventStore, EventStoreError, READ_MODEL, WRITE};
 
-impl Ledger {
-    /// 投影を DROP して作り直し、ログから埋め直す。
+impl EventStore {
+    /// リードモデルを DROP して作り直し、ログから埋め直す。
     ///
-    /// 戻すのは作り直した項目の数。DDL の写しは `projections/item.sql` の1つきりで、
-    /// 起動時に投影を作るのと同じものを流す。
-    pub async fn rebuild(&self) -> Result<u64, LedgerError> {
+    /// 戻すのは作り直した項目の数。DDL の写しは `read_models/item.sql` の1つきりで、
+    /// 起動時にリードモデルを作るのと同じものを流す。
+    pub async fn rebuild(&self) -> Result<u64, EventStoreError> {
         let mut tx = self.pool.begin_with(WRITE).await?;
 
         tx.execute("DROP TABLE IF EXISTS item").await?;
-        tx.execute(PROJECTION).await?;
+        tx.execute(READ_MODEL).await?;
 
         let rows = sqlx::query_as!(
             EventRow,
@@ -103,17 +103,17 @@ mod tests {
     use escrow_domain::url;
 
     use crate::testing::at;
-    use crate::{Ledger, NewSource, Seq};
+    use crate::{EventStore, NewSource, Seq};
 
-    /// 投影を壊してから作り直し、元に戻ることを確かめる。
+    /// リードモデルを壊してから作り直し、元に戻ることを確かめる。
     ///
-    /// 投影を書き換えられるのは crate の中だけなので、**壊す側もここにしか書けない**。
-    /// それ自体が「投影は追記からしか動かない」の裏付けになっている。
+    /// リードモデルを書き換えられるのは crate の中だけなので、**壊す側もここにしか書けない**。
+    /// それ自体が「リードモデルは追記からしか動かない」の裏付けになっている。
     #[tokio::test]
-    async fn a_broken_projection_is_restored_from_the_log() {
-        let ledger = Ledger::open_in_memory().await.unwrap();
-        let person = ledger.add_person("○○").await.unwrap();
-        let source = ledger
+    async fn a_broken_read_model_is_restored_from_the_log() {
+        let store = EventStore::open_in_memory().await.unwrap();
+        let person = store.add_person("○○").await.unwrap();
+        let source = store
             .add_source(&NewSource {
                 person_id: person,
                 url: url::normalize_source(
@@ -132,7 +132,7 @@ mod tests {
         let deadline = at("2026-03-09T00:30:00+09:00");
         let mut ids = Vec::new();
         for video in ["dQw4w9WgXcQ", "bLKBe3uMMRI"] {
-            let id = ledger
+            let id = store
                 .discover(
                     &Discovered {
                         source_id: source,
@@ -154,7 +154,7 @@ mod tests {
                 .await
                 .unwrap();
 
-            let seq = ledger
+            let seq = store
                 .append(
                     id,
                     Seq::FIRST,
@@ -163,7 +163,7 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            ledger
+            store
                 .append(
                     id,
                     seq,
@@ -181,7 +181,7 @@ mod tests {
         let before: Vec<_> = {
             let mut kept = Vec::new();
             for id in &ids {
-                kept.push(ledger.item(*id).await.unwrap().unwrap());
+                kept.push(store.item(*id).await.unwrap().unwrap());
             }
             kept
         };
@@ -189,33 +189,33 @@ mod tests {
 
         // 手で壊す — 状態を書き換え、1件は行ごと消す。
         sqlx::query("UPDATE item SET state = 'error', hold_until = NULL")
-            .execute(&ledger.pool)
+            .execute(&store.pool)
             .await
             .unwrap();
         sqlx::query("DELETE FROM item WHERE id = ?")
             .bind(i64::from(ids[1]))
-            .execute(&ledger.pool)
+            .execute(&store.pool)
             .await
             .unwrap();
 
-        assert_eq!(ledger.rebuild().await.unwrap(), 2);
+        assert_eq!(store.rebuild().await.unwrap(), 2);
 
         for (id, expected) in ids.iter().zip(&before) {
-            assert_eq!(&ledger.item(*id).await.unwrap().unwrap(), expected);
+            assert_eq!(&store.item(*id).await.unwrap().unwrap(), expected);
         }
     }
 
     /// 引き渡し済みの項目と、繋がりを持つ投稿も、作り直しで元に戻ること。
     ///
     /// 状態と対でしか意味を持たない値（`release_reference`）と、subtype ごとの値
-    /// （`title` / `body` / 繋がりの URL）が、どれも投影の側にしか無い状態に
+    /// （`title` / `body` / 繋がりの URL）が、どれもリードモデルの側にしか無い状態に
     /// なっていないことの確認（#1）。
     #[tokio::test]
     async fn released_items_and_linked_posts_survive_a_rebuild() {
-        let (ledger, source) = crate::testing::seeded().await;
+        let (store, source) = crate::testing::seeded().await;
 
         // 引き渡し済みの配信。題名に引用符と日本語が入る。
-        let live = ledger
+        let live = store
             .discover(
                 &Discovered {
                     source_id: source,
@@ -254,11 +254,11 @@ mod tests {
                 "2026-03-03T21:00:00+09:00",
             ),
         ] {
-            seq = ledger.append(live, seq, &event, at(moment)).await.unwrap();
+            seq = store.append(live, seq, &event, at(moment)).await.unwrap();
         }
 
         // 繋がりを持つ投稿。実体が無いので kept から始まる。
-        let post = ledger
+        let post = store
             .discover(
                 &crate::testing::a_post(source),
                 at("2026-03-01T12:01:00+09:00"),
@@ -267,24 +267,24 @@ mod tests {
             .unwrap();
 
         let before = [
-            ledger.item(live).await.unwrap().unwrap(),
-            ledger.item(post).await.unwrap().unwrap(),
+            store.item(live).await.unwrap().unwrap(),
+            store.item(post).await.unwrap().unwrap(),
         ];
 
-        assert_eq!(ledger.rebuild().await.unwrap(), 2);
+        assert_eq!(store.rebuild().await.unwrap(), 2);
 
         for (id, expected) in [live, post].into_iter().zip(&before) {
-            assert_eq!(&ledger.item(id).await.unwrap().unwrap(), expected);
+            assert_eq!(&store.item(id).await.unwrap().unwrap(), expected);
         }
     }
 
     /// ログが空なら、作り直しても空。
     #[tokio::test]
-    async fn rebuilding_an_empty_log_leaves_an_empty_projection() {
-        let ledger = Ledger::open_in_memory().await.unwrap();
-        assert_eq!(ledger.rebuild().await.unwrap(), 0);
+    async fn rebuilding_an_empty_log_leaves_an_empty_read_model() {
+        let store = EventStore::open_in_memory().await.unwrap();
+        assert_eq!(store.rebuild().await.unwrap(), 0);
         assert!(
-            ledger
+            store
                 .items_in_state(escrow_domain::state::StateName::Waiting)
                 .await
                 .unwrap()

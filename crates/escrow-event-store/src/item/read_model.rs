@@ -1,9 +1,9 @@
-//! `item` テーブル。#1 の erDiagram をそのまま写した投影（#15）。
+//! `item` テーブル。#1 の erDiagram をそのまま写したリードモデル（#15）。
 //!
-//! 列も索引も事象ログを入れる前と同じなので、**読み出しのクエリと性能は変わらない**。
+//! 列も索引もイベントログを入れる前と同じなので、**読み出しのクエリと性能は変わらない**。
 //! 変わったのは書き込みだけ。
 //!
-//! 読み出しは必ず `seq` を連れて返す。次の事象を書くときの前提になるので、
+//! 読み出しは必ず `seq` を連れて返す。次のイベントを書くときの前提になるので、
 //! 根拠を持たずに書く経路を作らせない。
 
 use escrow_domain::content::{Content, ContentType};
@@ -13,10 +13,10 @@ use escrow_domain::state::{Hold, ReleaseReference, State, StateName};
 use escrow_domain::timestamp::Timestamp;
 use escrow_domain::url::NormalizedUrl;
 
-use super::Projected;
-use crate::{Ledger, LedgerError, RowError, Seq, content_type_of, normalized, timestamp};
+use super::ReadModelRow;
+use crate::{EventStore, EventStoreError, RowError, Seq, content_type_of, normalized, timestamp};
 
-/// `item` の1行と、その姿を決めた最後の事象の番号。ここから先はドメイン型。
+/// `item` の1行と、その姿を決めた最後のイベントの番号。ここから先はドメイン型。
 struct Row {
     id: i64,
     source_id: i64,
@@ -35,9 +35,9 @@ struct Row {
     seq: i64,
 }
 
-impl Ledger {
+impl EventStore {
     /// `id` で1件読む。
-    pub async fn item(&self, id: ItemId) -> Result<Option<Projected>, LedgerError> {
+    pub async fn item(&self, id: ItemId) -> Result<Option<ReadModelRow>, EventStoreError> {
         let key = i64::from(id);
         let row = sqlx::query_as!(
             Row,
@@ -51,11 +51,16 @@ impl Ledger {
         .fetch_optional(&self.pool)
         .await?;
 
-        row.map(Projected::try_from).transpose().map_err(Into::into)
+        row.map(ReadModelRow::try_from)
+            .transpose()
+            .map_err(Into::into)
     }
 
     /// 正規化した URL で1件読む。項目の自然キー（#1）。
-    pub async fn item_by_url(&self, url: &NormalizedUrl) -> Result<Option<Projected>, LedgerError> {
+    pub async fn item_by_url(
+        &self,
+        url: &NormalizedUrl,
+    ) -> Result<Option<ReadModelRow>, EventStoreError> {
         let key = url.as_str();
         let row = sqlx::query_as!(
             Row,
@@ -69,14 +74,19 @@ impl Ledger {
         .fetch_optional(&self.pool)
         .await?;
 
-        row.map(Projected::try_from).transpose().map_err(Into::into)
+        row.map(ReadModelRow::try_from)
+            .transpose()
+            .map_err(Into::into)
     }
 
     /// 持ち主で絞って読む。配信元をまたいで、その人の項目がすべて出る（#6）。
     ///
     /// 並べ替えは呼ぶ側の仕事。`published_at` は時差を保つ text なので（#1）、
     /// SQL で並べると字面の順になり、時差の違う行が時刻の順に並ばない。
-    pub async fn items_of_person(&self, person: PersonId) -> Result<Vec<Projected>, LedgerError> {
+    pub async fn items_of_person(
+        &self,
+        person: PersonId,
+    ) -> Result<Vec<ReadModelRow>, EventStoreError> {
         let key = i64::from(person);
         let rows = sqlx::query_as!(
             Row,
@@ -92,13 +102,16 @@ impl Ledger {
         .await?;
 
         rows.into_iter()
-            .map(Projected::try_from)
+            .map(ReadModelRow::try_from)
             .collect::<Result<_, _>>()
             .map_err(Into::into)
     }
 
     /// 状態で絞って読む。エンジンはこれで拾ったものを、対応するスライスへ渡す（#15）。
-    pub async fn items_in_state(&self, state: StateName) -> Result<Vec<Projected>, LedgerError> {
+    pub async fn items_in_state(
+        &self,
+        state: StateName,
+    ) -> Result<Vec<ReadModelRow>, EventStoreError> {
         let key = state.as_str();
         let rows = sqlx::query_as!(
             Row,
@@ -113,13 +126,13 @@ impl Ledger {
         .await?;
 
         rows.into_iter()
-            .map(Projected::try_from)
+            .map(ReadModelRow::try_from)
             .collect::<Result<_, _>>()
             .map_err(Into::into)
     }
 }
 
-impl TryFrom<Row> for Projected {
+impl TryFrom<Row> for ReadModelRow {
     type Error = RowError;
 
     fn try_from(row: Row) -> Result<Self, Self::Error> {
@@ -291,7 +304,7 @@ pub(super) fn seq_of(id: i64, value: i64) -> Result<Seq, RowError> {
         })
 }
 
-/// ドメイン型から、投影の「`NULL` を許す」列を取り出したもの。
+/// ドメイン型から、リードモデルの「`NULL` を許す」列を取り出したもの。
 ///
 /// 書く側と読む側がここで対になる。[`State`] が伴う値は状態自身から取るので、
 /// 状態と列が食い違う書き方ができない。
@@ -340,10 +353,10 @@ mod tests {
     use escrow_domain::url;
 
     use crate::testing::{a_holding_item, a_live, a_post, at, item_url, seeded};
-    use crate::{Ledger, LedgerError, NewSource, RowError};
+    use crate::{EventStore, EventStoreError, NewSource, RowError};
 
-    async fn a_source_for(ledger: &Ledger, person: PersonId, raw: &str) -> SourceId {
-        ledger
+    async fn a_source_for(store: &EventStore, person: PersonId, raw: &str) -> SourceId {
+        store
             .add_source(&NewSource {
                 person_id: person,
                 url: url::normalize_source(raw).expect(raw),
@@ -357,10 +370,10 @@ mod tests {
             .unwrap()
     }
 
-    async fn an_item_at(ledger: &Ledger, source: SourceId, raw: &str) -> ItemId {
+    async fn an_item_at(store: &EventStore, source: SourceId, raw: &str) -> ItemId {
         let mut found = a_live(source);
         found.url = item_url(raw);
-        ledger
+        store
             .discover(&found, at("2026-03-01T20:05:00+09:00"))
             .await
             .unwrap()
@@ -369,25 +382,20 @@ mod tests {
     /// 持ち主で絞ると、配信元をまたいでその人の項目だけが出る（#6）。
     #[tokio::test]
     async fn lists_the_items_of_one_person_across_their_sources() {
-        let (ledger, first_source) = seeded().await;
-        let owner = ledger
-            .source(first_source)
-            .await
-            .unwrap()
-            .unwrap()
-            .person_id;
+        let (store, first_source) = seeded().await;
+        let owner = store.source(first_source).await.unwrap().unwrap().person_id;
 
-        let second_source = a_source_for(&ledger, owner, "https://x.com/i/user/12").await;
+        let second_source = a_source_for(&store, owner, "https://x.com/i/user/12").await;
         let mine = [
-            a_holding_item(&ledger, first_source).await,
-            an_item_at(&ledger, second_source, "https://x.com/i/status/21").await,
+            a_holding_item(&store, first_source).await,
+            an_item_at(&store, second_source, "https://x.com/i/status/21").await,
         ];
 
-        let other = ledger.add_person("△△").await.unwrap();
-        let theirs = a_source_for(&ledger, other, "https://x.com/i/user/34").await;
-        an_item_at(&ledger, theirs, "https://x.com/i/status/35").await;
+        let other = store.add_person("△△").await.unwrap();
+        let theirs = a_source_for(&store, other, "https://x.com/i/user/34").await;
+        an_item_at(&store, theirs, "https://x.com/i/status/35").await;
 
-        let listed: Vec<ItemId> = ledger
+        let listed: Vec<ItemId> = store
             .items_of_person(owner)
             .await
             .unwrap()
@@ -400,10 +408,10 @@ mod tests {
     /// 項目を1つも持たない持ち主は、空で返る。画面はこれを受けて空の一覧を出す（#30）。
     #[tokio::test]
     async fn a_person_without_items_comes_back_empty() {
-        let ledger = Ledger::open_in_memory().await.unwrap();
-        let alone = ledger.add_person("□□").await.unwrap();
+        let store = EventStore::open_in_memory().await.unwrap();
+        let alone = store.add_person("□□").await.unwrap();
 
-        assert!(ledger.items_of_person(alone).await.unwrap().is_empty());
+        assert!(store.items_of_person(alone).await.unwrap().is_empty());
     }
 
     /// 崩し方ごとに、どのエラーになるはずかを見る述語。
@@ -500,13 +508,13 @@ mod tests {
         ];
 
         for (corruption, expected) in cases {
-            let (ledger, source) = seeded().await;
-            let id = a_holding_item(&ledger, source).await;
+            let (store, source) = seeded().await;
+            let id = a_holding_item(&store, source).await;
 
-            sqlx::query(corruption).execute(&ledger.pool).await.unwrap();
+            sqlx::query(corruption).execute(&store.pool).await.unwrap();
 
-            match ledger.item(id).await {
-                Err(LedgerError::Row(e)) => {
+            match store.item(id).await {
+                Err(EventStoreError::Row(e)) => {
                     assert!(expected(&e), "{corruption} で想定外のエラー: {e}");
                 }
                 other => panic!("{corruption} が通ってしまった: {other:?}"),
@@ -517,20 +525,20 @@ mod tests {
     /// `Post` 側の欠けも同じように捕まえる。
     #[tokio::test]
     async fn refuses_a_post_without_a_body() {
-        let (ledger, source) = seeded().await;
-        let id = ledger
+        let (store, source) = seeded().await;
+        let id = store
             .discover(&a_post(source), at("2026-03-01T12:01:00+09:00"))
             .await
             .unwrap();
 
         sqlx::query("UPDATE item SET body = NULL")
-            .execute(&ledger.pool)
+            .execute(&store.pool)
             .await
             .unwrap();
 
         assert!(matches!(
-            ledger.item(id).await,
-            Err(LedgerError::Row(RowError::MissingColumn {
+            store.item(id).await,
+            Err(EventStoreError::Row(RowError::MissingColumn {
                 column: "body",
                 ..
             }))
@@ -540,24 +548,24 @@ mod tests {
     /// 繋がりの URL も往復すること（#1）。
     #[tokio::test]
     async fn round_trips_a_post_with_its_links() {
-        let (ledger, source) = seeded().await;
+        let (store, source) = seeded().await;
         let post = a_post(source);
-        let id = ledger
+        let id = store
             .discover(&post, at("2026-03-01T12:01:00+09:00"))
             .await
             .unwrap();
 
-        let read = ledger.item(id).await.unwrap().unwrap();
+        let read = store.item(id).await.unwrap().unwrap();
         assert_eq!(read.item.content, post.content);
     }
 
     /// 入口が違っても同じ正規形になるので、同じ行に着く（#1）。
     #[tokio::test]
     async fn finds_an_item_by_its_natural_key() {
-        let (ledger, source) = seeded().await;
-        let id = a_holding_item(&ledger, source).await;
+        let (store, source) = seeded().await;
+        let id = a_holding_item(&store, source).await;
 
-        let found = ledger
+        let found = store
             .item_by_url(&crate::testing::item_url(
                 "https://youtu.be/dQw4w9WgXcQ?si=xyz",
             ))

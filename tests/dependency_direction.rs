@@ -10,13 +10,13 @@ use std::collections::BTreeSet;
 use escrow_tests::members;
 
 /// スライスが依存してよいもの。互いの名前はここに無い。
-const SLICE: &[&str] = &["escrow-domain", "escrow-ledger", "escrow-scheduler"];
+const SLICE: &[&str] = &["escrow-domain", "escrow-event-store", "escrow-scheduler"];
 
 /// 組み立てる crate が依存してよいもの。**緩めて「全部」にしない** — 緩めた瞬間に
 /// 段5 の検査が消え、`escrow-external` を直接呼ぶ経路が生える。
 const APP: &[&str] = &[
     "escrow-domain",
-    "escrow-ledger",
+    "escrow-event-store",
     "escrow-config",
     "escrow-scheduler",
     "escrow-discovery",
@@ -27,7 +27,7 @@ const APP: &[&str] = &[
 ];
 
 /// 入口が依存してよいもの。組み立てる crate だけ（#82）。**緩めて `APP` にしない** —
-/// 緩めた瞬間に、入口ごとに台帳を開いて組み立て直す経路が生え、画面ごとに足す関数が
+/// 緩めた瞬間に、入口ごとにイベントストアを開いて組み立て直す経路が生え、画面ごとに足す関数が
 /// 1つの入口にしか届かなくなる。
 const ENTRY: &[&str] = &["escrow-app"];
 
@@ -41,7 +41,7 @@ const ALLOWED: &[(&str, &[&str])] = &[
     ("escrow-domain", &[]),
     // 段2 — 設定・永続化・外部ツール。config だけは external と入口が読む。
     ("escrow-config", &[]),
-    ("escrow-ledger", &["escrow-domain"]),
+    ("escrow-event-store", &["escrow-domain"]),
     ("escrow-external", &["escrow-domain", "escrow-config"]),
     // 段3 — 外部アクセスの受付。external を依存に持つ唯一の crate（#3）。
     (
@@ -54,7 +54,7 @@ const ALLOWED: &[(&str, &[&str])] = &[
     ("escrow-acquisition", SLICE),
     ("escrow-transcription", SLICE),
     ("escrow-custody", SLICE),
-    ("escrow-handover", &["escrow-domain", "escrow-ledger"]),
+    ("escrow-handover", &["escrow-domain", "escrow-event-store"]),
     // 段5 — 組み立てる crate。すべてを組み立てるが、external だけは名前で知らない。
     ("escrow-app", APP),
     // 段5 — 入口。組み立てる crate だけを見る（#82）。同じ段の中の辺で、前例は

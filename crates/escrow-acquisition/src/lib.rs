@@ -16,14 +16,14 @@ use escrow_domain::item::ItemId;
 use escrow_domain::source::SourceId;
 use escrow_domain::state::{Event, HoldTooFar, State};
 use escrow_domain::timestamp::Timestamp;
-use escrow_ledger::{Ledger, LedgerError, Projected};
+use escrow_event_store::{EventStore, EventStoreError, ReadModelRow};
 use escrow_scheduler::{Acquire, AdapterError};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum AcquisitionError {
     #[error(transparent)]
-    Ledger(#[from] LedgerError),
+    EventStore(#[from] EventStoreError),
     #[error(transparent)]
     Adapter(#[from] AdapterError),
     #[error("項目 {0} が無い")]
@@ -35,15 +35,15 @@ pub enum AcquisitionError {
 }
 
 pub struct Acquisition<'a> {
-    ledger: &'a Ledger,
+    store: &'a EventStore,
     media_dir: &'a Path,
     acquire: &'a dyn Acquire,
 }
 
 impl<'a> Acquisition<'a> {
-    pub const fn new(ledger: &'a Ledger, media_dir: &'a Path, acquire: &'a dyn Acquire) -> Self {
+    pub const fn new(store: &'a EventStore, media_dir: &'a Path, acquire: &'a dyn Acquire) -> Self {
         Self {
-            ledger,
+            store,
             media_dir,
             acquire,
         }
@@ -54,7 +54,7 @@ impl<'a> Acquisition<'a> {
     /// 預かる日数は配信元から**取得が終わった瞬間に読む**（#1）。呼ぶ側から
     /// 受け取らない。
     ///
-    /// 途中の状態は都度書く。落ちたときにどこまで進んだかが台帳に残り、#6 の
+    /// 途中の状態は都度書く。落ちたときにどこまで進んだかがリードモデルに残り、#6 の
     /// ダッシュボードが「いま動いているもの」を読める。
     pub async fn run(&self, id: ItemId) -> Result<State, AcquisitionError> {
         let current = self.load(id).await?;
@@ -70,7 +70,7 @@ impl<'a> Acquisition<'a> {
         // 期限も日数も、この1つの瞬間から決まる。
         let finished = Timestamp::now();
         let source = self
-            .ledger
+            .store
             .source(source_id)
             .await?
             .ok_or(AcquisitionError::NoSuchSource(source_id))?;
@@ -83,29 +83,33 @@ impl<'a> Acquisition<'a> {
         Ok(current.item.state)
     }
 
-    async fn load(&self, id: ItemId) -> Result<Projected, AcquisitionError> {
-        self.ledger
+    async fn load(&self, id: ItemId) -> Result<ReadModelRow, AcquisitionError> {
+        self.store
             .item(id)
             .await?
             .ok_or(AcquisitionError::NoSuchItem(id))
     }
 
-    /// 事象を1つ追記し、書けた項目を読み直す。
+    /// イベントを1つ追記し、書けた項目を読み直す。
     ///
     /// 読んだときの `seq` をそのまま渡すので、途中で誰かが動かしていれば
-    /// [`LedgerError::Superseded`] で落ちる（#15）。
-    async fn step(&self, current: Projected, event: &Event) -> Result<Projected, AcquisitionError> {
+    /// [`EventStoreError::Superseded`] で落ちる（#15）。
+    async fn step(
+        &self,
+        current: ReadModelRow,
+        event: &Event,
+    ) -> Result<ReadModelRow, AcquisitionError> {
         self.append(current, event, Timestamp::now()).await
     }
 
     async fn append(
         &self,
-        current: Projected,
+        current: ReadModelRow,
         event: &Event,
         at: Timestamp,
-    ) -> Result<Projected, AcquisitionError> {
+    ) -> Result<ReadModelRow, AcquisitionError> {
         let id = current.item.id;
-        self.ledger.append(id, current.seq, event, at).await?;
+        self.store.append(id, current.seq, event, at).await?;
         self.load(id).await
     }
 }
@@ -119,7 +123,7 @@ mod tests {
     use escrow_domain::source::{Monitoring, SourceId};
     use escrow_domain::state::MediaPresence;
     use escrow_domain::url::{self, NormalizedUrl};
-    use escrow_ledger::{NewSource, Seq};
+    use escrow_event_store::{NewSource, Seq};
     use escrow_scheduler::BoxFuture;
     use std::num::NonZeroU32;
     use std::sync::Mutex;
@@ -171,16 +175,16 @@ mod tests {
         Timestamp::parse(text).expect(text)
     }
 
-    async fn waiting_item(ledger: &Ledger) -> (SourceId, ItemId) {
-        waiting_item_holding_for(ledger, None).await
+    async fn waiting_item(store: &EventStore) -> (SourceId, ItemId) {
+        waiting_item_holding_for(store, None).await
     }
 
     async fn waiting_item_holding_for(
-        ledger: &Ledger,
+        store: &EventStore,
         hold_days: Option<NonZeroU32>,
     ) -> (SourceId, ItemId) {
-        let person = ledger.add_person("○○").await.unwrap();
-        let source = ledger
+        let person = store.add_person("○○").await.unwrap();
+        let source = store
             .add_source(&NewSource {
                 person_id: person,
                 url: url::normalize_source(
@@ -196,7 +200,7 @@ mod tests {
             .await
             .unwrap();
 
-        let id = ledger
+        let id = store
             .discover(
                 &Discovered {
                     source_id: source,
@@ -231,12 +235,12 @@ mod tests {
     /// 次に誰が拾うかは状態が決める（#15）。
     #[tokio::test]
     async fn audible_media_stops_at_transcribing() {
-        let ledger = Ledger::open_in_memory().await.unwrap();
-        let (_, id) = waiting_item_holding_for(&ledger, NonZeroU32::new(7)).await;
+        let store = EventStore::open_in_memory().await.unwrap();
+        let (_, id) = waiting_item_holding_for(&store, NonZeroU32::new(7)).await;
         let media = tempfile::tempdir().unwrap();
         let acquire = takes(&["video.1.mp4"]);
 
-        let state = Acquisition::new(&ledger, media.path(), &acquire)
+        let state = Acquisition::new(&store, media.path(), &acquire)
             .run(id)
             .await
             .unwrap();
@@ -250,11 +254,11 @@ mod tests {
     #[tokio::test]
     async fn images_alone_skip_transcription() {
         for (hold_days, expects_a_deadline) in [(None, false), (NonZeroU32::new(7), true)] {
-            let ledger = Ledger::open_in_memory().await.unwrap();
-            let (_, id) = waiting_item_holding_for(&ledger, hold_days).await;
+            let store = EventStore::open_in_memory().await.unwrap();
+            let (_, id) = waiting_item_holding_for(&store, hold_days).await;
             let media = tempfile::tempdir().unwrap();
 
-            let state = Acquisition::new(&ledger, media.path(), &takes(&["image.1.jpg"]))
+            let state = Acquisition::new(&store, media.path(), &takes(&["image.1.jpg"]))
                 .run(id)
                 .await
                 .unwrap();
@@ -274,12 +278,12 @@ mod tests {
     /// 落としたものが手元に残ること。
     #[tokio::test]
     async fn what_was_downloaded_stays_on_disk() {
-        let ledger = Ledger::open_in_memory().await.unwrap();
-        let (_, id) = waiting_item(&ledger).await;
+        let store = EventStore::open_in_memory().await.unwrap();
+        let (_, id) = waiting_item(&store).await;
         let media = tempfile::tempdir().unwrap();
 
         Acquisition::new(
-            &ledger,
+            &store,
             media.path(),
             &takes(&["video.1.mp4", "video.2.mp4"]),
         )
@@ -297,22 +301,22 @@ mod tests {
         );
     }
 
-    /// 取得で落ちたら `acquiring` のまま残る。台帳を見れば、どこで止まったか分かる。
+    /// 取得で落ちたら `acquiring` のまま残る。リードモデルを見れば、どこで止まったか分かる。
     ///
     /// リトライと `error` への遷移は Phase 6 の担当（#7）。
     #[tokio::test]
     async fn a_failed_download_leaves_the_item_where_it_stopped() {
-        let ledger = Ledger::open_in_memory().await.unwrap();
-        let (_, id) = waiting_item(&ledger).await;
+        let store = EventStore::open_in_memory().await.unwrap();
+        let (_, id) = waiting_item(&store).await;
         let media = tempfile::tempdir().unwrap();
 
-        let result = Acquisition::new(&ledger, media.path(), &Failing)
+        let result = Acquisition::new(&store, media.path(), &Failing)
             .run(id)
             .await;
 
         assert!(matches!(result, Err(AcquisitionError::Adapter(_))));
         assert_eq!(
-            ledger.item(id).await.unwrap().unwrap().item.state,
+            store.item(id).await.unwrap().unwrap().item.state,
             State::Acquiring
         );
     }
@@ -339,12 +343,12 @@ mod tests {
             }
         }
 
-        let ledger = Ledger::open_in_memory().await.unwrap();
-        let (_, id) = waiting_item_holding_for(&ledger, NonZeroU32::new(7)).await;
+        let store = EventStore::open_in_memory().await.unwrap();
+        let (_, id) = waiting_item_holding_for(&store, NonZeroU32::new(7)).await;
         let media = tempfile::tempdir().unwrap();
 
         let started = Timestamp::now();
-        let state = Acquisition::new(&ledger, media.path(), &Slow)
+        let state = Acquisition::new(&store, media.path(), &Slow)
             .run(id)
             .await
             .unwrap();
@@ -360,21 +364,23 @@ mod tests {
     /// 図に無い出発点からは動かない。
     #[tokio::test]
     async fn only_a_waiting_item_can_start() {
-        let ledger = Ledger::open_in_memory().await.unwrap();
-        let (_, id) = waiting_item(&ledger).await;
+        let store = EventStore::open_in_memory().await.unwrap();
+        let (_, id) = waiting_item(&store).await;
         let media = tempfile::tempdir().unwrap();
-        ledger
+        store
             .append(id, Seq::FIRST, &Event::Deleted, Timestamp::now())
             .await
             .unwrap();
 
-        let result = Acquisition::new(&ledger, media.path(), &takes(&["video.1.mp4"]))
+        let result = Acquisition::new(&store, media.path(), &takes(&["video.1.mp4"]))
             .run(id)
             .await;
 
         assert!(matches!(
             result,
-            Err(AcquisitionError::Ledger(LedgerError::IllegalTransition(_)))
+            Err(AcquisitionError::EventStore(
+                EventStoreError::IllegalTransition(_)
+            ))
         ));
     }
 }

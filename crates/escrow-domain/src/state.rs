@@ -29,7 +29,7 @@ pub enum State {
     /// 預かり中。この期限まで配信元を確認し続ける。
     ///
     /// 期限を伴わない `holding` は作れない。#1 の「期限のない預かりを表現できない」を、
-    /// 事象だけでなく状態の側でも成り立たせる。
+    /// イベントだけでなく状態の側でも成り立たせる。
     Holding { until: Timestamp },
     /// 保持が確定し、引き渡しを待つ。終端ではない。
     Kept,
@@ -136,7 +136,7 @@ impl State {
 
     /// 預かりの期限。持たない状態では空（#1 の `ITEM.hold_until`）。
     ///
-    /// [`Self::release_reference`] と合わせて、投影の列を書く側の全体像になる。
+    /// [`Self::release_reference`] と合わせて、リードモデルの列を書く側の全体像になる。
     /// 読み戻す側はこの3つ（名前・期限・参照）を揃えて [`State`] を組み直す。
     pub const fn hold_until(&self) -> Option<Timestamp> {
         match self {
@@ -251,7 +251,7 @@ impl ReleaseReference {
 
 /// 取得や文字起こしが1回失敗した理由。escrow は解釈せず保管する（#1）。
 ///
-/// 中身は外部ツールの出力だが、**回数を数えるために事象そのものが要る**ので、
+/// 中身は外部ツールの出力だが、**回数を数えるためにイベントそのものが要る**ので、
 /// #1 の「履歴を残す範囲は stateDiagram だけ」の外には出ない。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FailureReason(String);
@@ -291,7 +291,7 @@ pub enum Event {
     AcquisitionStarted,
     /// 取得が終わった。次にどこへ行くかは2つのスイッチが決める（#1 の「経路が分かれる理由」）。
     ///
-    /// **預かりの期限を運ぶのはこの事象だけ。** 以降は状態が持つ。
+    /// **預かりの期限を運ぶのはこのイベントだけ。** 以降は状態が持つ。
     Acquired {
         transcript: TranscriptNeed,
         hold: Hold,
@@ -316,7 +316,7 @@ pub enum Event {
     Deleted,
     /// 取得か文字起こしが1回失敗した。**状態は動かない。**
     ///
-    /// リトライ回数はこの事象を数えて導出する。`RetriesExhausted` は終端なので、
+    /// リトライ回数はこのイベントを数えて導出する。`RetriesExhausted` は終端なので、
     /// それだけでは最後の1回しか残らず数えられない（#1）。
     AttemptFailed { reason: FailureReason },
     /// リトライ上限に達した。
@@ -325,7 +325,7 @@ pub enum Event {
     ReacquisitionRequested,
 }
 
-/// ログに残る事象の判別子。DB の `item_event.kind`（#1）。
+/// ログに残るイベントの判別子。DB の `item_event.kind`（#1）。
 ///
 /// [`Event`] より1つ多い。`Discovered` は状態を動かさないので [`Event`] には無いが、
 /// 保存の形では他と同じ1行になる。**行を読む側はこの enum で全域に分岐し**、
@@ -382,7 +382,7 @@ impl EventKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
-#[error("escrow が知らない事象: {0}")]
+#[error("escrow が知らないイベント: {0}")]
 pub struct UnknownEventKind(pub String);
 
 impl std::str::FromStr for EventKind {
@@ -430,11 +430,11 @@ pub struct IllegalTransition {
 
 /// 状態遷移。#1 の stateDiagram をそのまま写した全域関数。
 ///
-/// 事象ごとに、受け付ける状態を並べる。内側の `match` は 9 状態を全部書き、
-/// **受け皿（`_ =>`）を置かない**。状態か事象を足すとここが軒並みコンパイルエラーになるので、
-/// 不正な遷移が「たまたま通る」ことがない。
+/// イベントごとに、受け付ける状態を並べる。内側の `match` は 9 状態を全部書き、
+/// **受け皿（`_ =>`）を置かない**。状態かイベントを足すとここが軒並みコンパイルエラーに
+/// なるので、不正な遷移が「たまたま通る」ことがない。
 ///
-/// 事象を保存する形にしたので、この関数がそのまま**ログを畳む関数**になる（#15）。
+/// イベントを保存する形にしたので、この関数がそのまま**ログをリプレイする関数**になる（#15）。
 pub fn next(state: &State, event: &Event) -> Result<State, IllegalTransition> {
     use Event as E;
     use State as S;
@@ -615,7 +615,7 @@ mod tests {
         ]
     }
 
-    /// 全事象の代表値。網羅の勘定に使う。
+    /// 全イベントの代表値。網羅の勘定に使う。
     fn all_events() -> [Event; 11] {
         [
             Event::AcquisitionStarted,
@@ -778,7 +778,7 @@ mod tests {
 
     /// 図に無い組み合わせはすべて拒まれる。
     ///
-    /// 9 状態 × 11 事象 = 99 通りのうち、通るのはちょうど 20 通り。
+    /// 9 状態 × 11 イベント = 99 通りのうち、通るのはちょうど 20 通り。
     /// 遷移を増やすとこの数が動くので、図を書き換えずに実装だけ緩めることができない。
     #[test]
     fn exactly_the_diagram_is_legal() {
@@ -870,7 +870,7 @@ mod tests {
         assert!(Presence::Unknown.confirmed().is_none());
         assert!(Presence::Gone.confirmed().is_none());
 
-        // 証があってはじめて事象が作れ、そこではじめて discarded へ行ける。
+        // 証があってはじめてイベントが作れ、そこではじめて discarded へ行ける。
         let event = Event::HeldToDeadline(Presence::Present.confirmed().unwrap());
         assert_eq!(
             next(&State::Holding { until: deadline() }, &event).unwrap(),
@@ -916,7 +916,7 @@ mod tests {
         assert!("gone".parse::<StateName>().is_err());
     }
 
-    /// 事象と判別子が1対1であること。
+    /// イベントと判別子が1対1であること。
     ///
     /// `Discovered` だけは [`Event`] に居ないので、`kind()` からは出てこない。
     /// 保存の形では他と同じ1行になるので、判別子の側には在る。
@@ -935,12 +935,12 @@ mod tests {
         assert_eq!(from_events, expected);
     }
 
-    /// 投影へ書く列と、状態が1対1であること。
+    /// リードモデルへ書く列と、状態が1対1であること。
     ///
     /// 読み戻す側はこの3つ（名前・期限・参照）から状態を組み直すので、
     /// 書く側が落とすものがあると往復しない。
     #[test]
-    fn the_projected_columns_cover_what_the_state_carries() {
+    fn the_read_model_columns_cover_what_the_state_carries() {
         for state in all_states() {
             let has_payload = state.hold_until().is_some() || state.release_reference().is_some();
             let carries_one = matches!(

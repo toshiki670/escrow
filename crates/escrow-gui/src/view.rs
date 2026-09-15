@@ -14,8 +14,8 @@ const SIDEBAR_WIDTH: f32 = 200.0;
 
 pub fn view(app: &App) -> Element<'_, Message> {
     match app {
-        App::Opening => centered("台帳を開いています"),
-        App::Unavailable(why) => centered(format!("台帳を開けません — {why}")),
+        App::Opening => centered("開いています"),
+        App::Unavailable(why) => centered(format!("開けません — {why}")),
         App::Ready(ready) => row![sidebar(ready), main(ready)].into(),
     }
 }
@@ -66,7 +66,7 @@ fn main(ready: &Ready) -> Element<'_, Message> {
         Selection::Person(_) => match ready.selected_person() {
             Some(person) => items_of(person, ready.listing()),
             // 持ち主を読んだあとに消えた。次に開けば居なくなっている。
-            None => centered("この持ち主は台帳に居ない"),
+            None => centered("この持ち主は居ない"),
         },
     };
 

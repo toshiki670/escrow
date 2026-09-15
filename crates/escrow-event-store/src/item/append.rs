@@ -1,7 +1,7 @@
-//! 事象を書く2つの道 — 誕生と追記（#15）。
+//! イベントを書く2つの道 — 誕生と追記（#15）。
 //!
-//! どちらも1つのトランザクションで、**事象を書いてから投影へ反映する**。投影の値は
-//! 決定ではなく決定の写し。
+//! どちらも1つのトランザクションで、**イベントを書いてからリードモデルへ反映する**。
+//! リードモデルの値は決定ではなく決定の写し。
 //!
 //! 追記は `(item_id, seq)` の UNIQUE が競合を弾く。
 
@@ -9,20 +9,20 @@ use escrow_domain::item::{Discovered, ItemId};
 use escrow_domain::state::{Event, Hold, MediaPresence, TranscriptNeed, next};
 use escrow_domain::timestamp::Timestamp;
 
-use super::projection::{Columns, state_of};
-use crate::{Ledger, LedgerError, Seq, WRITE, timestamp};
+use super::read_model::{Columns, state_of};
+use crate::{EventStore, EventStoreError, Seq, WRITE, timestamp};
 
-impl Ledger {
+impl EventStore {
     /// 項目を起票する。
     ///
-    /// ログの先頭に `discovered` を1つ書き、そこから投影の行を作る。`url` の
-    /// `UNIQUE` は投影が持っているが、両方を同じトランザクションで書くので、
+    /// ログの先頭に `discovered` を1つ書き、そこからリードモデルの行を作る。`url` の
+    /// `UNIQUE` はリードモデルが持っているが、両方を同じトランザクションで書くので、
     /// 同じ URL の2件目はログにも入らない（#1）。
     pub async fn discover(
         &self,
         discovered: &Discovered,
         at: Timestamp,
-    ) -> Result<ItemId, LedgerError> {
+    ) -> Result<ItemId, EventStoreError> {
         let state = discovered.initial_state();
         let columns = Columns::of(&discovered.content, &state);
 
@@ -38,7 +38,7 @@ impl Ledger {
 
         let mut tx = self.pool.begin_with(WRITE).await?;
 
-        // 同一性はログが持つ。投影の rowid から採ると、真実の側が捨てられる側の
+        // 同一性はログが持つ。リードモデルの rowid から採ると、真実の側が捨てられる側の
         // 採番に依存することになる。
         let id =
             sqlx::query!(r#"SELECT COALESCE(MAX(item_id), 0) + 1 AS "id!: i64" FROM item_event"#)
@@ -67,7 +67,7 @@ impl Ledger {
         )
         .execute(&mut *tx)
         .await
-        .map_err(LedgerError::from_append)?;
+        .map_err(EventStoreError::from_append)?;
 
         sqlx::query!(
             "INSERT INTO item (id, source_id, url, content_type, published_at, state, \
@@ -91,14 +91,14 @@ impl Ledger {
         )
         .execute(&mut *tx)
         .await
-        .map_err(LedgerError::from_append)?;
+        .map_err(EventStoreError::from_append)?;
 
         tx.commit().await?;
 
         Ok(ItemId::new(id))
     }
 
-    /// 事象を1つ追記し、同じトランザクションで投影へ反映する。
+    /// イベントを1つ追記し、同じトランザクションでリードモデルへ反映する。
     ///
     /// `after` は**その決定の前提**。読んだときの `seq` をそのまま渡す。ずれていれば
     /// 誰かが先に動かしているので、読み直して決め直す（#7）。
@@ -110,7 +110,7 @@ impl Ledger {
         after: Seq,
         event: &Event,
         at: Timestamp,
-    ) -> Result<Seq, LedgerError> {
+    ) -> Result<Seq, EventStoreError> {
         let key = i64::from(id);
         let mut tx = self.pool.begin_with(WRITE).await?;
 
@@ -124,13 +124,13 @@ impl Ledger {
         .await?;
 
         let Some(row) = row else {
-            return Err(LedgerError::NoSuchItem(id));
+            return Err(EventStoreError::NoSuchItem(id));
         };
 
         // 番号がずれていれば、この決定は古い姿を見て下されている。
         // 同時に走る2つのうち片方は、この先の UNIQUE でも弾かれる。
         if u32::try_from(row.seq).is_ok_and(|seq| seq != after.get()) {
-            return Err(LedgerError::Superseded);
+            return Err(EventStoreError::Superseded);
         }
 
         let hold_until = row
@@ -175,20 +175,20 @@ impl Ledger {
         )
         .execute(&mut *tx)
         .await
-        .map_err(LedgerError::from_append)?;
+        .map_err(EventStoreError::from_append)?;
 
         let state_name = moved.as_str();
         let state_since = state_since.to_text();
-        let projected_hold_until = moved.hold_until().map(Timestamp::to_text);
-        let projected_reference = moved.release_reference().map(|r| r.as_str().to_owned());
+        let next_hold_until = moved.hold_until().map(Timestamp::to_text);
+        let next_reference = moved.release_reference().map(|r| r.as_str().to_owned());
 
         sqlx::query!(
             "UPDATE item SET state = ?, state_since = ?, hold_until = ?, release_reference = ? \
              WHERE id = ?",
             state_name,
             state_since,
-            projected_hold_until,
-            projected_reference,
+            next_hold_until,
+            next_reference,
             key,
         )
         .execute(&mut *tx)
@@ -200,7 +200,7 @@ impl Ledger {
     }
 }
 
-/// 事象ごとの平らな列（#1）。運ばない事象では全部 `NULL`。
+/// イベントごとの平らな列（#1）。運ばないイベントでは全部 `NULL`。
 struct Payload {
     transcript_needed: Option<i64>,
     hold_until: Option<String>,
@@ -252,9 +252,9 @@ mod tests {
     use escrow_domain::state::Event;
 
     use crate::testing::{a_holding_item, at, seed_into};
-    use crate::{Ledger, LedgerError};
+    use crate::{EventStore, EventStoreError};
 
-    /// 別プロセスを模して、同じファイルを2つの `Ledger` が同時に書く。
+    /// 別プロセスを模して、同じファイルを2つの `EventStore` が同時に書く。
     ///
     /// **loser が受け取るのは `SQLITE_BUSY` ではなく `Superseded`**（#7）。`SQLITE_BUSY`
     /// （`database is locked`）は「誰かが先に書いた」ことを伝えないので、呼ぶ側が re-read
@@ -275,12 +275,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("escrow.db");
 
-        let engine = Ledger::open(&path).await.unwrap();
+        let engine = EventStore::open(&path).await.unwrap();
         let source = seed_into(&engine).await;
         let id = a_holding_item(&engine, source).await;
 
         // もう1つの担い手が同じファイルを開き、同じ姿を読む。
-        let cli = Ledger::open(&path).await.unwrap();
+        let cli = EventStore::open(&path).await.unwrap();
         let seen = engine.item(id).await.unwrap().unwrap().seq;
         assert_eq!(cli.item(id).await.unwrap().unwrap().seq, seen);
 
@@ -292,7 +292,8 @@ mod tests {
         );
 
         match (&first, &second) {
-            (Ok(_), Err(LedgerError::Superseded)) | (Err(LedgerError::Superseded), Ok(_)) => {}
+            (Ok(_), Err(EventStoreError::Superseded))
+            | (Err(EventStoreError::Superseded), Ok(_)) => {}
             _ => panic!("片方が通り、もう片方が Superseded: {first:?} / {second:?}"),
         }
 

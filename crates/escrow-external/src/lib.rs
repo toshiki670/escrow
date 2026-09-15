@@ -213,7 +213,7 @@ pub trait Discover {
     /// `since` 以降の項目を挙げる。
     ///
     /// #1 のとおり監視対象は `Source.created_at` 以降なので、それより古いものは
-    /// 返さない。既に台帳に在るかの判定は呼ぶ側（`Item.url` の一意キー）。
+    /// 返さない。既にリードモデルに在るかの判定は呼ぶ側（`Item.url` の一意キー）。
     fn discover<'a>(
         &'a self,
         source: &'a Source,

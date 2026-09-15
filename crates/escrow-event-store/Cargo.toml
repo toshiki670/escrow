@@ -1,5 +1,5 @@
 [package]
-name = "escrow-ledger"
+name = "escrow-event-store"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
