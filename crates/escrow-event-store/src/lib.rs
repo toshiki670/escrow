@@ -3,15 +3,16 @@
 //! 唯一の真実は `item_event` で、追記しかしない。`item` はそこから作られるリードモデルで、
 //! **いつでも捨てて作り直せる**。読むのはリードモデル、書くのはイベント、という分け方（CQRS）。
 //!
-//! **公開するのは [`EventStore::discover`] と [`EventStore::append`] の2つだけ。**
+//! **イベントを書く道は [`EventStore::discover`] と [`EventStore::append`] の2つだけ。**
 //! リードモデルはその2つを通ってしか動かないので、ログとリードモデルがずれる書き方が
 //! そもそも書けない。
 //! 何を公開してよいかは `tests/public_api.rs` の表が決める。
 //!
-//! **Young, 2010 の Event Store（`SaveChanges` / `GetEventsFor`）はイベントだけを持つ。**
-//! escrow の [`EventStore`] はそれに加えて、リードモデル（`item`）と catalog（`person` /
-//! `source` / `exclude`。イベントを持たず、いまの値の行を直接書く）を同じ SQLite に置き、
-//! リードモデルへの問い合わせを公開 API に持つ。
+//! **Young, 2010 の Event Store が持つのは、イベントの表と、そこから導ける aggregate の版の
+//! 表で、操作は `SaveChanges` / `GetEventsFor` の2つだけ。** escrow の [`EventStore`] は
+//! それに加えて、どのイベントからも導けない catalog（`person` / `source` / `exclude`。いまの
+//! 値の行を直接書く）とリードモデル（`item`）を同じ SQLite に置き、リードモデルへの
+//! 問い合わせを公開 API に持つ（#84）。
 //!
 //! 集約でディレクトリを切っていて、いまは `item` だけ。このファイルには集約に
 //! 依存しない仕組み — 接続・番号・行を読むときの失敗 — を置く。
@@ -206,6 +207,8 @@ pub enum RowError {
 }
 
 /// SQLite への接続。イベントを追記し、リードモデルを保つ。
+///
+/// Young, 2010 の Event Store と違えたことは [`crate`] の冒頭。
 #[derive(Debug)]
 pub struct EventStore {
     pool: SqlitePool,

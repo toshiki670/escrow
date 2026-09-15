@@ -38,7 +38,7 @@ async fn a_source_for(store: &EventStore, person: PersonId, raw: &str) -> Source
 }
 
 impl App {
-    /// `person add` → `source add` → `item add` → `fetch` が作る形を、イベントストアへ直接置く。
+    /// CLI の `person add` → `source add` → `item add` → `fetch` が作る形を、イベントストアへ直接置く。
     ///
     /// ○○ は配信1本（`holding`）と投稿1件（`kept`）、□□ は項目を持たない。
     ///

@@ -434,7 +434,7 @@ pub struct IllegalTransition {
 /// **受け皿（`_ =>`）を置かない**。状態かイベントを足すとここが軒並みコンパイルエラーに
 /// なるので、不正な遷移が「たまたま通る」ことがない。
 ///
-/// イベントを保存する形にしたので、この関数がそのまま**ログをリプレイする関数**になる（#15）。
+/// イベントを保存する形にしたので、この関数がそのまま**リプレイの1歩**になる（#15）。
 pub fn next(state: &State, event: &Event) -> Result<State, IllegalTransition> {
     use Event as E;
     use State as S;
