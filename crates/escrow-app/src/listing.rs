@@ -7,7 +7,8 @@
 //! そこから読み直すと**失敗しようのない経路に失敗が生える**。
 //!
 //! 見出しを何文字で切るかは、列幅の都合なので入口が決める（#6「切り方を決めるのは
-//! 表示する側」）。ここが返すのは1行目の全部。
+//! 表示する側」）。ここが返すのは1行目の全部で、`title` か `body` の1行目かの区別を
+//! 付けて返す — 入口が切るかどうかを、その区別で決める（#82）。
 
 use std::cmp::Reverse;
 
@@ -18,9 +19,21 @@ use escrow_handover::Handed;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Listed {
     published_at: Timestamp,
-    headline: String,
+    headline: Headline,
     state: String,
     content_type: String,
+}
+
+/// 見出し。`Media` は `title`、`Post` は `body` の1行目（#6）。
+///
+/// どちらから来たかを型で持つのは、入口が切るかどうかをそれで決めるため（#82）。
+/// `title` は全文のまま、`body` の1行目だけを列幅で切る。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Headline {
+    /// `Media` の `title`。全文が見出し。
+    Title(String),
+    /// `Post` の `body` の1行目。
+    Opening(String),
 }
 
 impl Listed {
@@ -38,8 +51,7 @@ impl Listed {
         self.published_at.inner().date_naive().to_string()
     }
 
-    /// `Media` は `title`、`Post` は `body` の1行目（#6）。
-    pub fn headline(&self) -> &str {
+    pub const fn headline(&self) -> &Headline {
         &self.headline
     }
 
@@ -62,15 +74,13 @@ pub(crate) fn newest_first(listed: &mut [Listed]) {
     listed.sort_by_key(|listed| Reverse(listed.published_at));
 }
 
-/// 見出し。`Media` は `title`、`Post` は `body` の1行目（#6）。
-///
 /// #4 はどちらか片方だけを埋めると決めているが、[`Handed`] の型は両方空も表せる。
-/// **そこは締めていない**ので、両方空なら見出しも空になる。
-fn headline(handed: &Handed) -> String {
+/// **そこは締めていない**ので、両方空なら空の1行目になる。
+fn headline(handed: &Handed) -> Headline {
     match (handed.title.as_deref(), handed.body.as_deref()) {
-        (Some(title), _) => title.to_owned(),
-        (None, Some(body)) => body.lines().next().unwrap_or_default().to_owned(),
-        (None, None) => String::new(),
+        (Some(title), _) => Headline::Title(title.to_owned()),
+        (None, Some(body)) => Headline::Opening(body.lines().next().unwrap_or_default().to_owned()),
+        (None, None) => Headline::Opening(String::new()),
     }
 }
 
@@ -105,14 +115,20 @@ mod tests {
     #[test]
     fn the_headline_comes_from_whichever_field_the_shape_fills() {
         let media = listed(Some("○○の雑談配信"), None, "2026-03-01T20:00:00+09:00");
-        assert_eq!(media.headline(), "○○の雑談配信");
+        assert_eq!(
+            media.headline(),
+            &Headline::Title("○○の雑談配信".to_owned())
+        );
 
         let post = listed(
             None,
             Some("明日の配信は21時から。"),
             "2026-03-01T12:00:00+09:00",
         );
-        assert_eq!(post.headline(), "明日の配信は21時から。");
+        assert_eq!(
+            post.headline(),
+            &Headline::Opening("明日の配信は21時から。".to_owned())
+        );
     }
 
     /// 本文は1行目だけを出す。改行から先は一覧の高さを崩す。
@@ -123,7 +139,10 @@ mod tests {
             Some("明日の配信は21時から。\n遅れたらごめん"),
             "2026-03-01T12:00:00+09:00",
         );
-        assert_eq!(post.headline(), "明日の配信は21時から。");
+        assert_eq!(
+            post.headline(),
+            &Headline::Opening("明日の配信は21時から。".to_owned())
+        );
     }
 
     /// 長い本文も1行目の全部を返す。切るのは入口（#6）。
@@ -132,7 +151,7 @@ mod tests {
         let body = "あ".repeat(100);
         let post = listed(None, Some(&body), "2026-03-01T12:00:00+09:00");
 
-        assert_eq!(post.headline(), body);
+        assert_eq!(post.headline(), &Headline::Opening(body));
     }
 
     /// 日付は日付だけ。時差は畳まず、配信元が言った日のまま出す（#1）。
@@ -166,7 +185,14 @@ mod tests {
         ];
         newest_first(&mut listing);
 
-        let headlines: Vec<&str> = listing.iter().map(Listed::headline).collect();
-        assert_eq!(headlines, ["新しい", "真ん中", "古い"]);
+        let headlines: Vec<&Headline> = listing.iter().map(Listed::headline).collect();
+        assert_eq!(
+            headlines,
+            [
+                &Headline::Title("新しい".to_owned()),
+                &Headline::Title("真ん中".to_owned()),
+                &Headline::Title("古い".to_owned()),
+            ]
+        );
     }
 }

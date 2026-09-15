@@ -97,7 +97,7 @@ fn items(listed: &[Listed]) -> Element<'_, Message> {
         [
             table::column(text("日付"), |item: &Listed| text(item.published_on())).width(110.0),
             table::column(text("項目"), |item: &Listed| {
-                text(listing::cut(item.headline()))
+                text(listing::shown(item.headline()))
             })
             .width(Fill),
             table::column(text("状態"), |item: &Listed| text(item.state())).width(110.0),

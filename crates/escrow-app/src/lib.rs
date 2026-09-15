@@ -38,7 +38,7 @@ pub use escrow_domain::item::ItemId;
 pub use escrow_domain::source::{Person, PersonId, SourceId};
 pub use escrow_domain::state::State;
 pub use escrow_handover::Handed;
-pub use listing::Listed;
+pub use listing::{Headline, Listed};
 
 /// 入口へ返す失敗。
 ///
@@ -380,8 +380,14 @@ mod tests {
         let nobody = persons.iter().find(|p| p.name == "□□").unwrap();
 
         let listed = app.items_of(owner.id).await.unwrap();
-        let headlines: Vec<&str> = listed.iter().map(Listed::headline).collect();
-        assert_eq!(headlines, ["○○の雑談配信", "明日の配信は21時から。"]);
+        let headlines: Vec<&Headline> = listed.iter().map(Listed::headline).collect();
+        assert_eq!(
+            headlines,
+            [
+                &Headline::Title("○○の雑談配信".to_owned()),
+                &Headline::Opening("明日の配信は21時から。".to_owned()),
+            ]
+        );
 
         let states: Vec<&str> = listed.iter().map(Listed::state).collect();
         assert_eq!(states, ["holding", "kept"]);
