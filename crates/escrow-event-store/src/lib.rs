@@ -3,17 +3,17 @@
 //! 唯一の真実は `item_event` で、追記しかしない。`item` はそこから作られるリードモデルで、
 //! **いつでも捨てて作り直せる**。読むのはリードモデル、書くのはイベント、という分け方（CQRS）。
 //!
-//! **イベントを書く道は [`EventStore::discover`] と [`EventStore::append`] の2つだけ。**
+//! **イベントを書く経路は [`EventStore::discover`] と [`EventStore::append`] の2つだけ。**
 //! リードモデルはその2つを通ってしか動かないので、ログとリードモデルがずれる書き方が
 //! そもそも書けない。
 //! 何を公開してよいかは `tests/public_api.rs` の表が決める。
 //!
 //! **Young, 2010 の基本の Event Store が持つのは、イベントの表と Aggregates 表（aggregate
 //! ごとのいまの版を非正規化して持つ。版はイベントの表から導ける）で、操作は `SaveChanges` /
-//! `GetEventsFor` の2つだけ。** escrow の [`EventStore`] は版の表を置かず、版は `item_event`
-//! の `MAX(seq)` で都度導く。そこに、どのイベントからも導けない catalog（`person` /
-//! `source` / `exclude`。いまの値の行を直接書く）とリードモデル（`item`）を同じ SQLite に
-//! 置き、リードモデルへの問い合わせを公開 API に持つ（#84）。
+//! `GetEventsFor` の2つだけ。** escrow の [`EventStore`] は版の表を置かず、版はイベントの表
+//! から都度導く。そこに、どのイベントからも導けない catalog（`person` / `source` /
+//! `exclude`。いまの値の行を直接書く）とリードモデル（`item`）を同じ SQLite に置き、
+//! リードモデルへの問い合わせを公開 API に持つ（#84）。
 //!
 //! 集約でディレクトリを切っていて、いまは `item` だけ。このファイルには集約に
 //! 依存しない仕組み — 接続・番号・行を読むときの失敗 — を置く。
