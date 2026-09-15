@@ -12,14 +12,9 @@ repository.workspace = true
 name = "escrow"
 path = "src/main.rs"
 
+# 段5 の入口。組み立てる crate だけを見る（#82）。
 [dependencies]
-escrow-domain.workspace = true
-escrow-ledger.workspace = true
-escrow-config.workspace = true
-escrow-scheduler.workspace = true
-escrow-acquisition.workspace = true
-escrow-transcription.workspace = true
-escrow-handover.workspace = true
+escrow-app.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 serde_json.workspace = true

@@ -1150,11 +1150,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "escrow-cli"
+name = "escrow-app"
 version = "0.1.0"
 dependencies = [
- "anyhow",
- "clap",
  "escrow-acquisition",
  "escrow-config",
  "escrow-domain",
@@ -1162,6 +1160,18 @@ dependencies = [
  "escrow-ledger",
  "escrow-scheduler",
  "escrow-transcription",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
+]
+
+[[package]]
+name = "escrow-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "escrow-app",
  "serde_json",
  "tokio",
 ]
@@ -1234,10 +1244,7 @@ dependencies = [
 name = "escrow-gui"
 version = "0.1.0"
 dependencies = [
- "escrow-config",
- "escrow-domain",
- "escrow-handover",
- "escrow-ledger",
+ "escrow-app",
  "iced",
  "iced_test",
  "tempfile",
