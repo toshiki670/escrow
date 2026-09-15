@@ -8,11 +8,12 @@
 //! そもそも書けない。
 //! 何を公開してよいかは `tests/public_api.rs` の表が決める。
 //!
-//! **Young, 2010 の Event Store が持つのは、イベントの表と、そこから導ける aggregate の版の
-//! 表で、操作は `SaveChanges` / `GetEventsFor` の2つだけ。** escrow の [`EventStore`] は
-//! それに加えて、どのイベントからも導けない catalog（`person` / `source` / `exclude`。いまの
-//! 値の行を直接書く）とリードモデル（`item`）を同じ SQLite に置き、リードモデルへの
-//! 問い合わせを公開 API に持つ（#84）。
+//! **Young, 2010 の基本の Event Store が持つのは、イベントの表と Aggregates 表（aggregate
+//! ごとのいまの版を非正規化して持つ。版はイベントの表から導ける）で、操作は `SaveChanges` /
+//! `GetEventsFor` の2つだけ。** escrow の [`EventStore`] は版の表を置かず、版は `item_event`
+//! の `MAX(seq)` で都度導く。そこに、どのイベントからも導けない catalog（`person` /
+//! `source` / `exclude`。いまの値の行を直接書く）とリードモデル（`item`）を同じ SQLite に
+//! 置き、リードモデルへの問い合わせを公開 API に持つ（#84）。
 //!
 //! 集約でディレクトリを切っていて、いまは `item` だけ。このファイルには集約に
 //! 依存しない仕組み — 接続・番号・行を読むときの失敗 — を置く。
