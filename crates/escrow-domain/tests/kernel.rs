@@ -17,7 +17,7 @@ use std::path::PathBuf;
 /// `const fn new` と `Display` と `i64` への変換を出すだけで、実行時には何も持たない。
 const DEPENDENCIES: &[&str] = &["chrono", "derive_more", "thiserror", "url"];
 
-/// `[dev-dependencies]`。テストの中でだけ副作用を持てるなら、抜け道は在ることになる。
+/// `[dev-dependencies]`。テストの中でだけ副作用を持てるなら、迂回路は在ることになる。
 ///
 /// `toml` は下のテストが `Cargo.toml` を読むため、`tempfile` は `asset` の走査を
 /// 実ディレクトリで試すため。どちらも公開 API に出ない。
@@ -82,7 +82,7 @@ fn the_kernel_cannot_reach_the_outside_world() {
     assert_eq!(
         table(&manifest, "dev-dependencies"),
         expected(DEV_DEPENDENCIES),
-        "テストの中でだけ副作用を持てるなら、抜け道は在る"
+        "テストの中でだけ副作用を持てるなら、迂回路は在る"
     );
     assert_eq!(
         table(&manifest, "build-dependencies"),

@@ -143,8 +143,9 @@ pub struct Limits {
 pub struct Tools {
     /// 外部ツールを探すディレクトリ。PATH に足す。
     ///
-    /// 見つからないときの逃げ道。GUI アプリはターミナルと違う PATH で起動される
-    /// （`.zshrc` を読まない）ので、Homebrew や mise で入れたものを見つけられないことがある（#2）。
+    /// PATH で見つからなかったものを、ここから探す。GUI アプリはターミナルと違う PATH で
+    /// 起動される（`.zshrc` を読まない）ので、Homebrew や mise で入れたものを見つけられない
+    /// ことがある（#2）。
     pub extra_paths: Vec<String>,
 }
 

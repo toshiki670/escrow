@@ -89,7 +89,7 @@ impl<'a> Custody<'a> {
         };
 
         let event = match observed.confirmed() {
-            // 期限が来ても、捨てるのは証が在るときだけ（#1）。
+            // 捨てるには証が要るので、期限が来ただけの回は `holding` に残る（#1）。
             Some(witness) if until <= now => Event::HeldToDeadline(witness),
             Some(witness) => Event::PresenceConfirmed(witness),
             None if observed == Presence::Gone => Event::SourceGone,
