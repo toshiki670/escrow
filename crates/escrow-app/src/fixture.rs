@@ -1,7 +1,8 @@
-//! 入口のテストが台帳へ置く形（#82）。feature `fixture` で公開する。
+//! 入口のテストがイベントストアへ置く形（#82）。feature `fixture` で公開する。
 //!
 //! 入口が名前で知る crate は `escrow-app` だけ（`tests/dependency_direction.rs`）なので、
-//! 台帳を仕込むのもここの仕事。入口のテストは [`App`] を受け取り、描いた結果だけを見る。
+//! イベントストアを仕込むのもここの仕事。入口のテストは [`App`] を受け取り、描いた結果だけを
+//! 見る。
 
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
@@ -13,7 +14,7 @@ use escrow_domain::source::{Monitoring, PersonId, SourceId};
 use escrow_domain::state::{Event, Hold, MediaPresence, TranscriptNeed};
 use escrow_domain::timestamp::Timestamp;
 use escrow_domain::url;
-use escrow_ledger::{Ledger, NewSource, Seq};
+use escrow_event_store::{EventStore, NewSource, Seq};
 
 use crate::App;
 
@@ -21,8 +22,8 @@ fn at(text: &str) -> Timestamp {
     Timestamp::parse(text).expect(text)
 }
 
-async fn a_source_for(ledger: &Ledger, person: PersonId, raw: &str) -> SourceId {
-    ledger
+async fn a_source_for(store: &EventStore, person: PersonId, raw: &str) -> SourceId {
+    store
         .add_source(&NewSource {
             person_id: person,
             url: url::normalize_source(raw).expect(raw),
@@ -37,30 +38,30 @@ async fn a_source_for(ledger: &Ledger, person: PersonId, raw: &str) -> SourceId 
 }
 
 impl App {
-    /// CLI の `person add` → `source add` → `item add` → `fetch` が作る形を、台帳へ直接置く。
+    /// CLI の `person add` → `source add` → `item add` → `fetch` が作る形を、イベントストアへ直接置く。
     ///
     /// ○○ は配信1本（`holding`）と投稿1件（`kept`）、□□ は項目を持たない。
     ///
-    /// **新しいほうを後から見つける。** 投影は id の順で返るので、こうしないと
+    /// **新しいほうを後から見つける。** リードモデルは id の順で返るので、こうしないと
     /// 「並べ替えを忘れた」が「たまたま合っている」に化ける。
     ///
-    /// 台帳はメモリの上に在り、実体の置き場所だけを `media_dir` で受ける。設定は既定で、
-    /// 外部ツールを探す場所は空 — **支えるのは読む側だけ**で、外へ出る `add_item` と
+    /// イベントストアはメモリの上に在り、実体の置き場所だけを `media_dir` で受ける。設定は
+    /// 既定で、外部ツールを探す場所は空 — **支えるのは読む側だけ**で、外へ出る `add_item` と
     /// `fetch` は [`crate::AppError::MissingTool`] で止まる。
     pub async fn seeded(media_dir: &Path) -> Self {
-        let ledger = Ledger::open_in_memory().await.unwrap();
+        let store = EventStore::open_in_memory().await.unwrap();
 
-        let owner = ledger.add_person("○○").await.unwrap();
+        let owner = store.add_person("○○").await.unwrap();
         let youtube = a_source_for(
-            &ledger,
+            &store,
             owner,
             "https://www.youtube.com/channel/UCBR8-60-B28hp2BmDPdntcQ",
         )
         .await;
-        let x = a_source_for(&ledger, owner, "https://x.com/i/user/12").await;
+        let x = a_source_for(&store, owner, "https://x.com/i/user/12").await;
 
         // 本文だけの投稿は、取るものが無いのでそのまま kept から始まる（#1）。
-        ledger
+        store
             .discover(
                 &Discovered {
                     source_id: x,
@@ -81,7 +82,7 @@ impl App {
             .await
             .unwrap();
 
-        let live = ledger
+        let live = store
             .discover(
                 &Discovered {
                     source_id: youtube,
@@ -100,7 +101,7 @@ impl App {
             )
             .await
             .unwrap();
-        let seq = ledger
+        let seq = store
             .append(
                 live,
                 Seq::FIRST,
@@ -109,7 +110,7 @@ impl App {
             )
             .await
             .unwrap();
-        ledger
+        store
             .append(
                 live,
                 seq,
@@ -122,7 +123,7 @@ impl App {
             .await
             .unwrap();
 
-        ledger.add_person("□□").await.unwrap();
+        store.add_person("□□").await.unwrap();
 
         Self {
             config: Config::default(),
@@ -132,7 +133,7 @@ impl App {
                 media_dir: media_dir.to_owned(),
                 transcribe_model: PathBuf::new(),
             },
-            ledger,
+            store,
             resolver: Resolver::new(None, &[]),
         }
     }

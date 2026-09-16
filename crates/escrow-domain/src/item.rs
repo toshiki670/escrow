@@ -1,4 +1,4 @@
-//! 見つけた1件と、その現在の状態。台帳を兼ね、手放した後も行は残る（#1）。
+//! 見つけた1件と、その現在の状態。手放した後も記録として残る（#1）。
 
 use derive_more::{Constructor, Display, Into};
 
@@ -19,7 +19,7 @@ use crate::url::NormalizedUrl;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Constructor, Display, Into)]
 pub struct ItemId(i64);
 
-/// 台帳の1行。
+/// 手放した後も残る、1件の記録。
 ///
 /// `content_type` を別に持たないのは、[`Content`] から導けるため（#1 の
 /// 「計算・導出できるものは持たない」）。並べて持つと、噛み合わない組を
@@ -39,7 +39,7 @@ pub struct Item {
     pub scheduled_start_at: Option<Timestamp>,
     /// いまの状態。預かりの期限は `Holding` が伴っている（#1）。
     pub state: State,
-    /// この状態になった日時。**状態が変わらなかった事象では動かない** — 生存確認や
+    /// この状態になった日時。**状態が変わらなかったイベントでは動かない** — 生存確認や
     /// 1回の失敗を書いても、`holding` になった日時はそのまま。
     pub state_since: Timestamp,
     pub content: Content,
@@ -54,10 +54,10 @@ impl Item {
 /// 見つけた時点で分かっていること。**ログの先頭にちょうど1つ**置かれる（#1）。
 ///
 /// 状態を動かすのではなく作るので、[`crate::state::Event`] には入らない。これが
-/// 無いと `url` や `title` が投影の側にしか存在せず、投影を捨てて作り直せない。
+/// 無いと `url` や `title` がリードモデルの側にしか存在せず、リードモデルを捨てて作り直せない。
 ///
 /// [`Item`] との差は `id` と `state` と `state_since` の3つで、どれも誕生の時点では
-/// まだ決まっていない — `id` は DB が採番し、残る2つはログを畳んで出る。
+/// まだ決まっていない — `id` は DB が採番し、残る2つはログをリプレイして出る。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Discovered {
     pub source_id: SourceId,

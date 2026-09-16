@@ -6,7 +6,7 @@ use escrow_domain::source::{Monitoring, PersonId, Source, SourceId};
 use escrow_domain::timestamp::Timestamp;
 use escrow_domain::url::{self, NormalizedUrl};
 
-use crate::{Ledger, LedgerError, RowError, positive, source_timestamp};
+use crate::{EventStore, EventStoreError, RowError, positive, source_timestamp};
 
 /// 配信元を登録するときに渡すもの。`id` はまだ無い。
 #[derive(Debug, Clone)]
@@ -21,8 +21,8 @@ pub struct NewSource {
     pub monitoring: Monitoring,
 }
 
-impl Ledger {
-    pub async fn add_source(&self, source: &NewSource) -> Result<SourceId, LedgerError> {
+impl EventStore {
+    pub async fn add_source(&self, source: &NewSource) -> Result<SourceId, EventStoreError> {
         let person_id = i64::from(source.person_id);
         let url = source.url.as_str();
         let enabled = i64::from(source.enabled);
@@ -53,7 +53,7 @@ impl Ledger {
         Ok(SourceId::new(id))
     }
 
-    pub async fn source(&self, id: SourceId) -> Result<Option<Source>, LedgerError> {
+    pub async fn source(&self, id: SourceId) -> Result<Option<Source>, EventStoreError> {
         let key = i64::from(id);
         let row = sqlx::query!(
             r#"SELECT id AS "id!", person_id, url, enabled AS "enabled: bool", created_at,
@@ -107,14 +107,14 @@ mod tests {
     use escrow_domain::state::Hold;
 
     use crate::testing::{at, seeded};
-    use crate::{Ledger, LedgerError, NewSource, RowError};
+    use crate::{EventStore, EventStoreError, NewSource, RowError};
     use escrow_domain::source::{Monitoring, PersonId};
     use escrow_domain::url;
 
     #[tokio::test]
     async fn round_trips_a_source() {
-        let (ledger, source_id) = seeded().await;
-        let source = ledger.source(source_id).await.unwrap().unwrap();
+        let (store, source_id) = seeded().await;
+        let source = store.source(source_id).await.unwrap().unwrap();
 
         assert_eq!(source.hold_days, NonZeroU32::new(7));
         assert_eq!(source.priority.get(), 1);
@@ -132,11 +132,11 @@ mod tests {
     /// UNIQUE に阻まれて検知が毎回空振りする。
     #[tokio::test]
     async fn the_same_source_cannot_be_registered_twice() {
-        let (ledger, source_id) = seeded().await;
-        let source = ledger.source(source_id).await.unwrap().unwrap();
-        let person = ledger.add_person("△△").await.unwrap();
+        let (store, source_id) = seeded().await;
+        let source = store.source(source_id).await.unwrap().unwrap();
+        let person = store.add_person("△△").await.unwrap();
 
-        let again = ledger
+        let again = store
             .add_source(&NewSource {
                 person_id: person,
                 url: source.url.clone(),
@@ -154,8 +154,8 @@ mod tests {
     /// #1 の「持ち主のいない `Source` は作れない」。
     #[tokio::test]
     async fn a_source_without_an_owner_is_refused() {
-        let ledger = Ledger::open_in_memory().await.unwrap();
-        let orphan = ledger
+        let store = EventStore::open_in_memory().await.unwrap();
+        let orphan = store
             .add_source(&NewSource {
                 person_id: PersonId::new(999),
                 url: url::normalize_source(
@@ -176,12 +176,12 @@ mod tests {
     /// 監視の期間が2列を往復すること（#1）。
     #[tokio::test]
     async fn round_trips_a_monitoring_period() {
-        let ledger = Ledger::open_in_memory().await.unwrap();
-        let person = ledger.add_person("○○").await.unwrap();
+        let store = EventStore::open_in_memory().await.unwrap();
+        let person = store.add_person("○○").await.unwrap();
         let from = at("2026-09-01T00:00:00+09:00");
         let until = at("2026-09-08T00:00:00+09:00");
 
-        let id = ledger
+        let id = store
             .add_source(&NewSource {
                 person_id: person,
                 url: url::normalize_source("https://x.com/i/user/12").unwrap(),
@@ -194,7 +194,7 @@ mod tests {
             .await
             .unwrap();
 
-        let source = ledger.source(id).await.unwrap().unwrap();
+        let source = store.source(id).await.unwrap().unwrap();
         assert_eq!(source.priority.get(), 3);
         assert_eq!(source.monitoring, Monitoring::Period { from, until });
         assert_eq!(
@@ -214,11 +214,11 @@ mod tests {
             "UPDATE source SET monitor_from = '2026-09-01T00:00:00+09:00'",
             "UPDATE source SET monitor_until = '2026-09-01T00:00:00+09:00'",
         ] {
-            let (ledger, id) = seeded().await;
-            sqlx::query(corruption).execute(&ledger.pool).await.unwrap();
+            let (store, id) = seeded().await;
+            sqlx::query(corruption).execute(&store.pool).await.unwrap();
 
-            match ledger.source(id).await {
-                Err(LedgerError::Row(RowError::BadMonitoring {
+            match store.source(id).await {
+                Err(EventStoreError::Row(RowError::BadMonitoring {
                     source: MonitoringError::HalfOpen,
                     ..
                 })) => {}
@@ -230,18 +230,18 @@ mod tests {
     /// 終わりが先に来る期間も撥ねる。
     #[tokio::test]
     async fn refuses_a_monitoring_period_that_ends_before_it_starts() {
-        let (ledger, id) = seeded().await;
+        let (store, id) = seeded().await;
         sqlx::query(
             "UPDATE source SET monitor_from = '2026-09-08T00:00:00+09:00', \
              monitor_until = '2026-09-01T00:00:00+09:00'",
         )
-        .execute(&ledger.pool)
+        .execute(&store.pool)
         .await
         .unwrap();
 
         assert!(matches!(
-            ledger.source(id).await,
-            Err(LedgerError::Row(RowError::BadMonitoring {
+            store.source(id).await,
+            Err(EventStoreError::Row(RowError::BadMonitoring {
                 source: MonitoringError::NotOrdered,
                 ..
             }))

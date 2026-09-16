@@ -5,15 +5,15 @@ use std::str::FromStr;
 use escrow_domain::content::ContentType;
 use escrow_domain::source::{Exclude, ExcludeId, SourceId};
 
-use crate::{Ledger, LedgerError, RowError};
+use crate::{EventStore, EventStoreError, RowError};
 
-impl Ledger {
+impl EventStore {
     pub async fn add_exclude(
         &self,
         source_id: Option<SourceId>,
         content_type: ContentType,
         enabled: bool,
-    ) -> Result<ExcludeId, LedgerError> {
+    ) -> Result<ExcludeId, EventStoreError> {
         let scoped = source_id.map(i64::from);
         let value = content_type.as_str();
         let enabled = i64::from(enabled);
@@ -32,7 +32,7 @@ impl Ledger {
     }
 
     /// 全除外条件。当たり判定は [`Exclude::covers`] が持つ。
-    pub async fn excludes(&self) -> Result<Vec<Exclude>, LedgerError> {
+    pub async fn excludes(&self) -> Result<Vec<Exclude>, EventStoreError> {
         let rows = sqlx::query!(
             r#"SELECT id AS "id!", source_id, content_type, enabled AS "enabled: bool"
                FROM exclude ORDER BY id"#
@@ -66,17 +66,17 @@ mod tests {
 
     #[tokio::test]
     async fn round_trips_excludes() {
-        let (ledger, source) = seeded().await;
-        ledger
+        let (store, source) = seeded().await;
+        store
             .add_exclude(Some(source), ContentType::XSpace, true)
             .await
             .unwrap();
-        ledger
+        store
             .add_exclude(None, ContentType::YoutubeShorts, true)
             .await
             .unwrap();
 
-        let excludes = ledger.excludes().await.unwrap();
+        let excludes = store.excludes().await.unwrap();
         assert_eq!(excludes.len(), 2);
         assert_eq!(excludes[0].source_id, Some(source));
         assert_eq!(excludes[1].source_id, None, "共通条件は source_id が空");

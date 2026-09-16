@@ -1,6 +1,6 @@
 //! テストの土台。
 //!
-//! 投影を壊す・行を消すといった確認は、接続を持たないと書けない。**公開 API に
+//! リードモデルを壊す・行を消すといった確認は、接続を持たないと書けない。**公開 API に
 //! 接続が出ていない**ことの裏返しで、だからこの手のテストは crate の中に置く。
 
 use std::num::NonZeroU32;
@@ -12,7 +12,7 @@ use escrow_domain::state::{Event, Hold, MediaPresence, TranscriptNeed};
 use escrow_domain::timestamp::Timestamp;
 use escrow_domain::url::{self, NormalizedUrl};
 
-use crate::{Ledger, NewSource, Seq};
+use crate::{EventStore, NewSource, Seq};
 
 pub(crate) fn at(text: &str) -> Timestamp {
     Timestamp::parse(text).expect(text)
@@ -23,15 +23,15 @@ pub(crate) fn item_url(raw: &str) -> NormalizedUrl {
 }
 
 /// 人と配信元を1つずつ持つ DB。項目は FK を要るので、これが最小の土台。
-pub(crate) async fn seeded() -> (Ledger, SourceId) {
-    let ledger = Ledger::open_in_memory().await.unwrap();
-    let source = seed_into(&ledger).await;
-    (ledger, source)
+pub(crate) async fn seeded() -> (EventStore, SourceId) {
+    let store = EventStore::open_in_memory().await.unwrap();
+    let source = seed_into(&store).await;
+    (store, source)
 }
 
-pub(crate) async fn seed_into(ledger: &Ledger) -> SourceId {
-    let person = ledger.add_person("○○").await.unwrap();
-    ledger
+pub(crate) async fn seed_into(store: &EventStore) -> SourceId {
+    let person = store.add_person("○○").await.unwrap();
+    store
         .add_source(&NewSource {
             person_id: person,
             url: url::normalize_source("https://www.youtube.com/channel/UCBR8-60-B28hp2BmDPdntcQ")
@@ -76,13 +76,13 @@ pub(crate) fn a_post(source_id: SourceId) -> Discovered {
 }
 
 /// 配信を1本、`holding` まで運ぶ。期限は 2026-03-09T00:30:00+09:00。
-pub(crate) async fn a_holding_item(ledger: &Ledger, source: SourceId) -> ItemId {
-    let id = ledger
+pub(crate) async fn a_holding_item(store: &EventStore, source: SourceId) -> ItemId {
+    let id = store
         .discover(&a_live(source), at("2026-03-01T20:05:00+09:00"))
         .await
         .unwrap();
 
-    let seq = ledger
+    let seq = store
         .append(
             id,
             Seq::FIRST,
@@ -91,7 +91,7 @@ pub(crate) async fn a_holding_item(ledger: &Ledger, source: SourceId) -> ItemId 
         )
         .await
         .unwrap();
-    ledger
+    store
         .append(
             id,
             seq,

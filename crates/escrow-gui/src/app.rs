@@ -1,12 +1,12 @@
-//! 状態と、それを動かす事象。
+//! 状態と、それを動かすメッセージ。
 //!
-//! 台帳を読むのは async なので、読み出しは [`Task`] として出し、結果を [`Message`] で
+//! イベントストアを読むのは async なので、読み出しは [`Task`] として出し、結果を [`Message`] で
 //! 受け取る。失敗は文字列にして運ぶ — iced の [`Message`] は複製できることを求めるが、
-//! 台帳と設定の失敗はどちらも複製できない。**画面が出すのは理由の文だけ**なので、
+//! イベントストアと設定の失敗はどちらも複製できない。**画面が出すのは理由の文だけ**なので、
 //! 型を保ったまま運ぶ意味がここには無い。
 //!
-//! 台帳を開く手順と読む関数は `escrow-app` が持つ（#82）。ここに在るのは、画面の状態と
-//! 事象の往復だけ。
+//! イベントストアを開く手順と読む関数は `escrow-app` が持つ（#82）。ここに在るのは、画面の
+//! 状態とメッセージの往復だけ。
 
 use std::sync::Arc;
 
@@ -21,15 +21,15 @@ pub enum Selection {
     Settings,
 }
 
-/// 画面の全体。台帳を開くまでは、まだ何も並べられない。
+/// 画面の全体。イベントストアを開くまでは、まだ何も並べられない。
 pub enum App {
     Opening,
-    /// 台帳を開けなかった。直す先は設定の場所か DB で、画面はその理由を出すだけ。
+    /// イベントストアを開けなかった。直す先は設定の場所か DB で、画面はその理由を出すだけ。
     Unavailable(String),
     Ready(Ready),
 }
 
-/// 台帳を開いたあと。
+/// イベントストアを開いたあと。
 pub struct Ready {
     app: Arc<escrow_app::App>,
     persons: Vec<Person>,
@@ -42,13 +42,13 @@ pub struct Ready {
 /// ダッシュボードと設定を選んでも、直前に読んだ中身がそのまま残る。そちらは
 /// 一覧を出さないので画面には現れない。
 pub enum Listing {
-    /// 読んでいる最中。台帳を開いた直後もここから始まる。
+    /// 読んでいる最中。イベントストアを開いた直後もここから始まる。
     Loading,
     Loaded(Vec<Listed>),
     Failed(String),
 }
 
-/// 開いた台帳と、その中身を読むのに要るもの。
+/// 開いたイベントストアと、その中身を読むのに要るもの。
 #[derive(Debug, Clone)]
 pub struct Opened {
     app: Arc<escrow_app::App>,
@@ -57,7 +57,7 @@ pub struct Opened {
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    /// 台帳を開き、持ち主を読み終えた。
+    /// イベントストアを開き、持ち主を読み終えた。
     Opened(Result<Opened, String>),
     /// サイドバーで選んだ。
     Selected(Selection),
@@ -65,7 +65,7 @@ pub enum Message {
     Listed(PersonId, Result<Vec<Listed>, String>),
 }
 
-/// 台帳を開くのは async なので、最初の状態と一緒に読み出しを出す。
+/// イベントストアを開くのは async なので、最初の状態と一緒に読み出しを出す。
 pub fn boot() -> (App, Task<Message>) {
     (App::Opening, Task::perform(open(), Message::Opened))
 }
@@ -144,7 +144,7 @@ impl Ready {
     }
 }
 
-/// 設定の言う場所で台帳を開き、持ち主を並べる。
+/// 設定の言う場所でイベントストアを開き、持ち主を並べる。
 ///
 /// 開けなければサイドバーも出せないので、ここが通るまで画面は空のまま。
 async fn open() -> Result<Opened, String> {
@@ -181,9 +181,9 @@ mod tests {
     use super::*;
     use crate::view::view;
 
-    /// 台帳を開き終えた画面。実体の置き場所は空で、手元に何も無い状態を表す。
+    /// イベントストアを開き終えた画面。実体の置き場所は空で、手元に何も無い状態を表す。
     ///
-    /// 台帳へ置く形は [`escrow_app::App::seeded`] が決める（#82）。
+    /// イベントストアへ置く形は [`escrow_app::App::seeded`] が決める（#82）。
     async fn opened(media_dir: &Path) -> App {
         let assembled = escrow_app::App::seeded(media_dir).await;
         let persons = assembled.persons().await.unwrap();
@@ -218,7 +218,7 @@ mod tests {
         }
     }
 
-    /// [`Task`] を最後まで回して、出てきた事象を集める。
+    /// [`Task`] を最後まで回して、出てきたメッセージを集める。
     async fn run(task: Task<Message>) -> Vec<Message> {
         use iced::futures::StreamExt as _;
         use iced_test::runtime::{Action, task};

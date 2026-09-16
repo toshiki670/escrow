@@ -6,13 +6,14 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
-# 段5 の入口。組み立てる crate だけを見る（#82）。読むのは投影で、書く道はまだ持たない（#30）。
+# 段5 の入口。組み立てる crate だけを見る（#82）。読むのはリードモデルで、書く道はまだ
+# 持たない（#30）。
 [dependencies]
 escrow-app.workspace = true
 iced.workspace = true
 
 [dev-dependencies]
-# テストが台帳へ置く形は escrow-app が持つ（#82）。
+# テストがイベントストアへ置く形は escrow-app が持つ（#82）。
 escrow-app = { workspace = true, features = ["fixture"] }
 iced_test.workspace = true
 tempfile.workspace = true

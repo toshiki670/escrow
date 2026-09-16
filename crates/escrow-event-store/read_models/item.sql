@@ -1,14 +1,14 @@
--- #1 の erDiagram の ITEM。**投影**であって真実ではない（#15）。
+-- #1 の erDiagram の ITEM。**リードモデル**であって真実ではない（#15）。
 --
 -- `migrations/` に置かないのは、スキーマを変えたいときに移行ではなく `rebuild` を
 -- 走らせるため。`sqlx::migrate!` は1ディレクトリ・1つの `_sqlx_migrations` で版を
--- 管理するので、事象と投影でディレクトリを割ることもできない。
+-- 管理するので、イベントとリードモデルでディレクトリを割ることもできない。
 --
--- このファイルが投影の DDL の唯一の写しで、`rebuild` は DROP のあとこれを流す。
+-- このファイルがリードモデルの DDL の唯一の写しで、`rebuild` は DROP のあとこれを流す。
 -- クローン直後の開発用 DB もこれを流して作る（`.cargo/config.toml`）。
 --
 -- 列は #1 の erDiagram のまま。索引もそのままなので、読み出しのクエリと性能は
--- 事象ログを入れる前と変わらない。
+-- イベントログを入れる前と変わらない。
 
 CREATE TABLE IF NOT EXISTS item (
     id              INTEGER PRIMARY KEY,
@@ -17,8 +17,8 @@ CREATE TABLE IF NOT EXISTS item (
     url             TEXT    NOT NULL,
     content_type    TEXT    NOT NULL,
     published_at    TEXT    NOT NULL,
-    -- ここから2つは導出列。state は事象を畳んだ結果、state_since は
-    -- **状態を変えた**最後の事象の occurred_at（自己ループでは動かない）。
+    -- ここから2つは導出列。state はイベントをリプレイした結果、state_since は
+    -- **状態を変えた**最後のイベントの occurred_at（自己ループでは動かない）。
     state           TEXT    NOT NULL,
     state_since     TEXT    NOT NULL,
     -- ここから下が #1 の「NULL を許す」列。

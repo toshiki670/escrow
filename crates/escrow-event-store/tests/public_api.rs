@@ -3,25 +3,25 @@
 //! `escrow-domain` のモジュール一覧と同じ形。用途に紐づく関数を足そうとすると
 //! 表の編集が要るので、**必ず差分に現れる**。
 //!
-//! そのうえで #7 の受け入れ「投影を直接書き換える関数が無いこと」を、名前ではなく
-//! **SQL の置き場所**で確かめる。投影へ書く文が追記と作り直しの2ファイルにしか
-//! 無い限り、ログと投影がずれる書き方は存在しない。
+//! そのうえで #7 の受け入れ「リードモデルを直接書き換える関数が無いこと」を、名前ではなく
+//! **SQL の置き場所**で確かめる。リードモデルへ書く文が追記と作り直しの2ファイルにしか
+//! 無い限り、ログとリードモデルがずれる書き方は存在しない。
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-/// `escrow-ledger` が外へ出す関数。**これで全部。**
+/// `escrow-event-store` が外へ出す関数。**これで全部。**
 ///
-/// 書く道は `discover` と `append` の2つだけで、投影を名指しで動かすものは無い。
-/// `rebuild` はログから作り直すので、書くのは投影だが**決めるのはログ**。
+/// 書く道は `discover` と `append` の2つだけで、リードモデルを名指しで動かすものは無い。
+/// `rebuild` はログから作り直すので、書くのはリードモデルだが**決めるのはログ**。
 const PUBLIC_API: &[&str] = &[
     // 接続
     "open",
     "open_in_memory",
-    // 事象を書く
+    // イベントを書く
     "discover",
     "append",
-    // 投影を読む
+    // リードモデルを読む
     "item",
     "item_by_url",
     "items_in_state",
@@ -30,7 +30,7 @@ const PUBLIC_API: &[&str] = &[
     "log",
     "replay",
     "failures_since_the_state_moved",
-    // 投影を作り直す
+    // リードモデルを作り直す
     "rebuild",
     // 設定（catalog）
     "add_person",
@@ -45,10 +45,10 @@ const PUBLIC_API: &[&str] = &[
     "next",
 ];
 
-/// 投影へ書く SQL を置いてよいファイル。
-const WRITES_THE_PROJECTION: &[&str] = &["item/append.rs", "rebuild.rs"];
+/// リードモデルへ書く SQL を置いてよいファイル。
+const WRITES_THE_READ_MODEL: &[&str] = &["item/append.rs", "rebuild.rs"];
 
-/// 投影へ書く文の見分け方。`item_event` に当たらないよう、後ろまで見る。
+/// リードモデルへ書く文の見分け方。`item_event` に当たらないよう、後ろまで見る。
 const WRITES: &[&str] = &[
     "INTO item (",
     "UPDATE item ",
@@ -62,8 +62,8 @@ fn src() -> PathBuf {
 
 /// `src/` 以下の `.rs` を、crate 相対のパスと**本体だけ**の中身で返す。
 ///
-/// 末尾の `#[cfg(test)] mod tests` から先は落とす。投影を壊してから作り直す確認の
-/// ように、テストは投影へ直接書くことがある。見たいのは出荷される経路のほう。
+/// 末尾の `#[cfg(test)] mod tests` から先は落とす。リードモデルを壊してから作り直す確認の
+/// ように、テストはリードモデルへ直接書くことがある。見たいのは出荷される経路のほう。
 fn sources() -> Vec<(String, String)> {
     fn walk(dir: &Path, root: &Path, found: &mut Vec<(String, String)>) {
         for entry in std::fs::read_dir(dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display())) {
@@ -128,14 +128,14 @@ fn only_the_listed_functions_are_public() {
 fn the_pool_never_leaves_the_crate() {
     assert!(
         !PUBLIC_API.contains(&"pool"),
-        "接続を外へ出すと、投影を直接書ける経路ができる"
+        "接続を外へ出すと、リードモデルを直接書ける経路ができる"
     );
 }
 
-/// 投影へ書く SQL が、追記と作り直しの2ファイルにしか無いこと（#7 の受け入れ）。
+/// リードモデルへ書く SQL が、追記と作り直しの2ファイルにしか無いこと（#7 の受け入れ）。
 #[test]
-fn only_appending_and_rebuilding_touch_the_projection() {
-    let allowed: BTreeSet<&str> = WRITES_THE_PROJECTION.iter().copied().collect();
+fn only_appending_and_rebuilding_touch_the_read_model() {
+    let allowed: BTreeSet<&str> = WRITES_THE_READ_MODEL.iter().copied().collect();
     let mut seen: BTreeSet<String> = BTreeSet::new();
 
     for (name, body) in sources() {
@@ -144,7 +144,7 @@ fn only_appending_and_rebuilding_touch_the_projection() {
             seen.insert(name.clone());
             assert!(
                 allowed.contains(name.as_str()),
-                "{name} が投影へ直接書いている。書く道は追記と作り直しだけ（#15）"
+                "{name} がリードモデルへ直接書いている。書く道は追記と作り直しだけ（#15）"
             );
         }
     }
@@ -152,6 +152,6 @@ fn only_appending_and_rebuilding_touch_the_projection() {
     assert_eq!(
         seen,
         allowed.iter().map(|s| (*s).to_owned()).collect(),
-        "投影へ書くファイルが減っている。表が古い"
+        "リードモデルへ書くファイルが減っている。表が古い"
     );
 }

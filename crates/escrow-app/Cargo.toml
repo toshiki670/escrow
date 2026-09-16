@@ -9,7 +9,7 @@ repository.workspace = true
 # 段5 の、組み立てる crate（#82）。入口はここだけを見る。
 [dependencies]
 escrow-domain.workspace = true
-escrow-ledger.workspace = true
+escrow-event-store.workspace = true
 escrow-config.workspace = true
 escrow-scheduler.workspace = true
 escrow-acquisition.workspace = true
@@ -22,7 +22,7 @@ tempfile.workspace = true
 tokio.workspace = true
 
 [features]
-# 入口のテストが台帳へ置く形（#82）。入口が名前で知る crate はこれ1つなので、
+# 入口のテストがイベントストアへ置く形（#82）。入口が名前で知る crate はこれ1つなので、
 # 仕込みもここが持つ。
 fixture = []
 

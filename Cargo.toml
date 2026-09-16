@@ -2,7 +2,7 @@
 resolver = "3"
 members = [
     "crates/escrow-domain",
-    "crates/escrow-ledger",
+    "crates/escrow-event-store",
     "crates/escrow-config",
     "crates/escrow-external",
     "crates/escrow-scheduler",
@@ -26,7 +26,7 @@ repository = "https://github.com/toshiki670/escrow"
 
 [workspace.dependencies]
 escrow-domain = { path = "crates/escrow-domain" }
-escrow-ledger = { path = "crates/escrow-ledger" }
+escrow-event-store = { path = "crates/escrow-event-store" }
 escrow-config = { path = "crates/escrow-config" }
 escrow-external = { path = "crates/escrow-external" }
 escrow-scheduler = { path = "crates/escrow-scheduler" }

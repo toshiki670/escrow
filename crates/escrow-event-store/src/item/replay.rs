@@ -1,7 +1,8 @@
-//! ログを読み、`state::next` で畳んで現在を作る（#15）。
+//! ログを読み、`state::next` でリプレイして現在を作る（#15）。
 //!
-//! 投影を経由しないので、**投影が正しいかを確かめる側**にもなる。畳んだ結果と
-//! 投影が一致することが、この2つを同じトランザクションで書いている証拠になる。
+//! リードモデルを経由しないので、**リードモデルが正しいかを確かめる側**にもなる。リプレイ
+//! した結果とリードモデルが一致することが、この2つを同じトランザクションで書いている
+//! 証拠になる。
 
 use escrow_domain::item::{Discovered, Item, ItemId};
 use escrow_domain::liveness::{Presence, PresenceConfirmed};
@@ -10,9 +11,9 @@ use escrow_domain::state::{
     Event, EventKind, FailureReason, Hold, MediaPresence, ReleaseReference, TranscriptNeed,
 };
 
-use super::projection::{content_of, seq_of};
+use super::read_model::{content_of, seq_of};
 use super::{Log, Recorded};
-use crate::{Ledger, LedgerError, RowError, Seq, content_type_of, normalized, timestamp};
+use crate::{EventStore, EventStoreError, RowError, Seq, content_type_of, normalized, timestamp};
 
 /// `item_event` の1行そのまま。
 pub(crate) struct EventRow {
@@ -36,10 +37,10 @@ pub(crate) struct EventRow {
     pub failure_reason: Option<String>,
 }
 
-impl Ledger {
-    /// 1つの項目のログ全体。リトライ回数のように、畳んだ結果では答えられないものを
+impl EventStore {
+    /// 1つの項目のログ全体。リトライ回数のように、リプレイした結果では答えられないものを
     /// 訊く側が使う（#1）。
-    pub async fn log(&self, id: ItemId) -> Result<Option<Log>, LedgerError> {
+    pub async fn log(&self, id: ItemId) -> Result<Option<Log>, EventStoreError> {
         let key = i64::from(id);
         let rows = sqlx::query_as!(
             EventRow,
@@ -61,8 +62,8 @@ impl Ledger {
         Ok(Some(log_of(rows)?))
     }
 
-    /// ログを畳んだ、いまの姿。投影を読まない。
-    pub async fn replay(&self, id: ItemId) -> Result<Option<Item>, LedgerError> {
+    /// ログをリプレイした、いまの姿。リードモデルを読まない。
+    pub async fn replay(&self, id: ItemId) -> Result<Option<Item>, EventStoreError> {
         let Some(log) = self.log(id).await? else {
             return Ok(None);
         };
@@ -73,7 +74,7 @@ impl Ledger {
 /// `seq` の順に並んだ、1つの項目ぶんの行からログを組む。
 ///
 /// **先頭が `discovered` で、番号が 1 から途切れずに続くこと**をここで確かめる。
-/// 確かめ終えた形が [`Log`] なので、畳む側はもう何も確かめなくてよい。
+/// 確かめ終えた形が [`Log`] なので、リプレイする側はもう何も確かめなくてよい。
 pub(crate) fn log_of(rows: Vec<EventRow>) -> Result<Log, RowError> {
     let mut rows = rows.into_iter();
     let head = rows.next().expect("呼ぶ側が空でないことを確かめている");
@@ -119,7 +120,7 @@ fn kind_of(id: i64, value: &str) -> Result<EventKind, RowError> {
     })
 }
 
-/// 誕生の行から、項目の中身を組み直す。投影を捨てても戻せる根拠がここ（#1）。
+/// 誕生の行から、項目の中身を組み直す。リードモデルを捨てても戻せる根拠がここ（#1）。
 fn discovered_of(row: &EventRow) -> Result<Discovered, RowError> {
     let id = row.item_id;
     let missing = |column| RowError::EventMissingColumn {
@@ -166,7 +167,7 @@ fn discovered_of(row: &EventRow) -> Result<Discovered, RowError> {
     })
 }
 
-/// 判別子で全域に分岐する。受け皿を置かないので、事象を足すとここが落ちる。
+/// 判別子で全域に分岐する。受け皿を置かないので、イベントを足すとここが落ちる。
 fn event_of(row: &EventRow) -> Result<Event, RowError> {
     let id = row.item_id;
     let kind = kind_of(id, &row.kind)?;

@@ -7,10 +7,10 @@ license.workspace = true
 repository.workspace = true
 
 # 外へ出ないので、スケジューラを要らない（#15）。#4 の list と release は
-# 台帳と手元のファイルしか触らない。
+# イベントストアと手元のファイルしか触らない。
 [dependencies]
 escrow-domain.workspace = true
-escrow-ledger.workspace = true
+escrow-event-store.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 

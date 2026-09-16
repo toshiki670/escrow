@@ -8,7 +8,7 @@ repository.workspace = true
 
 [dependencies]
 escrow-domain.workspace = true
-escrow-ledger.workspace = true
+escrow-event-store.workspace = true
 escrow-scheduler.workspace = true
 thiserror.workspace = true
 

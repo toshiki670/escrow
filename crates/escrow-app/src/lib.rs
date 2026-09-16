@@ -1,6 +1,6 @@
 //! 入口が呼ぶ関数（#82）。
 //!
-//! 設定を読んで台帳を開く手順と、そこから読む・書く関数をここに置く。入口
+//! 設定を読んでイベントストアを開く手順と、そこから読む・書く関数をここに置く。入口
 //! （`escrow-cli` / `escrow-gui`、#79 の SwiftUI）はこの crate だけを見て、出力の形
 //! （`println!`・画面）だけを持つ。画面ごとに足す関数もここに置くので、入口が増えても
 //! 書く場所は1つ。
@@ -24,8 +24,8 @@ use escrow_domain::source::{Monitoring, MonitoringError};
 use escrow_domain::state::{ReleaseReference, StateName, UnknownState};
 use escrow_domain::timestamp::{Timestamp, TimestampError};
 use escrow_domain::url::{self, TypeHint, UrlError};
+use escrow_event_store::{EventStore, EventStoreError, NewSource};
 use escrow_handover::{Handover, HandoverError};
-use escrow_ledger::{Ledger, LedgerError, NewSource};
 use escrow_scheduler::{AdapterError, Demand, MissingTool, Scheduler};
 use escrow_transcription::{Transcription, TranscriptionError};
 
@@ -42,7 +42,7 @@ pub use listing::{Headline, Listed};
 
 /// 入口へ返す失敗。
 ///
-/// 台帳・設定・スライスの失敗はそのまま通し、ここで決められなかったものにだけ
+/// イベントストア・設定・スライスの失敗はそのまま通し、ここで決められなかったものにだけ
 /// 名前を付ける。
 #[derive(Debug, Error)]
 pub enum AppError {
@@ -54,10 +54,10 @@ pub enum AppError {
     Open {
         path: PathBuf,
         #[source]
-        source: LedgerError,
+        source: EventStoreError,
     },
     #[error(transparent)]
-    Ledger(#[from] LedgerError),
+    EventStore(#[from] EventStoreError),
     #[error(transparent)]
     Handover(#[from] HandoverError),
     #[error(transparent)]
@@ -90,12 +90,12 @@ pub enum AppError {
     UndecidableType,
 }
 
-/// 設定を読み、台帳を開いた状態。入口はこれを1つ持ち、ここの関数だけを呼ぶ。
+/// 設定を読み、イベントストアを開いた状態。入口はこれを1つ持ち、ここの関数だけを呼ぶ。
 #[derive(Debug)]
 pub struct App {
     config: Config,
     paths: Paths,
-    ledger: Ledger,
+    store: EventStore,
     resolver: Resolver,
 }
 
@@ -115,7 +115,7 @@ pub struct Diagnosis {
 }
 
 impl App {
-    /// 設定の言う場所で台帳を開く。
+    /// 設定の言う場所でイベントストアを開く。
     ///
     /// # Errors
     ///
@@ -126,7 +126,7 @@ impl App {
         let paths = Paths::resolve(&config, &dirs);
         let resolver = Resolver::from_env(&config.extra_paths(&dirs));
 
-        let ledger = Ledger::open(&paths.db)
+        let store = EventStore::open(&paths.db)
             .await
             .map_err(|source| AppError::Open {
                 path: paths.db.clone(),
@@ -136,7 +136,7 @@ impl App {
         Ok(Self {
             config,
             paths,
-            ledger,
+            store,
             resolver,
         })
     }
@@ -147,16 +147,16 @@ impl App {
     }
 
     fn handover(&self) -> Handover<'_> {
-        Handover::new(&self.ledger, &self.paths.media_dir)
+        Handover::new(&self.store, &self.paths.media_dir)
     }
 
     /// 配信元の持ち主を全部。
     ///
     /// # Errors
     ///
-    /// 台帳を読めないとき。
+    /// イベントストアを読めないとき。
     pub async fn persons(&self) -> Result<Vec<Person>, AppError> {
-        Ok(self.ledger.persons().await?)
+        Ok(self.store.persons().await?)
     }
 
     /// 選んだ持ち主の項目を、一覧の1行の形で新しい順に。
@@ -166,17 +166,17 @@ impl App {
     ///
     /// # Errors
     ///
-    /// 台帳を読めない・手元の実体を扱えない、のどちらか。
+    /// イベントストアを読めない・手元の実体を扱えない、のどちらか。
     pub async fn items_of(&self, person: PersonId) -> Result<Vec<Listed>, AppError> {
-        let projected = self.ledger.items_of_person(person).await?;
+        let rows = self.store.items_of_person(person).await?;
         let handover = self.handover();
 
-        let mut listed = projected
+        let mut listed = rows
             .iter()
-            .map(|projected| {
+            .map(|row| {
                 handover
-                    .handed(&projected.item)
-                    .map(|handed| Listed::new(projected.item.published_at, &handed))
+                    .handed(&row.item)
+                    .map(|handed| Listed::new(row.item.published_at, &handed))
             })
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -188,31 +188,31 @@ impl App {
     ///
     /// # Errors
     ///
-    /// 知らない状態・台帳を読めない・手元の実体を扱えない、のどれか。
+    /// 知らない状態・イベントストアを読めない・手元の実体を扱えない、のどれか。
     pub async fn list(
         &self,
         state: Option<&str>,
         id: Option<i64>,
     ) -> Result<Vec<Handed>, AppError> {
-        let projected = match (state, id) {
+        let rows = match (state, id) {
             (_, Some(id)) => self
-                .ledger
+                .store
                 .item(ItemId::new(id))
                 .await?
                 .into_iter()
                 .collect::<Vec<_>>(),
             (Some(name), None) => {
                 let name: StateName = name.parse()?;
-                self.ledger.items_in_state(name).await?
+                self.store.items_in_state(name).await?
             }
             // #4 は状態を絞らない呼び方も許す。既定は引き渡し待ち。
-            (None, None) => self.ledger.items_in_state(StateName::Kept).await?,
+            (None, None) => self.store.items_in_state(StateName::Kept).await?,
         };
 
         let handover = self.handover();
-        Ok(projected
+        Ok(rows
             .iter()
-            .map(|p| handover.handed(&p.item))
+            .map(|row| handover.handed(&row.item))
             .collect::<Result<_, _>>()?)
     }
 
@@ -220,7 +220,7 @@ impl App {
     ///
     /// # Errors
     ///
-    /// 項目が無い・引き渡せる状態でない・台帳や実体を触れない、のどれか。
+    /// 項目が無い・引き渡せる状態でない・イベントストアや実体を触れない、のどれか。
     pub async fn release(&self, id: i64, reference: Option<&str>) -> Result<Handed, AppError> {
         Ok(self
             .handover()
@@ -232,16 +232,16 @@ impl App {
     ///
     /// # Errors
     ///
-    /// 台帳へ書けないとき。
+    /// イベントストアへ書けないとき。
     pub async fn add_person(&self, name: &str) -> Result<PersonId, AppError> {
-        Ok(self.ledger.add_person(name).await?)
+        Ok(self.store.add_person(name).await?)
     }
 
     /// 監視対象を登録する。日時は ISO 8601 の text で受け、両方か両方無しで対にする（#1）。
     ///
     /// # Errors
     ///
-    /// URL が配信元の形でない・重みや日数が 0・監視期間が対でない・台帳へ書けない、
+    /// URL が配信元の形でない・重みや日数が 0・監視期間が対でない・イベントストアへ書けない、
     /// のどれか。
     pub async fn add_source(
         &self,
@@ -262,7 +262,7 @@ impl App {
         let monitoring = Monitoring::new(at(monitor_from)?, at(monitor_until)?)?;
 
         Ok(self
-            .ledger
+            .store
             .add_source(&NewSource {
                 person_id: PersonId::new(person),
                 url,
@@ -280,7 +280,7 @@ impl App {
     /// # Errors
     ///
     /// URL が項目の形でない・種別を決められない・要るツールが無い・外へ出て失敗した・
-    /// 台帳へ書けない、のどれか。
+    /// イベントストアへ書けない、のどれか。
     pub async fn add_item(
         &self,
         source: i64,
@@ -303,7 +303,7 @@ impl App {
             .await?;
 
         Ok(self
-            .ledger
+            .store
             .discover(
                 &Discovered {
                     source_id: SourceId::new(source),
@@ -326,7 +326,7 @@ impl App {
     pub async fn fetch(&self, id: i64) -> Result<State, AppError> {
         let id = ItemId::new(id);
         let item = self
-            .ledger
+            .store
             .item(id)
             .await?
             .ok_or(AppError::NoSuchItem(id))?
@@ -336,14 +336,14 @@ impl App {
             scheduler.acquirer(item.content_type(), Demand::interactive(Timestamp::now()));
 
         // 預かる日数も期限も、取得が終わった瞬間に取得のスライスが決める（#1）。
-        let state = Acquisition::new(&self.ledger, &self.paths.media_dir, acquirer.as_ref())
+        let state = Acquisition::new(&self.store, &self.paths.media_dir, acquirer.as_ref())
             .run(id)
             .await?;
 
         // スライスは互いを知らないので、**次に誰が拾うかは状態が決める**（#15）。
         // 巡回するエンジンは #33 なので、いまはここが状態を見て繋ぐ。
         let state = if state.name() == StateName::Transcribing {
-            Transcription::new(&self.ledger, &self.paths.media_dir, scheduler.transcriber())
+            Transcription::new(&self.store, &self.paths.media_dir, scheduler.transcriber())
                 .run(id)
                 .await?
         } else {

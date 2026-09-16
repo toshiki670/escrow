@@ -13,14 +13,14 @@ use escrow_domain::asset::{self, Asset};
 use escrow_domain::item::ItemId;
 use escrow_domain::state::{Event, State};
 use escrow_domain::timestamp::Timestamp;
-use escrow_ledger::{Ledger, LedgerError, Projected};
+use escrow_event_store::{EventStore, EventStoreError, ReadModelRow};
 use escrow_scheduler::{AdapterError, Transcribe};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum TranscriptionError {
     #[error(transparent)]
-    Ledger(#[from] LedgerError),
+    EventStore(#[from] EventStoreError),
     #[error(transparent)]
     Adapter(#[from] AdapterError),
     #[error("項目 {0} が無い")]
@@ -34,19 +34,19 @@ pub enum TranscriptionError {
 }
 
 pub struct Transcription<'a> {
-    ledger: &'a Ledger,
+    store: &'a EventStore,
     media_dir: &'a Path,
     transcribe: &'a dyn Transcribe,
 }
 
 impl<'a> Transcription<'a> {
     pub const fn new(
-        ledger: &'a Ledger,
+        store: &'a EventStore,
         media_dir: &'a Path,
         transcribe: &'a dyn Transcribe,
     ) -> Self {
         Self {
-            ledger,
+            store,
             media_dir,
             transcribe,
         }
@@ -77,8 +77,8 @@ impl<'a> Transcription<'a> {
         Ok(current.item.state)
     }
 
-    async fn load(&self, id: ItemId) -> Result<Projected, TranscriptionError> {
-        self.ledger
+    async fn load(&self, id: ItemId) -> Result<ReadModelRow, TranscriptionError> {
+        self.store
             .item(id)
             .await?
             .ok_or(TranscriptionError::NoSuchItem(id))
@@ -86,11 +86,11 @@ impl<'a> Transcription<'a> {
 
     async fn step(
         &self,
-        current: Projected,
+        current: ReadModelRow,
         event: &Event,
-    ) -> Result<Projected, TranscriptionError> {
+    ) -> Result<ReadModelRow, TranscriptionError> {
         let id = current.item.id;
-        self.ledger
+        self.store
             .append(id, current.seq, event, Timestamp::now())
             .await?;
         self.load(id).await
@@ -106,7 +106,7 @@ mod tests {
     use escrow_domain::source::Monitoring;
     use escrow_domain::state::{Hold, MediaPresence, TranscriptNeed};
     use escrow_domain::url;
-    use escrow_ledger::{NewSource, Seq};
+    use escrow_event_store::{NewSource, Seq};
     use escrow_scheduler::BoxFuture;
     use std::num::NonZeroU32;
     use std::sync::Mutex;
@@ -146,11 +146,11 @@ mod tests {
 
     /// 取得まで済ませ、`transcribing` の項目とその実体を用意する。
     ///
-    /// 事象は台帳へ直接書く。取得のスライスを呼ばないのは、**スライス同士が互いを
+    /// イベントはイベントストアへ直接書く。取得のスライスを呼ばないのは、**スライス同士が互いを
     /// 知らない**ことをテストの側でも守るため（#15）。
-    async fn transcribing_item(ledger: &Ledger, media_dir: &Path, hold: Hold) -> ItemId {
-        let person = ledger.add_person("○○").await.unwrap();
-        let source = ledger
+    async fn transcribing_item(store: &EventStore, media_dir: &Path, hold: Hold) -> ItemId {
+        let person = store.add_person("○○").await.unwrap();
+        let source = store
             .add_source(&NewSource {
                 person_id: person,
                 url: url::normalize_source(
@@ -166,7 +166,7 @@ mod tests {
             .await
             .unwrap();
 
-        let id = ledger
+        let id = store
             .discover(
                 &Discovered {
                     source_id: source,
@@ -186,7 +186,7 @@ mod tests {
             .await
             .unwrap();
 
-        let seq = ledger
+        let seq = store
             .append(
                 id,
                 Seq::FIRST,
@@ -195,7 +195,7 @@ mod tests {
             )
             .await
             .unwrap();
-        ledger
+        store
             .append(
                 id,
                 seq,
@@ -222,9 +222,9 @@ mod tests {
     /// 断片ごとに1本（#1）。
     #[tokio::test]
     async fn each_fragment_gets_its_own_transcript() {
-        let ledger = Ledger::open_in_memory().await.unwrap();
+        let store = EventStore::open_in_memory().await.unwrap();
         let media = tempfile::tempdir().unwrap();
-        let id = transcribing_item(&ledger, media.path(), Hold::None).await;
+        let id = transcribing_item(&store, media.path(), Hold::None).await;
         put(
             &asset::item_dir(media.path(), id),
             &["video.1.mp4", "video.2.mp4", "video.3.mp4"],
@@ -233,7 +233,7 @@ mod tests {
         let transcribe = FakeTranscribe {
             calls: Mutex::new(Vec::new()),
         };
-        Transcription::new(&ledger, media.path(), &transcribe)
+        Transcription::new(&store, media.path(), &transcribe)
             .run(id)
             .await
             .unwrap();
@@ -255,9 +255,9 @@ mod tests {
     /// 音の入っていないものは飛ばす（#1 のスイッチ表）。
     #[tokio::test]
     async fn images_are_not_transcribed() {
-        let ledger = Ledger::open_in_memory().await.unwrap();
+        let store = EventStore::open_in_memory().await.unwrap();
         let media = tempfile::tempdir().unwrap();
-        let id = transcribing_item(&ledger, media.path(), Hold::None).await;
+        let id = transcribing_item(&store, media.path(), Hold::None).await;
         put(
             &asset::item_dir(media.path(), id),
             &["image.1.jpg", "image.2.jpg"],
@@ -266,7 +266,7 @@ mod tests {
         let transcribe = FakeTranscribe {
             calls: Mutex::new(Vec::new()),
         };
-        Transcription::new(&ledger, media.path(), &transcribe)
+        Transcription::new(&store, media.path(), &transcribe)
             .run(id)
             .await
             .unwrap();
@@ -284,13 +284,13 @@ mod tests {
                 State::Holding { until: deadline() },
             ),
         ] {
-            let ledger = Ledger::open_in_memory().await.unwrap();
+            let store = EventStore::open_in_memory().await.unwrap();
             let media = tempfile::tempdir().unwrap();
-            let id = transcribing_item(&ledger, media.path(), hold).await;
+            let id = transcribing_item(&store, media.path(), hold).await;
             put(&asset::item_dir(media.path(), id), &["video.1.mp4"]);
 
             let state = Transcription::new(
-                &ledger,
+                &store,
                 media.path(),
                 &FakeTranscribe {
                     calls: Mutex::new(Vec::new()),
@@ -324,18 +324,18 @@ mod tests {
             }
         }
 
-        let ledger = Ledger::open_in_memory().await.unwrap();
+        let store = EventStore::open_in_memory().await.unwrap();
         let media = tempfile::tempdir().unwrap();
-        let id = transcribing_item(&ledger, media.path(), Hold::None).await;
+        let id = transcribing_item(&store, media.path(), Hold::None).await;
         put(&asset::item_dir(media.path(), id), &["video.1.mp4"]);
 
-        let result = Transcription::new(&ledger, media.path(), &Failing)
+        let result = Transcription::new(&store, media.path(), &Failing)
             .run(id)
             .await;
 
         assert!(matches!(result, Err(TranscriptionError::Adapter(_))));
         assert_eq!(
-            ledger.item(id).await.unwrap().unwrap().item.state,
+            store.item(id).await.unwrap().unwrap().item.state,
             State::Transcribing { hold: Hold::None }
         );
     }

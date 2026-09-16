@@ -1,6 +1,6 @@
 //! 配信元から、まだ見ていない項目を見つける（#15 のスライス）。
 //!
-//! 見つけたものを台帳へ起票するところまで。取得はしない — 起票すれば状態が
+//! 見つけたものをイベントストアへ起票するところまで。取得はしない — 起票すれば状態が
 //! `waiting` になり、次に誰が拾うかは状態が決める（#15 の Blackboard）。
 //!
 //! ここに在るのは「1つの配信元を1回見る」だけで、**いつ見るかは持たない**。順番と
@@ -10,26 +10,26 @@
 use escrow_domain::item::{Discovered, ItemId};
 use escrow_domain::source::{Exclude, Source};
 use escrow_domain::timestamp::Timestamp;
-use escrow_ledger::{Ledger, LedgerError};
+use escrow_event_store::{EventStore, EventStoreError};
 use escrow_scheduler::{AdapterError, Discover};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum DiscoveryError {
     #[error(transparent)]
-    Ledger(#[from] LedgerError),
+    EventStore(#[from] EventStoreError),
     #[error(transparent)]
     Adapter(#[from] AdapterError),
 }
 
 pub struct Discovery<'a> {
-    ledger: &'a Ledger,
+    store: &'a EventStore,
     discover: &'a dyn Discover,
 }
 
 impl<'a> Discovery<'a> {
-    pub const fn new(ledger: &'a Ledger, discover: &'a dyn Discover) -> Self {
-        Self { ledger, discover }
+    pub const fn new(store: &'a EventStore, discover: &'a dyn Discover) -> Self {
+        Self { store, discover }
     }
 
     /// 1つの配信元を1回見て、新しく見つけたものを起票する。
@@ -41,7 +41,7 @@ impl<'a> Discovery<'a> {
     ///   外に居る間は外へも出ない
     ///
     /// 除外に当たった種別も行を作らない。除外されていることは [`Exclude`] が持つ（#1）。
-    /// 既に台帳に在るものは飛ばす — 判定は `Item.url` の一意キー。
+    /// 既にリードモデルに在るものは飛ばす — 判定は `Item.url` の一意キー。
     pub async fn sweep(
         &self,
         source: &Source,
@@ -61,12 +61,12 @@ impl<'a> Discovery<'a> {
             if excludes.iter().any(|e| e.covers(source.id, content_type)) {
                 continue;
             }
-            if self.ledger.item_by_url(&found.url).await?.is_some() {
+            if self.store.item_by_url(&found.url).await?.is_some() {
                 continue;
             }
 
             let id = self
-                .ledger
+                .store
                 .discover(
                     &Discovered {
                         source_id: source.id,
@@ -93,7 +93,7 @@ mod tests {
     use escrow_domain::source::{ExcludeId, Monitoring, SourceId};
     use escrow_domain::state::MediaPresence;
     use escrow_domain::url;
-    use escrow_ledger::NewSource;
+    use escrow_event_store::NewSource;
     use escrow_scheduler::BoxFuture;
     use escrow_scheduler::Found;
     use std::num::NonZeroU32;
@@ -130,10 +130,10 @@ mod tests {
         }
     }
 
-    async fn seeded(monitoring: Monitoring, enabled: bool) -> (Ledger, Source) {
-        let ledger = Ledger::open_in_memory().await.unwrap();
-        let person = ledger.add_person("○○").await.unwrap();
-        let id = ledger
+    async fn seeded(monitoring: Monitoring, enabled: bool) -> (EventStore, Source) {
+        let store = EventStore::open_in_memory().await.unwrap();
+        let person = store.add_person("○○").await.unwrap();
+        let id = store
             .add_source(&NewSource {
                 person_id: person,
                 url: url::normalize_source(
@@ -148,8 +148,8 @@ mod tests {
             })
             .await
             .unwrap();
-        let source = ledger.source(id).await.unwrap().unwrap();
-        (ledger, source)
+        let source = store.source(id).await.unwrap().unwrap();
+        (store, source)
     }
 
     fn exclude(source_id: Option<SourceId>, content_type: ContentType) -> Exclude {
@@ -162,21 +162,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn found_items_are_written_to_the_ledger() {
-        let (ledger, source) = seeded(Monitoring::Continuous, true).await;
+    async fn found_items_are_written_to_the_event_store() {
+        let (store, source) = seeded(Monitoring::Continuous, true).await;
         let discover = FakeDiscover(vec![
             found("dQw4w9WgXcQ", MediaType::YoutubeVideo),
             found("bLKBe3uMMRI", MediaType::YoutubeLive),
         ]);
 
-        let started = Discovery::new(&ledger, &discover)
+        let started = Discovery::new(&store, &discover)
             .sweep(&source, &[], at("2026-03-01T20:05:00+09:00"))
             .await
             .unwrap();
 
         assert_eq!(started.len(), 2);
         for id in started {
-            let item = ledger.item(id).await.unwrap().unwrap().item;
+            let item = store.item(id).await.unwrap().unwrap().item;
             assert_eq!(item.source_id, source.id);
             assert_eq!(item.state.name(), escrow_domain::state::StateName::Waiting);
         }
@@ -185,13 +185,13 @@ mod tests {
     /// 除外に当たったものは**行を作らない**（#1）。
     #[tokio::test]
     async fn excluded_kinds_never_become_rows() {
-        let (ledger, source) = seeded(Monitoring::Continuous, true).await;
+        let (store, source) = seeded(Monitoring::Continuous, true).await;
         let discover = FakeDiscover(vec![
             found("dQw4w9WgXcQ", MediaType::YoutubeVideo),
             found("bLKBe3uMMRI", MediaType::YoutubeShorts),
         ]);
 
-        let started = Discovery::new(&ledger, &discover)
+        let started = Discovery::new(&store, &discover)
             .sweep(
                 &source,
                 &[exclude(None, ContentType::YoutubeShorts)],
@@ -201,16 +201,16 @@ mod tests {
             .unwrap();
 
         assert_eq!(started.len(), 1);
-        let item = ledger.item(started[0]).await.unwrap().unwrap().item;
+        let item = store.item(started[0]).await.unwrap().unwrap().item;
         assert_eq!(item.content_type(), ContentType::YoutubeVideo);
     }
 
     /// 二度目の巡回で同じものを見つけても、行は増えない（#1 の一意キー）。
     #[tokio::test]
     async fn sweeping_twice_does_not_duplicate() {
-        let (ledger, source) = seeded(Monitoring::Continuous, true).await;
+        let (store, source) = seeded(Monitoring::Continuous, true).await;
         let discover = FakeDiscover(vec![found("dQw4w9WgXcQ", MediaType::YoutubeVideo)]);
-        let discovery = Discovery::new(&ledger, &discover);
+        let discovery = Discovery::new(&store, &discover);
 
         let first = discovery
             .sweep(&source, &[], at("2026-03-01T20:05:00+09:00"))
@@ -233,16 +233,16 @@ mod tests {
             Some(at("2026-09-08T00:00:00+09:00")),
         )
         .unwrap();
-        let (ledger, source) = seeded(period, true).await;
+        let (store, source) = seeded(period, true).await;
         let discover = FakeDiscover(vec![found("dQw4w9WgXcQ", MediaType::YoutubeVideo)]);
 
-        let outside = Discovery::new(&ledger, &discover)
+        let outside = Discovery::new(&store, &discover)
             .sweep(&source, &[], at("2026-03-01T20:05:00+09:00"))
             .await
             .unwrap();
         assert!(outside.is_empty());
 
-        let inside = Discovery::new(&ledger, &discover)
+        let inside = Discovery::new(&store, &discover)
             .sweep(&source, &[], at("2026-09-03T20:05:00+09:00"))
             .await
             .unwrap();
@@ -251,10 +251,10 @@ mod tests {
 
     #[tokio::test]
     async fn a_disabled_source_is_not_visited() {
-        let (ledger, source) = seeded(Monitoring::Continuous, false).await;
+        let (store, source) = seeded(Monitoring::Continuous, false).await;
         let discover = FakeDiscover(vec![found("dQw4w9WgXcQ", MediaType::YoutubeVideo)]);
 
-        let started = Discovery::new(&ledger, &discover)
+        let started = Discovery::new(&store, &discover)
             .sweep(&source, &[], at("2026-03-01T20:05:00+09:00"))
             .await
             .unwrap();

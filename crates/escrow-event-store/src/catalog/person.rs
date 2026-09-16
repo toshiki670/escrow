@@ -2,10 +2,10 @@
 
 use escrow_domain::source::{Person, PersonId};
 
-use crate::{Ledger, LedgerError};
+use crate::{EventStore, EventStoreError};
 
-impl Ledger {
-    pub async fn add_person(&self, name: &str) -> Result<PersonId, LedgerError> {
+impl EventStore {
+    pub async fn add_person(&self, name: &str) -> Result<PersonId, EventStoreError> {
         let id = sqlx::query!(
             "INSERT INTO person (name) VALUES (?) RETURNING id AS \"id!\"",
             name
@@ -20,7 +20,7 @@ impl Ledger {
     /// 登録された持ち主を、登録した順に挙げる。
     ///
     /// サイドバーに並ぶのはこれ（#6）。
-    pub async fn persons(&self) -> Result<Vec<Person>, LedgerError> {
+    pub async fn persons(&self) -> Result<Vec<Person>, EventStoreError> {
         let rows = sqlx::query!(r#"SELECT id AS "id!", name FROM person ORDER BY id"#)
             .fetch_all(&self.pool)
             .await?;
@@ -34,7 +34,7 @@ impl Ledger {
             .collect())
     }
 
-    pub async fn person(&self, id: PersonId) -> Result<Option<Person>, LedgerError> {
+    pub async fn person(&self, id: PersonId) -> Result<Option<Person>, EventStoreError> {
         let key = i64::from(id);
         let row = sqlx::query!(r#"SELECT id AS "id!", name FROM person WHERE id = ?"#, key)
             .fetch_optional(&self.pool)
@@ -51,18 +51,18 @@ impl Ledger {
 mod tests {
     use escrow_domain::state::StateName;
 
-    use crate::Ledger;
+    use crate::EventStore;
     use crate::testing::{a_holding_item, seeded};
 
     /// サイドバーに並ぶ順は、登録した順（#6）。
     #[tokio::test]
     async fn lists_the_persons_in_the_order_they_were_added() {
-        let ledger = Ledger::open_in_memory().await.unwrap();
+        let store = EventStore::open_in_memory().await.unwrap();
         for name in ["○○", "△△", "□□"] {
-            ledger.add_person(name).await.unwrap();
+            store.add_person(name).await.unwrap();
         }
 
-        let names: Vec<String> = ledger
+        let names: Vec<String> = store
             .persons()
             .await
             .unwrap()
@@ -74,29 +74,29 @@ mod tests {
 
     /// #1 の削除の連鎖。`PERSON` を消すと、その `SOURCE`・`ITEM`・`ITEM_EVENT` が消える。
     ///
-    /// 事象は投影を参照していないので、連鎖は `source_id` の側から届く。届かないと、
-    /// 投影だけが消えてログが残り、`rebuild` で消したはずのものが甦る。
+    /// イベントはリードモデルを参照していないので、連鎖は `source_id` の側から届く。
+    /// 届かないと、リードモデルだけが消えてログが残り、`rebuild` で消したはずのものが甦る。
     #[tokio::test]
     async fn deleting_a_person_takes_its_sources_items_and_events() {
-        let (ledger, source) = seeded().await;
-        let id = a_holding_item(&ledger, source).await;
+        let (store, source) = seeded().await;
+        let id = a_holding_item(&store, source).await;
 
         sqlx::query("DELETE FROM person")
-            .execute(&ledger.pool)
+            .execute(&store.pool)
             .await
             .unwrap();
 
-        assert!(ledger.source(source).await.unwrap().is_none());
+        assert!(store.source(source).await.unwrap().is_none());
         assert!(
-            ledger
+            store
                 .items_in_state(StateName::Holding)
                 .await
                 .unwrap()
                 .is_empty()
         );
-        assert!(ledger.log(id).await.unwrap().is_none(), "ログも消える");
+        assert!(store.log(id).await.unwrap().is_none(), "ログも消える");
 
         // 作り直しても甦らない。
-        assert_eq!(ledger.rebuild().await.unwrap(), 0);
+        assert_eq!(store.rebuild().await.unwrap(), 0);
     }
 }
