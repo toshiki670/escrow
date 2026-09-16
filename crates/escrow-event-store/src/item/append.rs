@@ -1,4 +1,4 @@
-//! イベントを書く2つの道 — 誕生と追記（#15）。
+//! イベントを書く2つの経路 — 誕生と追記（#15）。
 //!
 //! どちらも1つのトランザクションで、**イベントを書いてからリードモデルへ反映する**。
 //! リードモデルの値は決定ではなく決定の写し。
@@ -38,7 +38,7 @@ impl EventStore {
 
         let mut tx = self.pool.begin_with(WRITE).await?;
 
-        // 同一性はログが持つ。リードモデルの rowid から採ると、真実の側が捨てられる側の
+        // 同一性はログが持つ。リードモデルの rowid から採ると、真実の側が、捨てて作り直せる側の
         // 採番に依存することになる。
         let id =
             sqlx::query!(r#"SELECT COALESCE(MAX(item_id), 0) + 1 AS "id!: i64" FROM item_event"#)
@@ -258,7 +258,7 @@ mod tests {
     ///
     /// **loser が受け取るのは `SQLITE_BUSY` ではなく `Superseded`**（#7）。`SQLITE_BUSY`
     /// （`database is locked`）は「誰かが先に書いた」ことを伝えないので、呼ぶ側が re-read
-    /// して決め直す道へ入れない。**deferred transaction は read transaction で始まり、
+    /// して決め直す経路へ入れない。**deferred transaction は read transaction で始まり、
     /// write transaction へ upgrade する段で `SQLITE_BUSY` を返す**（[BEGIN] の
     /// 「Subsequent write statements will upgrade the transaction to a write transaction
     /// if possible, or return SQLITE_BUSY」）ので、書き込みは `BEGIN IMMEDIATE` で開く。
