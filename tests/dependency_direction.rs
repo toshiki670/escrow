@@ -13,7 +13,7 @@ use escrow_tests::members;
 const SLICE: &[&str] = &["escrow-domain", "escrow-event-store", "escrow-scheduler"];
 
 /// 組み立てる crate が依存してよいもの。**緩めて「全部」にしない** — 緩めた瞬間に
-/// 段5 の検査が消え、`escrow-external` を直接呼ぶ経路が生える。
+/// 段5 の検査が消え、`escrow-external` を直接呼ぶ経路ができる。
 const APP: &[&str] = &[
     "escrow-domain",
     "escrow-event-store",
@@ -27,13 +27,13 @@ const APP: &[&str] = &[
 ];
 
 /// 入口が依存してよいもの。組み立てる crate だけ（#82）。**緩めて `APP` にしない** —
-/// 緩めた瞬間に、入口ごとにイベントストアを開いて組み立て直す経路が生え、画面ごとに足す関数が
+/// 緩めた瞬間に、入口ごとにイベントストアを開いて組み立て直す経路ができ、画面ごとに足す関数が
 /// 1つの入口にしか届かなくなる。
 const ENTRY: &[&str] = &["escrow-app"];
 
 /// 依存の図。左が右を依存に持ってよい、の全部。
 ///
-/// 実際に使っているかは問わない。ここに無い辺が生えたら落ちる。
+/// 実際に使っているかは問わない。ここに無い辺を足したら落ちる。
 const ALLOWED: &[(&str, &[&str])] = &[
     // ワークスペース全体にかかるテスト。crate を1つも依存に持たない。
     ("escrow-tests", &[]),
@@ -69,7 +69,7 @@ const ALLOWED: &[(&str, &[&str])] = &[
 /// 名前が実在することを先に確かめる。
 const EXTERNAL: &str = "escrow-external";
 
-/// #3 の図に無い辺が生えていないこと。
+/// 依存の辺がすべて #3 の図に在ること。
 #[test]
 fn dependencies_follow_the_one_way_graph() {
     let allowed: std::collections::BTreeMap<&str, BTreeSet<&str>> = ALLOWED

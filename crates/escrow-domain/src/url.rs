@@ -14,10 +14,10 @@ use crate::content::{ContentType, Platform};
 
 /// 正規化を通った URL。
 ///
-/// 作る道は [`normalize_item`] と [`normalize_source`] の2つ。`Item.url` の `UNIQUE` が
+/// 作る経路は [`normalize_item`] と [`normalize_source`] の2つ。`Item.url` の `UNIQUE` が
 /// 何を同一と見なすかを、この型が決める（#1）。
 ///
-/// 導出は `Display` まで。`Constructor` と `From` はこの2つの道を迂回させるので外してある。
+/// 導出は `Display` まで。`Constructor` と `From` はこの2つの経路を迂回させるので外してある。
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Display)]
 pub struct NormalizedUrl(String);
 

@@ -6,7 +6,7 @@
 //!
 //! 探し方は PATH が先、`tools.extra_paths` が後（#2）。GUI アプリはターミナルと違う
 //! PATH で起動される（`.zshrc` を読まない）ので、Homebrew や mise で入れたものを
-//! 見つけられないことがある。`extra_paths` はそのときの逃げ道。
+//! 見つけられないことがある。`extra_paths` はそのときに探す場所。
 
 use std::ffi::OsStr;
 use std::fmt;
@@ -198,7 +198,7 @@ mod tests {
         assert_eq!(resolver.missing().len(), Tool::ALL.len());
     }
 
-    /// `extra_paths` は見つからないときの逃げ道として効く。
+    /// `extra_paths` は PATH で見つからなかったものを拾う。
     #[test]
     fn extra_paths_cover_what_the_path_misses() {
         let on_path = tempfile::tempdir().unwrap();

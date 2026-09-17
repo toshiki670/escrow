@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 
 /// `escrow-event-store` が外へ出す関数。**これで全部。**
 ///
-/// 書く道は `discover` と `append` の2つだけで、リードモデルを名指しで動かすものは無い。
+/// 書く経路は `discover` と `append` の2つだけで、リードモデルを名指しで動かすものは無い。
 /// `rebuild` はログから作り直すので、書くのはリードモデルだが**決めるのはログ**。
 const PUBLIC_API: &[&str] = &[
     // 接続
@@ -144,7 +144,7 @@ fn only_appending_and_rebuilding_touch_the_read_model() {
             seen.insert(name.clone());
             assert!(
                 allowed.contains(name.as_str()),
-                "{name} がリードモデルへ直接書いている。書く道は追記と作り直しだけ（#15）"
+                "{name} がリードモデルへ直接書いている。書く経路は追記と作り直しだけ（#15）"
             );
         }
     }

@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
-# 段5 の入口。組み立てる crate だけを見る（#82）。読むのはリードモデルで、書く道はまだ
+# 段5 の入口。組み立てる crate だけを見る（#82）。読むのはリードモデルで、書く経路はまだ
 # 持たない（#30）。
 [dependencies]
 escrow-app.workspace = true

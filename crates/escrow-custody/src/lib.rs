@@ -56,7 +56,7 @@ impl<'a> Custody<'a> {
     /// `holding` の1件を配信元と突き合わせ、判定がついたら次の状態まで進める。
     ///
     /// `probe` が空なのは、その種別を確かめる手段を #5 がまだ決めていないとき
-    /// （X 投稿）。**観測できなかったのと同じ道を通る**ので、確かめる手段の有無が
+    /// （X 投稿）。**観測できなかったのと同じ経路を通る**ので、確かめる手段の有無が
     /// 判定の形を変えない。
     ///
     /// # Errors
@@ -89,7 +89,7 @@ impl<'a> Custody<'a> {
         };
 
         let event = match observed.confirmed() {
-            // 証を要求するので、期限が来たというだけで捨てる道は無い（#1）。
+            // 捨てるには証が要るので、期限が来ただけの回は `holding` に残る（#1）。
             Some(witness) if until <= now => Event::HeldToDeadline(witness),
             Some(witness) => Event::PresenceConfirmed(witness),
             None if observed == Presence::Gone => Event::SourceGone,
@@ -381,7 +381,7 @@ mod tests {
         assert!(media_exists(media.path(), id));
     }
 
-    /// 確かめる手段を持たない種別（#5 の X 投稿）も、同じ道を通る。
+    /// 確かめる手段を持たない種別（#5 の X 投稿）も、同じ経路を通る。
     #[tokio::test]
     async fn a_type_with_no_way_to_check_takes_the_same_path() {
         let store = EventStore::open_in_memory().await.unwrap();

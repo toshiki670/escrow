@@ -24,7 +24,7 @@ pub enum Presence {
 impl Presence {
     /// 「在る」を観測したときだけ証を返す。
     ///
-    /// [`PresenceConfirmed`] を作る道はここしかないので、`Unknown` を握りつぶして
+    /// [`PresenceConfirmed`] を作れるのはここだけなので、`Unknown` を握りつぶして
     /// 期限切れを捨てに行くコードは**書けない**。
     pub const fn confirmed(self) -> Option<PresenceConfirmed> {
         match self {

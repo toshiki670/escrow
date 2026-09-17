@@ -75,7 +75,7 @@ mod tests {
     /// #1 の削除の連鎖。`PERSON` を消すと、その `SOURCE`・`ITEM`・`ITEM_EVENT` が消える。
     ///
     /// イベントはリードモデルを参照していないので、連鎖は `source_id` の側から届く。
-    /// 届かないと、リードモデルだけが消えてログが残り、`rebuild` で消したはずのものが甦る。
+    /// 届かないと、リードモデルだけが消えてログが残り、消したはずの項目が `rebuild` で戻る。
     #[tokio::test]
     async fn deleting_a_person_takes_its_sources_items_and_events() {
         let (store, source) = seeded().await;
@@ -96,7 +96,7 @@ mod tests {
         );
         assert!(store.log(id).await.unwrap().is_none(), "ログも消える");
 
-        // 作り直しても甦らない。
+        // 作り直しても戻らない。
         assert_eq!(store.rebuild().await.unwrap(), 0);
     }
 }
