@@ -190,7 +190,7 @@ impl State {
         }
     }
 
-    /// 終端。人が再取得を指示しない限り動かない。
+    /// 終端。人が再取得を指示したときだけ動く。
     pub const fn is_terminal(&self) -> bool {
         !self.is_live()
     }
@@ -208,7 +208,7 @@ pub enum Hold {
 
 /// 預かる日数が大きすぎて、期限が日時にならないとき。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
-#[error("{days} 日先は日付の範囲の外")]
+#[error("{days} 日先は表せる範囲の外")]
 pub struct HoldTooFar {
     pub days: std::num::NonZeroU32,
 }
@@ -221,7 +221,7 @@ impl Hold {
     /// `acquired` を書く直前の時刻を渡す。
     ///
     /// 空を返さないのは、[`Hold::None`]（期限なし＝捨てない）と、日数が表せる範囲を
-    /// 超えたこととが**意味の反転した2つ**だから。片方をもう片方と混同させない。
+    /// 超えたこととが**意味の反転した2つ**だから。片方をもう片方として返さない。
     pub fn from_days(
         days: Option<std::num::NonZeroU32>,
         acquired_at: Timestamp,
@@ -281,7 +281,7 @@ pub enum TranscriptNeed {
     NotNeeded,
 }
 
-/// 状態を動かす出来事。
+/// 状態を動かすイベント。
 ///
 /// 項目の誕生（`discovered`）は状態を**動かす**のではなく**作る**ので、
 /// [`crate::item::Discovered`] が運ぶ。[`next`] の引数にはならず、混ぜると受け皿を置かない
@@ -702,7 +702,7 @@ mod tests {
                 Event::HeldToDeadline(confirmed()),
                 State::Discarded,
             ),
-            // 状態がそのままの2つ。
+            // 状態を動かさない2つ。
             (
                 State::Holding { until: deadline() },
                 Event::PresenceConfirmed(confirmed()),

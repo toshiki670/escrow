@@ -10,7 +10,7 @@ pub struct Member {
     pub manifest: toml::Table,
 }
 
-/// ワークスペースの根。この crate の1つ上。
+/// ワークスペースのルート。この crate の1つ上。
 pub fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()

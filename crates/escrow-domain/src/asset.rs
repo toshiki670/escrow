@@ -113,7 +113,7 @@ impl Asset {
 
     /// ファイル名から読み戻す。規則に合わないものは `None`。
     ///
-    /// ディレクトリには取得中の中間ファイルなど規則外のものも落ちうるので、
+    /// ディレクトリには取得中の中間ファイルなど規則外のものも在りうるので、
     /// この関数はどんな文字列にも答えを返す（規則外なら `None`）。
     pub fn parse_file_name(file_name: &str) -> Option<Self> {
         // ちょうど3つ。`video.1.mp4.part` のように途中で増えた中間ファイルは
@@ -226,7 +226,7 @@ mod tests {
         assert_eq!(webm.extension, "webm");
     }
 
-    /// 規則外の名前で落ちないこと。ディレクトリには中間ファイルも落ちる。
+    /// 規則外の名前で落ちないこと。取得する側は中間ファイルも書く。
     #[test]
     fn ignores_names_that_do_not_follow_the_rule() {
         for name in [

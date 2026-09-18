@@ -27,15 +27,15 @@ impl NormalizedUrl {
     }
 }
 
-/// パスが種別について何を語っているか。
+/// 入口から決まる種別。
 ///
-/// 正規形と一緒に返す。`/shorts/<id>` を `/watch?v=<id>` へ写すと `youtube_shorts` と
+/// 正規形と一緒に返す。`/shorts/<id>` を `/watch?v=<id>` へ潰すと `youtube_shorts` と
 /// `youtube_video` を分ける手掛かりが消えるので、**正規化する前**に読む（#1）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TypeHint {
     /// パスが種別を決めている。
     Known(ContentType),
-    /// YouTube の `/watch?v=` と `youtu.be/` は shorts / video / live のどれも指しうる。
+    /// YouTube の `/watch?v=` と `youtu.be/` は shorts / video / live のどれの入口にもなる。
     /// 検知はフィードの `link` で決まらなかったぶんを1件ごとの追加取得で埋め、
     /// 人の登録は `--type` で受ける（#5）。
     YoutubeUnknown,
@@ -56,7 +56,7 @@ pub enum UrlError {
     },
 }
 
-/// 項目の URL を正規形へ写し、パスが語る種別を一緒に返す。
+/// 項目の URL を正規形へ写し、入口から決まる種別を一緒に返す。
 ///
 /// 種別は正規化と同時に決める（#1 の決め事）。
 pub fn normalize_item(input: &str) -> Result<(NormalizedUrl, TypeHint), UrlError> {
@@ -115,7 +115,7 @@ fn parse(input: &str) -> Result<Url, UrlError> {
 }
 
 fn host_kind(url: &Url) -> Option<Host> {
-    // ホストの大文字小文字は url crate が畳んでいる。
+    // ホストは URL Standard が ASCII を小文字に揃えるので、小文字だけを並べる。
     match url.host_str()? {
         "youtube.com" | "www.youtube.com" | "m.youtube.com" | "music.youtube.com" => {
             Some(Host::Youtube)
@@ -144,13 +144,13 @@ fn youtube_item(url: &Url, input: &str) -> Result<(NormalizedUrl, TypeHint), Url
     };
 
     let (id, hint) = match segments(url).as_slice() {
-        // 種別が決まるパス。
+        // 種別が決まる入口。
         ["shorts", id] => (
             (*id).to_owned(),
             TypeHint::Known(ContentType::YoutubeShorts),
         ),
         ["live", id] => ((*id).to_owned(), TypeHint::Known(ContentType::YoutubeLive)),
-        // 種別は後で決めるパス。ショートも配信のアーカイブもここから開ける。
+        // 種別は後で決める入口。ショートも配信のアーカイブもここから開ける。
         ["watch"] => (
             query_value(url, "v").ok_or_else(not_an_item)?.into_owned(),
             TypeHint::YoutubeUnknown,
@@ -264,7 +264,7 @@ const fn is_base64url(b: u8) -> bool {
 mod tests {
     use super::*;
 
-    /// 同じ動画へ辿り着くパスは、どれも1つの正規形になる。
+    /// 同じ動画へ辿り着く入口は、どれも1つの正規形へ潰れる。
     #[test]
     fn youtube_entrances_collapse_to_one_form() {
         const WATCH: &str = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";

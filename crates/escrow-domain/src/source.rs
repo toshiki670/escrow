@@ -222,7 +222,8 @@ mod tests {
         assert_eq!(source(None).hold_from(at).unwrap(), Hold::None);
     }
 
-    /// 期限なしと、日付の範囲の外は別のこと。黙って捨てると「捨てない」と区別が付かなくなる。
+    /// 期限なしと、表せる範囲の外は別のこと。エラーを無視して `None` にすると「捨てない」と
+    /// 区別が付かなくなる。
     #[test]
     fn a_span_outside_the_calendar_is_not_the_same_as_no_deadline() {
         let at = Timestamp::parse("2026-03-01T22:30:00+09:00").unwrap();

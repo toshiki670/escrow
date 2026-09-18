@@ -7,8 +7,8 @@
 //! 手段へ替えても、「在ることを確かめられなければ捨てない」はそのまま効く。
 //! 見分けがつくぶんは `Gone` を早く返せる、という便宜になるだけ。
 //!
-//! 実際に配信元を叩く仕事は Phase 4 で足す。ここに置くのは、その結果を表す語彙と、
-//! 「在ることを確かめた」という証だけ。
+//! 配信元を叩く仕事は段3 の `Probe` と段4 の custody に在る。ここに置くのは、その結果を
+//! 表す語彙と、「在ることを確かめた」という証だけ。
 
 /// 生存確認 1 回ぶんの観測。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,7 +24,7 @@ pub enum Presence {
 impl Presence {
     /// 「在る」を観測したときだけ証を返す。
     ///
-    /// [`PresenceConfirmed`] を作れるのはここだけなので、`Unknown` を黙って捨てて
+    /// [`PresenceConfirmed`] を作れるのはここだけなので、`Unknown` を無視して
     /// 期限切れを捨てに行くコードは**書けない**。
     pub const fn confirmed(self) -> Option<PresenceConfirmed> {
         match self {
