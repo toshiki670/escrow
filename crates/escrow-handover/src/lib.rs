@@ -31,7 +31,7 @@ pub enum HandoverError {
     },
 }
 
-/// #4 が返す1件。形は `the_handed_item_has_exactly_the_nine_fields` が固定している。
+/// #4 が返す1件。フィールドは #4 の `list` の JSON の 9 つ。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Handed {
     /// `release` に渡す。
@@ -135,7 +135,7 @@ impl<'a> Handover<'a> {
             )
             .await?;
 
-        // ここから先で落ちても、残るのは参照の無いファイルだけ。
+        // ここから先で落ちても、残るのは孤児ファイルだけ（#7）。
         asset::remove(self.media_dir, id).map_err(|source| HandoverError::Io {
             path: asset::item_dir(self.media_dir, id),
             source,

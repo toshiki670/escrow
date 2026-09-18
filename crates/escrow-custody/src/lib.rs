@@ -9,10 +9,10 @@
 //! 行数に出る**こと — 在ることを確かめた回だけイベントが増え、確かめられなかった回は
 //! 何も残らない。
 //!
-//! # 持つのは「1件を1回確かめる」だけ
+//! # 順番と時刻はスケジューラが決める
 //!
 //! ここに在るのは「1件を1回確かめる」だけ。順番と時刻はスケジューラが決め、
-//! [`Custody::check`] の中の呼び出しがその中で待つ。頻度は巡回の側（#7）。
+//! [`Custody::check`] の中の呼び出しがその中で待つ。頻度は #38 が決める。
 
 use std::path::{Path, PathBuf};
 
@@ -33,7 +33,7 @@ pub enum CustodyError {
     Adapter(#[from] AdapterError),
     #[error("項目 {0} が無い")]
     NoSuchItem(ItemId),
-    #[error("項目 {id} は預かり中ではない: {state}")]
+    #[error("項目 {id} は {state}（確かめるのは預かり中のものだけ）")]
     NotHolding { id: ItemId, state: StateName },
     #[error("手元の実体を扱えない: {path}")]
     Io {

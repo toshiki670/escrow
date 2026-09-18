@@ -111,7 +111,7 @@ mod tests {
     use std::num::NonZeroU32;
     use std::sync::Mutex;
 
-    /// 呼び出しの実体を控えるだけの文字起こし。
+    /// 受け取った実体を控えるだけの文字起こし。
     struct FakeTranscribe {
         calls: Mutex<Vec<String>>,
     }

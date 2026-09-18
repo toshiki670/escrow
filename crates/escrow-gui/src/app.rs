@@ -3,7 +3,7 @@
 //! イベントストアを読むのは async なので、読み出しは [`Task`] として出し、結果を [`Message`] で
 //! 受け取る。失敗は文字列にして運ぶ — iced の [`Message`] は複製できることを求めるが、
 //! イベントストアと設定の失敗はどちらも複製できない。**画面が出すのは理由の文だけ**なので、
-//! 型を保ったまま運ぶ意味がここには無い。
+//! 型を保ったまま運ぶ意味がここには無い（#7 の「型で締めない所を先に決めておく」）。
 //!
 //! イベントストアを開く手順と読む関数は `escrow-app` が持つ（#82）。ここに在るのは、画面の
 //! 状態とメッセージの往復だけ。
@@ -108,7 +108,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             let App::Ready(ready) = app else {
                 return Task::none();
             };
-            // 読んでいる間に人が選び直していたら、届いたぶんは捨てる。
+            // 読んでいる間に人が選び直していたら、届いたぶんは無視する。
             if ready.selection != Selection::Person(person) {
                 return Task::none();
             }
@@ -284,7 +284,7 @@ mod tests {
         assert!(shows(&app, "2026-03-01"));
     }
 
-    /// #30 の受け入れ — 項目が0件の `Person` でも画面が描ける。
+    /// #30 の受け入れ — 項目が0件の `Person` でも画面が壊れない。
     #[tokio::test]
     async fn a_person_without_items_still_draws() {
         let media = tempfile::tempdir().unwrap();

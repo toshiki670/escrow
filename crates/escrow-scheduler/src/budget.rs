@@ -1,12 +1,12 @@
 //! 予算と順番（#13）。
 //!
-//! 経路ごとに `Gate` を1つ持ち、外へ出る要求はそこで順番を待つ。**数えるものは経路で違う** —
-//! 頻度で測る経路は最後に出した時刻を見て、取得は走っている数を見る。
+//! 経路ごとに予算と順番待ちを1つ持ち、外へ出る要求はそこで順番を待つ。**数えるものは
+//! 経路で違う** — 頻度で測る経路は最後に出した時刻を見て、取得は走っている数を見る。
 //!
 //! # 経過時間と実時間
 //!
-//! 予算と待ち時間は**経過時間**なので [`tokio::time::Instant`] で測る。テストは
-//! `tokio::time::pause` で止めて進められる。一方 [`Plan`] が答える時刻は人が読む
+//! 予算と待ち時間は**経過時間**なので [`tokio::time::Instant`] で測る。テストでは時間を
+//! 止めて進められる。一方 [`Plan`] が答える時刻は人が読む
 //! **実時間**なので、呼ぶ側が渡した `now` に残りの時間を足して作る。
 
 use std::cmp::Ordering;
@@ -104,7 +104,7 @@ enum Measure {
 struct Ticket {
     deadline: Option<Timestamp>,
     weight: NonZeroU32,
-    /// 並んだ順。締切と重みが同じものを先着順に並べ、同じ `Queued` を作らせない。
+    /// 並んだ順。締切と重みが同じものを先着順に並べ、同じ `Ticket` を作らせない。
     seq: u64,
 }
 
@@ -172,8 +172,8 @@ impl Gate {
         }
     }
 
-    /// ロックが `PoisonError` になるのは、ロックの中で panic したときだけ。中の操作はどれも
-    /// panic しない。
+    /// `lock()` が `PoisonError` を返すのは、ロックを持ったまま panic したときだけ。中の操作は
+    /// どれも panic しない。
     fn lock(&self) -> MutexGuard<'_, GateState> {
         self.state.lock().expect("Gate の状態のロック")
     }
@@ -261,9 +261,9 @@ impl Gate {
         let wait = retry_after.unwrap_or(state.backoff);
         let until = Instant::now() + wait;
 
-        // 同じ経路の別の呼び出しが、もっと長い `Retry-After` を受けていることがある。**遅い
-        // ほうを残す** — 両方の指示を満たす時刻はそれだけで、短いほうで上書きすると、
-        // 相手がまだ待てと言っている経路へ出ていく。
+        // 同じ経路の別の呼び出しが、もっと長い待ち時間（`Retry-After` か既定）を持っている
+        // ことがある。**遅いほうを残す** — 両方の指示を満たす時刻はそれだけで、短いほうで
+        // 上書きすると、相手がまだ待てと言っている経路へ出ていく。
         state.closed_until = Some(
             state
                 .closed_until
@@ -316,8 +316,8 @@ impl Gate {
         match (Self::closed_for(state, now), by_measure) {
             (Some(closed), Opening::In(measured)) => Opening::In(closed.max(measured)),
             (Some(closed), Opening::Now) => Opening::In(closed),
-            // 走っているものが終わる時刻は未知のまま答える。
-            // 閉鎖の終わりは [`Plan::closed_until`] が別に持つ。
+            // 遅いほうを選ぶには両方の時刻が要る。走っているものが終わる時刻は未知なので、
+            // 閉鎖と比べずにそのまま答える。閉鎖の終わりは [`Plan::closed_until`] が別に持つ。
             (_, Opening::WhenOneFinishes) => Opening::WhenOneFinishes,
             (None, opening) => opening,
         }
@@ -339,9 +339,9 @@ enum Opening {
     WhenOneFinishes,
 }
 
-/// 列に並んでいる間の1件。**取らずに落ちたら列から抜ける。**
+/// 列に並んでいる間、`Ticket` を列に置いておくもの。**取らずに落ちたら列から抜ける。**
 ///
-/// 呼ぶ側が future を落としたときに `Queued` が残ると、その `Gate` は永久に先頭が動かない。
+/// 呼ぶ側が future を `drop` したときに `Queued` が残ると、その `Gate` は永久に先頭が動かない。
 struct Queued<'a> {
     gate: &'a Gate,
     ticket: Ticket,
@@ -367,8 +367,8 @@ impl Permit for Slot<'_> {
         match result {
             Ok(()) => self.gate.passed(),
             Err(AdapterError::Rejected { retry_after, .. }) => self.gate.rejected(*retry_after),
-            // 待ち時間を戻すのは通ったときだけ。拒否以外の失敗（抑えている最中の失敗など）で
-            // 戻すと、次の拒否が最初の待ち時間からやり直しになる。
+            // 待ち時間を戻すのは通ったときだけ。拒否以外の失敗で戻すと、抑えている最中に次の
+            // 拒否が来たとき、最初の待ち時間からやり直しになる。
             Err(_) => {}
         }
     }

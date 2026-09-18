@@ -5,7 +5,7 @@
 //!
 //! ここに在るのは「1つの配信元を1回見る」だけで、**いつ見るかは持たない**。順番と
 //! 時刻はスケジューラが決め、`sweep` の中の呼び出しがその中で待つ。どの配信元を
-//! どれだけの頻度で見るかは巡回の側（Phase 6、#7）。
+//! どれだけの頻度で見るかは巡回の側（#33）。
 
 use escrow_domain::item::{Discovered, ItemId};
 use escrow_domain::source::{Exclude, Source};
@@ -182,7 +182,7 @@ mod tests {
         }
     }
 
-    /// 除外を通ったものだけが行になる（#1）。
+    /// 除外に当たったものは行を作らない（#1）。
     #[tokio::test]
     async fn excluded_kinds_never_become_rows() {
         let (store, source) = seeded(Monitoring::Continuous, true).await;

@@ -21,7 +21,7 @@
 //!
 //! # 予算は要求を出す側の外に在る
 //!
-//! [`budget::Budget`] が経路ごとの `Gate` を持ち、`escrow-external` の外向きの呼び出しは
+//! [`budget::Budget`] が経路ごとに予算と順番待ちを持ち、`escrow-external` の外向きの呼び出しは
 //! 1本残らずそこを通る。各経路が自分で自分を抑える形だと、経路が複数ある時点で合計を
 //! 誰も知らない（#13）。
 //!
@@ -262,10 +262,10 @@ mod tests {
         )
     }
 
-    /// 予算が、`route` の型を通った実際の呼び出しに掛かること。
+    /// 予算が、`Adapters` が返すものを通った実際の呼び出しに掛かること。
     ///
     /// `Gate` そのものの振る舞いは [`budget`] の単体テストが見る。ここが見るのは**繋がり** —
-    /// [`Turn`] → `Admit` → `through` → `route` の型 → ツール が1本になっていること。
+    /// [`Turn`] → `Admit` → `through` → `Adapters` が返すもの → ツール が1本になっていること。
     #[tokio::test(start_paused = true)]
     async fn the_budget_applies_to_a_call_that_goes_through_the_adapters() {
         let adapters = adapters();
