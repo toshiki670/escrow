@@ -85,7 +85,7 @@ pub enum AppError {
     HoldDays,
     #[error("項目 {0} が無い")]
     NoSuchItem(ItemId),
-    /// URL が種別を語らない（`/watch?v=` など）。人が種別を添えて呼び直す（#5）。
+    /// `/watch?v=` などの、種別が URL の外に在る形。人が種別を添えて呼び直す（#5）。
     #[error("この URL からは種別を決められない")]
     UndecidableType,
 }
@@ -216,7 +216,7 @@ impl App {
             .collect::<Result<_, _>>()?)
     }
 
-    /// #4 の `release`。消す前の姿を返す。
+    /// #4 の `release`。消す前の値を返す。
     ///
     /// # Errors
     ///
@@ -289,7 +289,7 @@ impl App {
     ) -> Result<ItemId, AppError> {
         let (url, hint) = url::normalize_item(raw_url)?;
 
-        // 種別は正規化する前の入口から決める（#1）。入口が語らない形なら人に訊く。
+        // 種別は正規化する前の URL のパスから決める（#1）。パスが語らない形なら人に訊く。
         let content_type = match (hint, kind) {
             (_, Some(given)) => given.parse::<ContentType>()?,
             (TypeHint::Known(known), None) => known,

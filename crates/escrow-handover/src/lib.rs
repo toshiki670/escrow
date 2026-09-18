@@ -54,7 +54,7 @@ pub struct Handed {
 
 /// #4 の `list` と `release`（#15 のスライス）。
 ///
-/// 外へ出ないので、スケジューラを持たない。触るのはイベントストアと手元のファイルだけ。
+/// 中で完結する（触るのはイベントストアと手元のファイルだけ）ので、スケジューラ抜きで足りる。
 pub struct Handover<'a> {
     store: &'a EventStore,
     media_dir: &'a Path,
@@ -114,7 +114,7 @@ impl<'a> Handover<'a> {
             .ok_or(HandoverError::NoSuchItem(id))?;
 
         // #4 の「`holding` の項目も `list` に出るが、この場合 `release` は使えない」。
-        // 遷移として弾かれるが、外へ返す理由をはっきりさせるためにここでも見る。
+        // 遷移としては `next` が弾くが、外へ返す理由をはっきりさせるためにここでも見る。
         if row.item.state != State::Kept {
             return Err(HandoverError::NotReleasable {
                 id,
@@ -122,10 +122,10 @@ impl<'a> Handover<'a> {
             });
         }
 
-        // 引き渡す中身は、消す前の姿で返す。受け取る側が何を持って行ったか分かる。
+        // 引き渡す中身は、消す前の値で返す。受け取る側が何を持って行ったか分かる。
         let handed = self.handed(&row.item)?;
 
-        // 読んだときの番号をそのまま渡す。動いていれば追記が弾かれる（#15）。
+        // 読んだときの番号をそのまま渡す。動いていれば追記は `Superseded`（#15）。
         self.store
             .append(
                 id,
@@ -135,7 +135,7 @@ impl<'a> Handover<'a> {
             )
             .await?;
 
-        // ここから先で落ちても、残るのは孤児ファイルだけ。
+        // ここから先で落ちても、残るのは参照の無いファイルだけ。
         asset::remove(self.media_dir, id).map_err(|source| HandoverError::Io {
             path: asset::item_dir(self.media_dir, id),
             source,
@@ -266,7 +266,7 @@ mod tests {
                 "url",
             ]
         );
-        // #4 は state_since を返さない。期限の計算は escrow 側の仕事。
+        // state_since は escrow の中に留める。期限の計算は escrow 側の仕事（#4）。
         assert!(!json.as_object().unwrap().contains_key("state_since"));
     }
 
@@ -353,7 +353,7 @@ mod tests {
             .await
             .unwrap();
 
-        // 返すのは消す前の姿。受け取る側が何を持って行ったか分かる。
+        // 返すのは消す前の値。受け取る側が何を持って行ったか分かる。
         assert_eq!(handed.media_paths.len(), 1);
         assert_eq!(handed.transcript_paths.len(), 1);
 
@@ -384,7 +384,7 @@ mod tests {
                 ..
             })
         ));
-        // 断られたら、実体はそのまま。
+        // `NotReleasable` のとき、実体はそのまま。
         assert!(dir.join("video.1.mp4").is_file());
     }
 

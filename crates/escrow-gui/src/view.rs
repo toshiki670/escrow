@@ -43,7 +43,7 @@ fn sidebar(ready: &Ready) -> Element<'_, Message> {
     .into()
 }
 
-/// サイドバーの1項目。選んでいるものだけ塗る。
+/// サイドバーの1項目。選んでいるものだけ色を付ける。
 fn entry<'a>(name: &'a str, selection: Selection, ready: &Ready) -> Element<'a, Message> {
     let style = if selection == ready.selection() {
         button::secondary

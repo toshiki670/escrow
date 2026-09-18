@@ -61,7 +61,7 @@ pub enum Message {
     Opened(Result<Opened, String>),
     /// サイドバーで選んだ。
     Selected(Selection),
-    /// 項目を読み終えた。**どの持ち主のぶんか**を連れて戻る。
+    /// 項目を読み終えた。**どの持ち主のぶんか**を一緒に返す。
     Listed(PersonId, Result<Vec<Listed>, String>),
 }
 
@@ -108,7 +108,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             let App::Ready(ready) = app else {
                 return Task::none();
             };
-            // 読んでいる間に選び直されていたら、届いたぶんは捨てる。
+            // 読んでいる間に人が選び直していたら、届いたぶんは捨てる。
             if ready.selection != Selection::Person(person) {
                 return Task::none();
             }
@@ -284,7 +284,7 @@ mod tests {
         assert!(shows(&app, "2026-03-01"));
     }
 
-    /// #30 の受け入れ — 項目が0件の `Person` でも画面が壊れない。
+    /// #30 の受け入れ — 項目が0件の `Person` でも画面が描ける。
     #[tokio::test]
     async fn a_person_without_items_still_draws() {
         let media = tempfile::tempdir().unwrap();
