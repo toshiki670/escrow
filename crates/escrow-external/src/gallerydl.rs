@@ -72,7 +72,7 @@ pub(crate) fn timeline_url(source: &NormalizedUrl) -> Option<String> {
 /// 共通で渡すもの。
 fn base(program: &Path, browser: Browser) -> Invocation {
     Invocation::new(program)
-        // 利用者の設定ファイルに引きずられない。出力形式を変えられていると、
+        // 利用者の設定ファイルを無視して動かす。利用者が出力形式を変えていると、
         // 読み取りの層が理由なく落ちる。
         .arg("--config-ignore")
         .arg("--cookies-from-browser")
@@ -81,14 +81,14 @@ fn base(program: &Path, browser: Browser) -> Invocation {
 
 /// タイムラインを列挙する。落とさない。
 ///
-/// `text-tweets` はメディアの無い投稿を拾うため。既定では飛ばされる（#5）。
+/// `text-tweets` はメディアの無い投稿を拾うため。gallery-dl の既定はそれを飛ばす（#5）。
 /// `cards=ytdl` は Space やライブ配信のカードを拾うため。
 pub(crate) fn timeline_argv(program: &Path, timeline: &str, browser: Browser) -> Invocation {
     base(program, browser)
         .arg("--dump-json")
         .args(["-o", "extractor.twitter.text-tweets=true"])
         .args(["-o", "extractor.twitter.cards=ytdl"])
-        // 引用元と RT は、それ自体を項目にしない。繋がりは URL で記録する（#1）。
+        // 引用元と RT は URL の繋がりとして記録し、項目にはしない（#1）。
         .args(["-o", "extractor.twitter.quoted=false"])
         .args(["-o", "extractor.twitter.retweets=false"])
         .arg(timeline)
@@ -96,7 +96,7 @@ pub(crate) fn timeline_argv(program: &Path, timeline: &str, browser: Browser) ->
 
 /// 1つの投稿の中身を取る。落とさない。
 ///
-/// タイムラインと同じ envelope が返るので、読み取りは共通。
+/// タイムラインと同じ配列の形が返るので、読み取りは共通。
 pub(crate) fn describe_argv(program: &Path, url: &NormalizedUrl, browser: Browser) -> Invocation {
     base(program, browser)
         .arg("--dump-json")
@@ -137,7 +137,7 @@ const URL: i64 = 3;
 /// 投稿のメタデータのうち、escrow が使うものだけ。
 ///
 /// 知らないキーは無視する。gallery-dl は項目を足すので、`deny_unknown_fields` に
-/// すると足された日に読めなくなる。
+/// すると足した日に読めなくなる。
 #[derive(Debug, Deserialize)]
 struct TweetMetadata {
     tweet_id: i64,
@@ -179,9 +179,9 @@ pub(crate) fn parse_timeline(stdout: &str) -> Result<Vec<Found>, AdapterError> {
                 Some(last) => last.media = MediaPresence::Present,
                 None => return Err(parse_error(&"見出しの前にファイルが出た")),
             },
-            // 知らない種別を黙って捨てない。投稿を載せた新しい形が来たとき、
-            // 取りこぼしが「空のタイムライン」に見える。Parse なので判定は
-            // 保留に倒れ、預かり中のものは捨てられない（#5）。
+            // 知らない種別は `Parse` で落とす。黙って捨てると、投稿を載せた新しい形が
+            // 来たとき、取りこぼしが「空のタイムライン」に見える。Parse なので判定は
+            // 保留になり、預かり中のものは `holding` に残る（#5）。
             other => return Err(parse_error(&format!("知らない出力の種別 {other}"))),
         }
     }
@@ -204,7 +204,7 @@ fn post(meta: &serde_json::Value) -> Result<Found, AdapterError> {
             in_reply_to: link(meta.reply_id)?,
             quoted: link(meta.quoted_id)?,
         },
-        // ファイルが続いていれば、読み取りの側で `Present` に上書きされる。
+        // ファイルが続いていれば、読み取りの側が `Present` に上書きする。
         media: MediaPresence::Absent,
     })
 }
@@ -223,7 +223,7 @@ fn status_url(id: i64) -> Result<NormalizedUrl, AdapterError> {
         .map_err(|e| parse_error(&e))
 }
 
-/// `"2006-03-21 20:50:14"` を読む。時差は畳まれていて UTC。
+/// `"2006-03-21 20:50:14"` を読む。時差は UTC に畳んである。
 fn naive_utc(text: &str) -> Result<Timestamp, AdapterError> {
     chrono::NaiveDateTime::parse_from_str(text.trim(), "%Y-%m-%d %H:%M:%S")
         .map(|naive| Timestamp::from(naive.and_utc().fixed_offset()))
@@ -376,7 +376,7 @@ fn rename_into_place(from: &Path, into: &Path) -> Result<Vec<Asset>, AdapterErro
     // gallery-dl の `{num}` が並び順を持つので、名前で並べれば投稿内の順になる。
     downloaded.sort();
 
-    // 通し番号は種類ごとに1から振り直す。宣言順に依存しないよう、種類を鍵にする。
+    // 通し番号は種類ごとに1から振り直す。宣言順に依存しないよう、種類をキーにする。
     let mut counts: std::collections::HashMap<AssetKind, u32> = std::collections::HashMap::new();
     let mut assets = Vec::new();
 
@@ -457,7 +457,7 @@ mod tests {
         // #5「text-tweets でメディアの無い投稿を拾う」「cards=ytdl でカードを拾う」
         assert!(args.contains(&"extractor.twitter.text-tweets=true"));
         assert!(args.contains(&"extractor.twitter.cards=ytdl"));
-        // 引用元と RT はそれ自体を項目にしない（#1 の「1投稿 = 1 Item」）。
+        // 引用元と RT は繋がりとして記録し、項目にはしない（#1 の「1投稿 = 1 Item」）。
         assert!(args.contains(&"extractor.twitter.quoted=false"));
         assert!(args.contains(&"extractor.twitter.retweets=false"));
         assert!(args.contains(&"--dump-json"));
@@ -487,10 +487,10 @@ mod tests {
 
     // ---- 出力の読み取り ----
 
-    /// 実物の envelope（`[2, meta]` と `[3, url, meta]`）に、gallery-dl 自身の
+    /// 実物の配列の形（`[2, meta]` と `[3, url, meta]`）に、gallery-dl 自身の
     /// `_transform_tweet` が出すキーを載せたもの。
     ///
-    /// X はタイムラインの列挙に cookie を要るので、この形は認証を通したうえで
+    /// X はタイムラインの列挙に cookie が要るので、この形は認証を通したうえで
     /// もう一度確かめる必要がある（#5 の「取りこぼしや不便が出てから直す」）。
     const TIMELINE: &str = include_str!("../tests/fixtures/gallerydl/timeline.json");
 
@@ -505,7 +505,7 @@ mod tests {
         }
     }
 
-    /// ハンドル抜きの正規形へ潰れる（#1）。
+    /// ハンドル抜きの正規形になる（#1）。
     #[test]
     fn urls_are_canonical() {
         let found = parse_timeline(TIMELINE).unwrap();
@@ -568,7 +568,7 @@ mod tests {
         assert_eq!(found[0].published_at.to_text(), "2006-03-21T20:50:14+00:00");
     }
 
-    /// gallery-dl は出力の項目を足す。知らないキーで落ちてはいけない。
+    /// gallery-dl は出力の項目を足す。知らないキーが来ても読めること。
     #[test]
     fn unknown_keys_do_not_break_the_reader() {
         let json = r#"[[2, {"tweet_id":20,"date":"2006-03-21 20:50:14","content":"x",
@@ -607,7 +607,7 @@ mod tests {
             matches!(error, AdapterError::Unauthenticated { .. }),
             "{error:?}"
         );
-        // cookie の失効は消えたことを意味しない。判定は保留（#5）。
+        // cookie の失効は判定保留（#5）。消えたとは別のこと。
         assert_eq!(error.presence(), escrow_domain::liveness::Presence::Unknown);
     }
 
@@ -631,7 +631,7 @@ mod tests {
             classify(&completed),
             AdapterError::Unauthenticated { .. }
         ));
-        // cookie の失効は消えたことを意味しない。判定は保留（#5）。
+        // cookie の失効は判定保留（#5）。消えたとは別のこと。
         assert_eq!(
             classify(&completed).presence(),
             escrow_domain::liveness::Presence::Unknown
@@ -660,7 +660,7 @@ mod tests {
         }
     }
 
-    /// 知らない拡張子は実体として数えない。
+    /// 実体に数えるのは知っている拡張子だけ。
     #[test]
     fn unknown_extensions_are_left_alone() {
         let from = tempfile::tempdir().unwrap();

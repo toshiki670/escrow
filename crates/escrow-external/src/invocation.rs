@@ -91,7 +91,7 @@ pub(crate) async fn run(
     if let Some(dir) = working_dir {
         command.current_dir(dir);
     }
-    // 端末を持たない場所から動くので、対話的な問い合わせで止まらせない。
+    // 端末が無い場所から動くので、対話的な問い合わせを待たずに進む。
     command.stdin(std::process::Stdio::null());
 
     let output = command
