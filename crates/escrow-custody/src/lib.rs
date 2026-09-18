@@ -400,7 +400,7 @@ mod tests {
         assert_eq!(recorded(&store, id).await, before);
     }
 
-    /// cookie の失効は項目の問題ではないので、捨てずに返す（#5）。
+    /// cookie の失効は項目の問題ではないので、無視せずに返す（#5）。
     #[tokio::test]
     async fn an_expired_cookie_reaches_the_caller() {
         let store = EventStore::open_in_memory().await.unwrap();

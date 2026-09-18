@@ -289,7 +289,7 @@ impl App {
     ) -> Result<ItemId, AppError> {
         let (url, hint) = url::normalize_item(raw_url)?;
 
-        // 種別は正規化する前の URL のパスから決める（#1）。パスが語らない形なら人に訊く。
+        // 種別は正規化する前の入口から決める（#1）。入口から決まらない形なら人に訊く。
         let content_type = match (hint, kind) {
             (_, Some(given)) => given.parse::<ContentType>()?,
             (TypeHint::Known(known), None) => known,
