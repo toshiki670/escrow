@@ -1,6 +1,6 @@
-//! テストの土台。
+//! テストの共通部品。
 //!
-//! リードモデルを壊す・行を消すといった確認は、接続を持たないと書けない。**公開 API に
+//! リードモデルを壊す・行を消すといった確認には、接続が要る。**公開 API に
 //! 接続が出ていない**ことの裏返しで、だからこの手のテストは crate の中に置く。
 
 use std::num::NonZeroU32;
@@ -22,7 +22,7 @@ pub(crate) fn item_url(raw: &str) -> NormalizedUrl {
     url::normalize_item(raw).expect(raw).0
 }
 
-/// 人と配信元を1つずつ持つ DB。項目は FK を要るので、これが最小の土台。
+/// 人と配信元を1つずつ持つ DB。項目には FK が要るので、これが最小の準備。
 pub(crate) async fn seeded() -> (EventStore, SourceId) {
     let store = EventStore::open_in_memory().await.unwrap();
     let source = seed_into(&store).await;

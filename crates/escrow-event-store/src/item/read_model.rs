@@ -1,9 +1,9 @@
 //! `item` テーブル。#1 の erDiagram をそのまま写したリードモデル（#15）。
 //!
-//! 列も索引もイベントログを入れる前と同じなので、**読み出しのクエリと性能は変わらない**。
+//! 列も索引もイベントログを入れる前と同じなので、**読み出しのクエリと性能はそのまま**。
 //! 変わったのは書き込みだけ。
 //!
-//! 読み出しは必ず `seq` を連れて返す。次のイベントを書くときの前提になるので、
+//! 読み出しは必ず `seq` を一緒に返す。次のイベントを書くときの前提になるので、
 //! 根拠を持たずに書く経路を作らせない。
 
 use escrow_domain::content::{Content, ContentType};
@@ -16,7 +16,7 @@ use escrow_domain::url::NormalizedUrl;
 use super::ReadModelRow;
 use crate::{EventStore, EventStoreError, RowError, Seq, content_type_of, normalized, timestamp};
 
-/// `item` の1行と、その姿を決めた最後のイベントの番号。ここから先はドメイン型。
+/// `item` の1行と、その状態を決めた最後のイベントの番号。ここから先はドメイン型。
 struct Row {
     id: i64,
     source_id: i64,
@@ -206,7 +206,7 @@ pub(super) fn content_of(
     match content_type.media_type() {
         Some(media_type) => {
             let title = title.ok_or_else(|| missing("title"))?.to_owned();
-            // Media は body も繋がりの URL も持たない（#1）。
+            // Media が持つのは `title` だけ（#1）。body と繋がりの URL は `UnexpectedColumn`。
             if body.is_some() {
                 return Err(unexpected("body"));
             }
@@ -417,7 +417,7 @@ mod tests {
     /// 崩し方ごとに、どのエラーになるはずかを見る述語。
     type Expected = fn(&RowError) -> bool;
 
-    /// 壊れた行は黙って通さない。#1 の「`NULL` を許すのはこの列だけ」が
+    /// 壊れた行ははっきり落とす。#1 の「`NULL` を許すのはこの列だけ」が
     /// 文書ではなく parse として効いていること。
     #[tokio::test]
     async fn refuses_rows_that_break_the_null_rules() {
@@ -457,7 +457,7 @@ mod tests {
                     }
                 )
             }),
-            // 預かりを通らない状態に期限が入っていたら撥ねる（#1）。
+            // 預かりを通らない状態に期限が入っていたら弾く（#1）。
             ("UPDATE item SET state = 'kept'", |e| {
                 matches!(
                     e,
@@ -467,7 +467,7 @@ mod tests {
                     }
                 )
             }),
-            // 逆に holding から期限を抜いても撥ねる。期限のない預かりは無い。
+            // 逆に holding から期限を抜いても弾く。預かりは必ず期限を持つ。
             ("UPDATE item SET hold_until = NULL", |e| {
                 matches!(
                     e,
@@ -522,7 +522,7 @@ mod tests {
         }
     }
 
-    /// `Post` 側の欠けも同じように捕まえる。
+    /// `Post` 側の欠けも同じように見つける。
     #[tokio::test]
     async fn refuses_a_post_without_a_body() {
         let (store, source) = seeded().await;

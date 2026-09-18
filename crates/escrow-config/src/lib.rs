@@ -36,7 +36,7 @@ pub enum ConfigError {
 
 /// #2 の項目表。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-// 綴り違いを黙って既定へ落とすと、設定したつもりが効かない。はっきり落とす。
+// 綴り違いははっきり落とす。黙って既定へ落とすと、設定したつもりが効かない。
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     pub storage: Storage,
@@ -58,7 +58,7 @@ pub struct Storage {
     pub media_dir: String,
     /// DB の場所。空なら Application Support 配下。
     pub db_path: String,
-    /// これを下回ったら取得を始めない。単位は GiB（2^30 バイト、#2）。
+    /// 取得を始める前に要る空き。単位は GiB（2^30 バイト、#2）。
     pub min_free_gib: u32,
 }
 
@@ -68,7 +68,7 @@ pub struct Check {
     /// `holding` の項目をまとめて確認する間隔。
     ///
     /// 検知（`Source.priority` と #13 の予算）とは別の概念なので、こちらは共通設定（#1）。
-    /// ディスクが逼迫したら詰める（#7 の巡回）。
+    /// ディスクが逼迫したら間隔を詰める（#7 の巡回）。
     pub interval_hours: NonZeroU32,
 }
 
@@ -96,7 +96,7 @@ pub struct Transcribe {
 pub struct Auth {
     /// cookie を取り出すブラウザ。
     ///
-    /// **生の認証情報は持たない。** cookie 本体をファイルに書かず、取り出し元だけを持つ（#2）。
+    /// **ファイルに置くのは取り出し元だけ**で、cookie 本体（生の認証情報）は書かない（#2）。
     /// プラットフォームごとに分けないのは、同じブラウザにログインしているため。
     pub cookies_from: Browser,
 }
@@ -110,7 +110,7 @@ pub struct Auth {
 pub struct Schedule {
     /// 拒否を受けて `Retry-After` が返らなかったときに待つ秒数。
     pub rejection_backoff_seconds: NonZeroU32,
-    /// 連続で断られるたびに待ち時間を倍にする、その上限の秒数。
+    /// 連続で拒否を受けるたびに待ち時間を倍にする、その上限の秒数。
     pub rejection_max_backoff_seconds: NonZeroU32,
     pub youtube: Limits,
     pub x: Limits,
@@ -129,7 +129,8 @@ pub struct Limits {
     pub describe_gap_seconds: NonZeroU32,
     /// 配信元にまだ在るかを確かめる間隔の下限。秒。
     ///
-    /// 生存確認は預かり中の全件をまとめて叩くので、この間隔が塊を散らす役も兼ねる（#13）。
+    /// 生存確認は預かり中の全件をまとめて叩くので、この間隔が要求を時間で分ける役も
+    /// 兼ねる（#13）。
     pub probe_gap_seconds: NonZeroU32,
     /// 同時に走らせる取得の数。
     ///
@@ -144,7 +145,7 @@ pub struct Tools {
     /// 外部ツールを探すディレクトリ。PATH に足す。
     ///
     /// PATH で見つからなかったものを、ここから探す。GUI アプリはターミナルと違う PATH で
-    /// 起動される（`.zshrc` を読まない）ので、Homebrew や mise で入れたものを見つけられない
+    /// 動く（`.zshrc` を読まない）ので、Homebrew や mise で入れたものを見つけられない
     /// ことがある（#2）。
     pub extra_paths: Vec<String>,
 }
@@ -169,7 +170,7 @@ impl TryFrom<String> for Language {
     type Error = EmptyLanguage;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        // 前後の空白と `auto` の綴り揺れだけ吸収する。言語コードそのものは
+        // 前後の空白と `auto` の大文字小文字だけ正す。言語コードそのものは
         // 文字起こし側が解釈するので、escrow は畳まない。
         let trimmed = value.trim();
 
@@ -330,7 +331,7 @@ impl Default for Limits {
 impl Config {
     /// 設定ファイルを読む。**無ければ既定を返す。**
     ///
-    /// 初回起動でファイルが無いのは異常ではない。壊れている場合だけ落とす。
+    /// 初回起動ではファイルが無いのが普通。壊れている場合だけ落とす。
     pub fn load(path: &Path) -> Result<Self, ConfigError> {
         let text = match std::fs::read_to_string(path) {
             Ok(text) => text,
@@ -346,12 +347,11 @@ impl Config {
         Self::from_toml(&text)
     }
 
-    /// 設定画面から書き戻す。**コメントは保持しない**（#2）。
+    /// 設定画面から書き戻す。**書くのは項目だけで、TOML のコメントは消える**（#2）。
     ///
-    /// 同じディレクトリの一時ファイルへ書いてから rename する。途中で落ちても、
-    /// 切れた設定ファイルが残らない。[`Config::load`] は無いファイルだけ既定に
-    /// 落として壊れたファイルは落とすので、**自分の書き込みでその状態を作らない**
-    /// ようにしておく。
+    /// 同じディレクトリの一時ファイルへ書いてから rename する。途中で落ちても、元の
+    /// ファイルがそのまま残る。[`Config::load`] は無いファイルだけ既定に落として壊れた
+    /// ファイルは落とすので、**自分の書き込みでは「無い」か「完全」のどちらかにしておく**。
     pub fn save(&self, path: &Path) -> Result<(), ConfigError> {
         use std::io::Write as _;
 
@@ -433,7 +433,7 @@ impl Dirs {
         &self.home
     }
 
-    /// 設定ファイルの場所。**設定で変えられない**（読むために場所が要るため、#2）。
+    /// 設定ファイルの場所。**場所は固定**（読むために場所が要るため、#2）。
     pub fn config_file(&self) -> PathBuf {
         self.config_dir.join("config.toml")
     }
@@ -468,7 +468,7 @@ impl Paths {
     }
 }
 
-/// 設定に書かれたパスを実際の場所へ写す。
+/// 設定に書いてあるパスを実際の場所へ写す。
 ///
 /// 先頭の1成分が `~` のときだけホームへ差し替える。`~` はシェルの記法で
 /// [`std::path`] の概念ではないので、その一段だけがここの仕事。
@@ -581,7 +581,7 @@ concurrent_acquisitions = 1
         assert_eq!(Config::load(&path).unwrap(), config);
     }
 
-    /// 綴り違いは黙って既定へ落とさない。設定したつもりが効かないのを防ぐ。
+    /// 綴り違いははっきり落とす。設定したつもりが効かないのを防ぐ。
     #[test]
     fn a_misspelled_key_is_refused() {
         let typo = r#"
@@ -591,7 +591,7 @@ media_dirs = "~/Movies/escrow"
         assert!(Config::from_toml(typo).is_err());
     }
 
-    /// 間隔に 0 は無い。`NonZeroU32` なので読む時点で落ちる。
+    /// 間隔は 1 以上。`NonZeroU32` なので読む時点で落ちる。
     #[test]
     fn a_zero_interval_is_refused() {
         let zero = r#"
@@ -601,7 +601,7 @@ interval_hours = 0
         assert!(Config::from_toml(zero).is_err());
     }
 
-    /// 予算に 0 も無い。0 は「無制限」ではなく「一度も出さない」に見えるので、
+    /// 予算も 1 以上。0 は「無制限」ではなく「一度も出さない」に見えるので、
     /// 読む時点で落とす。
     #[test]
     fn a_zero_budget_is_refused() {
@@ -648,7 +648,7 @@ interval_hours = 0
             assert_eq!(config.auth.cookies_from, browser);
         }
 
-        // 一部のアダプタしか知らない綴りは、共通設定として使えないので入れていない。
+        // 共通設定に入るのは、全アダプタが知る綴りだけ。一部のアダプタしか知らないものは外。
         for only_one_tool in ["whale", "librewolf", "zen", "netscape"] {
             let toml = format!("[auth]\ncookies_from = \"{only_one_tool}\"\n");
             assert!(Config::from_toml(&toml).is_err(), "{only_one_tool}");
@@ -776,7 +776,7 @@ min_free_gib = 50
         assert_eq!(Config::load(&path).unwrap().storage.min_free_gib, 99);
     }
 
-    /// `auto` の綴り揺れと前後の空白は吸収する。言語コードそのものは畳まない。
+    /// `auto` の大文字小文字と前後の空白は正す。言語コードそのものは畳まない。
     #[test]
     fn the_auto_sentinel_tolerates_spelling() {
         for raw in ["auto", "AUTO", "Auto", "  auto  "] {

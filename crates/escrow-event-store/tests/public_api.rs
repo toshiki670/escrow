@@ -1,6 +1,6 @@
 //! 公開 API を表で固定する（#15）。
 //!
-//! `escrow-domain` のモジュール一覧と同じ形。用途に紐づく関数を足そうとすると
+//! `escrow-domain` のモジュール一覧と同じ形。用途ごとの関数を足そうとすると
 //! 表の編集が要るので、**必ず差分に現れる**。
 //!
 //! そのうえで #7 の受け入れ「リードモデルを直接書き換える関数が無いこと」を、名前ではなく
@@ -63,7 +63,7 @@ fn src() -> PathBuf {
 /// `src/` 以下の `.rs` を、crate 相対のパスと**本体だけ**の中身で返す。
 ///
 /// 末尾の `#[cfg(test)] mod tests` から先は落とす。リードモデルを壊してから作り直す確認の
-/// ように、テストはリードモデルへ直接書くことがある。見たいのは出荷される経路のほう。
+/// ように、テストはリードモデルへ直接書くことがある。見たいのは出荷するコードの経路のほう。
 fn sources() -> Vec<(String, String)> {
     fn walk(dir: &Path, root: &Path, found: &mut Vec<(String, String)>) {
         for entry in std::fs::read_dir(dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display())) {
@@ -95,7 +95,7 @@ fn sources() -> Vec<(String, String)> {
 
 /// `pub fn` / `pub async fn` / `pub const fn` の名前。
 ///
-/// `pub(crate)` は前置きが違うので当たらない。外へ出るものだけが集まる。
+/// 外へ出るものだけが集まる。`pub(crate)` は前置きが違うので当たらない。
 fn public_functions(body: &str) -> BTreeSet<String> {
     body.lines()
         .map(str::trim_start)
@@ -117,10 +117,10 @@ fn only_the_listed_functions_are_public() {
     }
 
     let expected: BTreeSet<String> = PUBLIC_API.iter().map(|s| (*s).to_owned()).collect();
-    assert_eq!(actual, expected, "表に無い関数が公開されている（#15）");
+    assert_eq!(actual, expected, "表に無い関数が公開 API に在る（#15）");
 }
 
-/// 接続そのものは外へ出さない。
+/// 接続そのものは crate の中に留める。
 ///
 /// 出すと、表に載っていない SQL をどこからでも書けるようになり、上の表が
 /// 「そこを通れば」の話にしかならなくなる。
