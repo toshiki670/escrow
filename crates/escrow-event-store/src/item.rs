@@ -1,6 +1,6 @@
 //! 項目のイベントと、そのリードモデル（#15）。
 //!
-//! 誕生（[`EventStore::discover`]）と追記（[`EventStore::append`]）、そこから作られる
+//! 誕生（[`EventStore::discover`]）と追記（[`EventStore::append`]）、`rebuild` がそこから導く
 //! リードモデル。
 
 use escrow_domain::item::{Discovered, Item, ItemId};
@@ -16,10 +16,10 @@ mod replay;
 pub(crate) use read_model::Columns;
 pub(crate) use replay::{EventRow, log_of};
 
-/// リードモデルから読んだ1件と、その姿を決めた最後のイベントの番号。
+/// リードモデルから読んだ1件と、その状態を決めた最後のイベントの番号。
 ///
 /// 次のイベントを書くときにこの `seq` を渡すので、**読んでから書くまでの間に誰かが
-/// 動かしていれば弾かれる**。読み出しが必ず番号を連れてくるので、根拠を持たずに
+/// 動かしていれば `UNIQUE` が弾く**。読み出しが必ず番号を一緒に返すので、根拠を持たずに
 /// 書く経路がそもそも作れない。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReadModelRow {
@@ -50,7 +50,7 @@ pub struct Log {
 }
 
 impl Log {
-    /// ログをリプレイして、いまの姿を作る。
+    /// ログをリプレイして、いまの状態を作る。
     ///
     /// リプレイの1歩は #1 の状態遷移そのもの。イベントを保存する形にしたので、手で書いた
     /// 全域関数がそのままここで使える（#15）。
@@ -83,8 +83,8 @@ impl Log {
 
     /// 直近の「状態を変えたイベント」より後ろの失敗の本数。
     ///
-    /// #1 の「リトライ回数そのものは数えず、イベントから導出する」。カウンタを持たない
-    /// ので、書き忘れて実際とずれることが起きない。
+    /// #1 の「リトライ回数そのものは数えず、イベントから導出する」。イベントから導くだけ
+    /// なので、実際と常に一致する。
     pub fn failures_since_the_state_moved(&self) -> Result<usize, IllegalTransition> {
         let mut state = self.discovered.initial_state();
         let mut failures = 0;

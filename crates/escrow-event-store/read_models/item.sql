@@ -1,6 +1,6 @@
 -- #1 の erDiagram の ITEM。**リードモデル**であって真実ではない（#15）。
 --
--- `migrations/` に置かないのは、スキーマを変えたいときに移行ではなく `rebuild` を
+-- `migrations/` の外に置くのは、スキーマを変えたいときに移行ではなく `rebuild` を
 -- 走らせるため。`sqlx::migrate!` は1ディレクトリ・1つの `_sqlx_migrations` で版を
 -- 管理するので、イベントとリードモデルでディレクトリを割ることもできない。
 --
@@ -8,7 +8,7 @@
 -- クローン直後の開発用 DB もこれを流して作る（`.cargo/config.toml`）。
 --
 -- 列は #1 の erDiagram のまま。索引もそのままなので、読み出しのクエリと性能は
--- イベントログを入れる前と変わらない。
+-- イベントログを入れる前のまま。
 
 CREATE TABLE IF NOT EXISTS item (
     id              INTEGER PRIMARY KEY,

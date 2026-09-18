@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
-# escrow の crate に依存しない（#15）。設定は #1 の語彙を知らずに読めるので、
+# 依存は escrow の外の crate だけ（#15）。設定は #1 の語彙を知らずに読めるので、
 # 段2 の中でも独立して立つ。
 [dependencies]
 directories.workspace = true

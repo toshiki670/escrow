@@ -128,8 +128,8 @@ mod tests {
         );
     }
 
-    /// 同じ配信元を二度登録できない。できてしまうと、二個目は item.url の
-    /// UNIQUE に阻まれて検知が毎回空振りする。
+    /// 同じ配信元の登録は1回だけ。二度できてしまうと、二個目は item.url の
+    /// UNIQUE が阻んで検知が毎回空振りする。
     #[tokio::test]
     async fn the_same_source_cannot_be_registered_twice() {
         let (store, source_id) = seeded().await;
@@ -204,10 +204,10 @@ mod tests {
         );
     }
 
-    /// 片方だけ埋まった行は、意味が決まっていないので読み出しが撥ねる。
+    /// 片方だけ埋まった行は、意味が決まっていないので読み出しが弾く。
     ///
-    /// DB は2列に分かれているが、写した先の [`Monitoring`] は「両方空」か
-    /// 「両方埋まっている」しか持てない。その差をここで受け止める。
+    /// DB は2列に分かれているが、写した先の [`Monitoring`] が持つのは「両方空」か
+    /// 「両方埋まっている」だけ。その差をここで受け止める。
     #[tokio::test]
     async fn refuses_half_of_a_monitoring_period() {
         for corruption in [
@@ -227,7 +227,7 @@ mod tests {
         }
     }
 
-    /// 終わりが先に来る期間も撥ねる。
+    /// 終わりが先に来る期間も弾く。
     #[tokio::test]
     async fn refuses_a_monitoring_period_that_ends_before_it_starts() {
         let (store, id) = seeded().await;

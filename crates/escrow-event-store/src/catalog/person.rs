@@ -17,7 +17,7 @@ impl EventStore {
         Ok(PersonId::new(id))
     }
 
-    /// 登録された持ち主を、登録した順に挙げる。
+    /// 登録してある持ち主を、登録した順に挙げる。
     ///
     /// サイドバーに並ぶのはこれ（#6）。
     pub async fn persons(&self) -> Result<Vec<Person>, EventStoreError> {
@@ -96,7 +96,7 @@ mod tests {
         );
         assert!(store.log(id).await.unwrap().is_none(), "ログも消える");
 
-        // 作り直しても戻らない。
+        // 作り直しても 0 件のまま。
         assert_eq!(store.rebuild().await.unwrap(), 0);
     }
 }

@@ -127,8 +127,8 @@ impl EventStore {
             return Err(EventStoreError::NoSuchItem(id));
         };
 
-        // 番号がずれていれば、この決定は古い姿を見て下されている。
-        // 同時に走る2つのうち片方は、この先の UNIQUE でも弾かれる。
+        // 番号がずれていれば、この決定は呼ぶ側が古い状態を見て下したもの。
+        // 同時に走る2つのうち片方は、この先の UNIQUE も弾く。
         if u32::try_from(row.seq).is_ok_and(|seq| seq != after.get()) {
             return Err(EventStoreError::Superseded);
         }
@@ -256,16 +256,16 @@ mod tests {
 
     /// 別プロセスを模して、同じファイルを2つの `EventStore` が同時に書く。
     ///
-    /// **loser が受け取るのは `SQLITE_BUSY` ではなく `Superseded`**（#7）。`SQLITE_BUSY`
-    /// （`database is locked`）は「誰かが先に書いた」ことを伝えないので、呼ぶ側が re-read
-    /// して決め直す経路へ入れない。**deferred transaction は read transaction で始まり、
-    /// write transaction へ upgrade する段で `SQLITE_BUSY` を返す**（[BEGIN] の
+    /// **後から書いた側が受け取るのは `SQLITE_BUSY` ではなく `Superseded`**（#7）。
+    /// `SQLITE_BUSY`（`database is locked`）は「誰かが先に書いた」ことを伝えないので、呼ぶ側が
+    /// re-read して決め直す経路へ入れない。**deferred transaction は read transaction で
+    /// 始まり、write transaction へ upgrade する段で `SQLITE_BUSY` を返す**（[BEGIN] の
     /// 「Subsequent write statements will upgrade the transaction to a write transaction
     /// if possible, or return SQLITE_BUSY」）ので、書き込みは `BEGIN IMMEDIATE` で開く。
     ///
     /// [BEGIN]: https://www.sqlite.org/lang_transaction.html
     ///
-    /// **write lock の獲得順は nondeterministic。** どちらが勝つかを assert すると
+    /// **write lock の獲得順は nondeterministic。** どちらが先に通るかを assert すると
     /// flaky test になる（#78）。`BEGIN IMMEDIATE` と `busy_timeout` が決めるのは
     /// 「片方が通り、もう片方が `Superseded`」まで。
     ///
@@ -279,7 +279,7 @@ mod tests {
         let source = seed_into(&engine).await;
         let id = a_holding_item(&engine, source).await;
 
-        // もう1つの担い手が同じファイルを開き、同じ姿を読む。
+        // もう1つの書き手が同じファイルを開き、同じ状態を読む。
         let cli = EventStore::open(&path).await.unwrap();
         let seen = engine.item(id).await.unwrap().unwrap().seq;
         assert_eq!(cli.item(id).await.unwrap().unwrap().seq, seen);
@@ -297,7 +297,7 @@ mod tests {
             _ => panic!("片方が通り、もう片方が Superseded: {first:?} / {second:?}"),
         }
 
-        // ログは1件しか増えていない。
+        // 増えたログは1件だけ。
         assert_eq!(engine.log(id).await.unwrap().unwrap().rest.len(), 3);
     }
 }
