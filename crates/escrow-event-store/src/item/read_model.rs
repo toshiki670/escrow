@@ -559,7 +559,7 @@ mod tests {
         assert_eq!(read.item.content, post.content);
     }
 
-    /// URL の形が違っても同じ正規形になるので、同じ行に着く（#1）。
+    /// 入口が違っても同じ正規形になるので、同じ行に着く（#1）。
     #[tokio::test]
     async fn finds_an_item_by_its_natural_key() {
         let (store, source) = seeded().await;
