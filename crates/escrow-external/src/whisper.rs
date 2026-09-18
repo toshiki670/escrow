@@ -57,7 +57,7 @@ impl Whisper {
 /// 16kHz モノラルの PCM。映像は捨てる。
 pub(crate) fn convert_argv(ffmpeg: &Path, input: &Path, output: &Path) -> Invocation {
     Invocation::new(ffmpeg)
-        // 端末が無い場所で動くので、上書きの問い合わせを受けない。
+        // 端末が無い場所で動くので、対話の入力を閉じて動かす。
         .arg("-nostdin")
         .args(["-loglevel", "error"])
         .arg("-i")

@@ -9,7 +9,7 @@
 //! # 1件から分かること
 //!
 //! `link` と `title` と `published` だけ。**配信かどうかの印も、開始時刻も無い。**
-//! `/shorts/` と `/watch?v=` は `link` で分かるが、`/watch?v=` の側は動画か配信かを
+//! `/shorts/` と `/watch?v=` は `link` で分かるが、`/watch?v=` の側は動画か配信かは
 //! 決まらない。そこだけ1件ごとの追加取得（yt-dlp）で埋める。
 
 use std::time::Duration;
