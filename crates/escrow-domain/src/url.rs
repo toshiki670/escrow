@@ -35,7 +35,7 @@ impl NormalizedUrl {
 pub enum TypeHint {
     /// パスが種別を決めている。
     Known(ContentType),
-    /// YouTube の `/watch?v=` と `youtu.be/` は shorts / video / live のどれにも使う。
+    /// YouTube の `/watch?v=` と `youtu.be/` は shorts / video / live のどれの入口にもなる。
     /// 検知はフィードの `link` で決まらなかったぶんを1件ごとの追加取得で埋め、
     /// 人の登録は `--type` で受ける（#5）。
     YoutubeUnknown,
@@ -71,7 +71,7 @@ pub fn normalize_item(input: &str) -> Result<(NormalizedUrl, TypeHint), UrlError
 
 /// 配信元の URL を正規形へ写す。
 ///
-/// 受け付けるのは解決済みの不変 ID。ハンドルは改名されうるうえ、不変 ID への解決は
+/// 受け付けるのは解決済みの不変 ID。ハンドルは持ち主が変えうるうえ、不変 ID への解決は
 /// ネットワークが要る仕事で、この関数の責務ではないため、解決してから渡す。
 pub fn normalize_source(input: &str) -> Result<NormalizedUrl, UrlError> {
     let parsed = parse(input)?;
@@ -150,7 +150,7 @@ fn youtube_item(url: &Url, input: &str) -> Result<(NormalizedUrl, TypeHint), Url
             TypeHint::Known(ContentType::YoutubeShorts),
         ),
         ["live", id] => ((*id).to_owned(), TypeHint::Known(ContentType::YoutubeLive)),
-        // 決められない入口。ショートも配信のアーカイブもここから開ける。
+        // 種別は後で決める入口。ショートも配信のアーカイブもここから開ける。
         ["watch"] => (
             query_value(url, "v").ok_or_else(not_an_item)?.into_owned(),
             TypeHint::YoutubeUnknown,
@@ -222,7 +222,7 @@ fn x_source(url: &Url, input: &str) -> Result<NormalizedUrl, UrlError> {
         ["intent", "user"] => query_value(url, "user_id")
             .ok_or_else(unresolved)?
             .into_owned(),
-        // ハンドルは改名されうるので、解決前の形は `unresolved`。
+        // ハンドルは持ち主が変えうるので、解決前の形は `unresolved`。
         _ => return Err(unresolved()),
     };
 
@@ -308,7 +308,7 @@ mod tests {
         }
     }
 
-    /// ハンドルは落ちる。改名されても同じ行に着くのがこの正規化の目的。
+    /// ハンドルは落ちる。持ち主が改名しても同じ行に着くのがこの正規化の目的。
     #[test]
     fn x_posts_drop_the_handle() {
         const CANONICAL: &str = "https://x.com/i/status/20";
@@ -364,7 +364,7 @@ mod tests {
             "https://www.youtube.com/channel/UCBR8-60-B28hp2BmDPdntcQ"
         );
 
-        // `@handle` は改名されうるので、解決前の形は `UnresolvedSource`。
+        // `@handle` は持ち主が変えうるので、解決前の形は `UnresolvedSource`。
         assert!(matches!(
             normalize_source("https://www.youtube.com/@YouTube"),
             Err(UrlError::UnresolvedSource { .. })
@@ -384,7 +384,7 @@ mod tests {
             assert_eq!(normalize_source(input).expect(input).as_str(), CANONICAL);
         }
 
-        // ハンドルは改名されうるので、解決前の形は `UnresolvedSource`。
+        // ハンドルは持ち主が変えうるので、解決前の形は `UnresolvedSource`。
         for handle in [
             "https://x.com/jack",
             "https://x.com/i/user/jack",

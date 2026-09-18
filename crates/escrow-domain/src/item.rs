@@ -10,7 +10,8 @@ use crate::url::NormalizedUrl;
 
 /// `Item` の外部ハンドル。
 ///
-/// #4 の `escrow release <id>` が受け取る値で、実体の置き場所もここから導く（#1）。
+/// #4 の `escrow release <id>` が受け取る値で、実体の置き場所も [`crate::asset`] がここから
+/// 導く（#1）。
 /// `url` が自然キーで、こちらは外へ見せる同一性。
 ///
 /// **`i64` から作る経路は [`ItemId::new`] だけ。** `From<i64>` を出さずにおくと、
@@ -115,8 +116,8 @@ mod tests {
         }
     }
 
-    /// 実体の有無は `Content` とは別に持つ。動画付きも画像だけも、本文の枠を持つ同じ `Post`
-    /// （#1）。
+    /// 実体の有無は `Content` とは別に持つ。画像付きもテキストだけも、本文の枠を持つ
+    /// 同じ `Post`（#1）。
     #[test]
     fn whether_there_is_media_is_not_written_in_the_content() {
         let post = Content::Post {

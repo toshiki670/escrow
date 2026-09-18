@@ -112,7 +112,7 @@ fn only_the_scheduler_knows_the_external_tools() {
 
 /// 表がワークスペースの全 crate を覆っていること。
 ///
-/// 覆っていないと、表に載らない crate が迂回路を作っても誰も気づかない。名前は
+/// 覆っていないと、表に載らない crate が迂回路を作っても、この検査は黙って通る。名前は
 /// ディレクトリではなく `package.name` から取るので、置き場所を変えても追える。
 #[test]
 fn the_graph_covers_every_crate_in_the_workspace() {

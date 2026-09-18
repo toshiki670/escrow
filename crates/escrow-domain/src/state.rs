@@ -201,8 +201,8 @@ impl State {
 pub enum Hold {
     /// この日時まで預かる。期限まで配信元に在り続けたら捨てる。
     Until(Timestamp),
-    /// 期限なしで預かる。`holding` は期限まで確かめる状態なので、通らずにそのまま `kept` に
-    /// なる。
+    /// 期限なしで預かる。`holding` は期限まで確かめる状態なので、そこを通らずに
+    /// そのまま `kept` になる。
     None,
 }
 
@@ -283,8 +283,8 @@ pub enum TranscriptNeed {
 
 /// 状態を動かす出来事。
 ///
-/// ここに在るのは状態を**動かす**出来事だけ。項目の誕生（`discovered`）は状態を**作る**ので
-/// [`crate::item::Discovered`] が運び、[`next`] の引数にならない。混ぜると、受け皿を置かない
+/// 項目の誕生（`discovered`）は状態を**動かす**のではなく**作る**ので、
+/// [`crate::item::Discovered`] が運ぶ。[`next`] の引数にはならず、混ぜると受け皿を置かない
 /// この関数に不正な腕が9本増える。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
@@ -309,7 +309,7 @@ pub enum Event {
     PresenceConfirmed(PresenceConfirmed),
     /// 期限まで配信元に在ることを確かめた。捨ててよい。
     ///
-    /// 証を要求するので、期限が過ぎたというだけで捨てる実装はコンパイルが止める。
+    /// 証を要求するので、期限が過ぎたというだけで捨てる実装はコンパイルエラーになる。
     HeldToDeadline(PresenceConfirmed),
     /// 外部が受け取った。
     Released { reference: Option<ReleaseReference> },
@@ -801,8 +801,8 @@ mod tests {
 
     /// 期限を運ぶのは `acquired` の1回きり（#1）。
     ///
-    /// `Transcribed` は値を持たないので、ログの期限は `acquired` の `Until(X)` の
-    /// **1つに定まる**。行き先は状態が持っている期限だけが決める。
+    /// `Transcribed` は値を持たないので、ログに載る期限は `acquired` の `Until(X)`
+    /// **1つだけ**。行き先は状態が持っている期限だけが決める。
     #[test]
     fn the_deadline_travels_in_the_state_not_in_transcribed() {
         let acquired = Event::Acquired {

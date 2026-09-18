@@ -114,7 +114,7 @@ impl Asset {
     /// ファイル名から読み戻す。規則に合わないものは `None`。
     ///
     /// ディレクトリには取得中の中間ファイルなど規則外のものも落ちうるので、
-    /// この関数はどんな文字列にも `None` で答える。
+    /// この関数はどんな文字列にも答えを返す（規則外なら `None`）。
     pub fn parse_file_name(file_name: &str) -> Option<Self> {
         // ちょうど3つ。`video.1.mp4.part` のように途中で増えた中間ファイルは
         // 4つに割れるのでここで落ちる。まだ取得中のものを実体として数えない。
@@ -261,7 +261,7 @@ mod tests {
             assert_eq!(AssetKind::of_extension(ext), Some(expected), "{ext}");
         }
 
-        // 知らないものは「知らない」（`None`）と答える。
+        // 知らない拡張子は当てずに `None`。
         assert_eq!(AssetKind::of_extension("part"), None);
         assert_eq!(AssetKind::of_extension(""), None);
     }

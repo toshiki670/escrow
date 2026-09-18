@@ -49,7 +49,7 @@ pub struct Source {
     /// 検知の重み。
     ///
     /// 重みにしたのは、間隔を宣言すると、配信元 N 本ぶんの合計が #13 の予算を超えた
-    /// 時点で守れない約束になるため。重みなら、実際の頻度は予算から導く（#1）。
+    /// 時点で守れない約束になるため。重みなら、実際の頻度はスケジューラが予算から導く（#1）。
     pub priority: NonZeroU32,
     /// いつからいつまで見るか。
     pub monitoring: Monitoring,
@@ -120,7 +120,7 @@ impl Source {
 
 /// 取り込まない種別。`Source` ごと、または全対象共通（#1）。
 ///
-/// 当たったものの記録はこちらだけが持ち、`Item` には行を作らない。
+/// 除外の事実を持つのはこちらで、当たったものは `Item` の行にならない。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Exclude {
     pub id: ExcludeId,
