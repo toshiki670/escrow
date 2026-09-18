@@ -82,7 +82,7 @@ impl Platform {
 /// subtype が `Media` になる種別。#1 の表で `Media` 側の5つ。
 ///
 /// [`Content::Media`] がこれを持つことで、`content_type` と中身の食い違いが
-/// **表現できなくなる**。両方を並べて持って突き合わせる、という形にしない。
+/// **型の上で無くなる**。両方を並べて持って突き合わせる、という形にしない。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum MediaType {
     YoutubeShorts,

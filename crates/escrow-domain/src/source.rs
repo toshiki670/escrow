@@ -39,7 +39,7 @@ pub struct Person {
 pub struct Source {
     pub id: SourceId,
     pub person_id: PersonId,
-    /// 不変 ID へ寄せた URL。ハンドルは改名されうるので持たない（#1）。
+    /// 不変 ID へ寄せた URL。ハンドルは持ち主が変えうるので持たない（#1）。
     pub url: NormalizedUrl,
     pub enabled: bool,
     /// 登録日時。これ以降の投稿を監視する。
@@ -80,7 +80,7 @@ pub enum MonitoringError {
 }
 
 impl Monitoring {
-    /// 2つの値から組み立てる。DB の行と人の入力が通る唯一の入口。
+    /// 2つの値から組み立てる。DB の行と人の入力が通る唯一の関数。
     pub fn new(from: Option<Timestamp>, until: Option<Timestamp>) -> Result<Self, MonitoringError> {
         match (from, until) {
             (None, None) => Ok(Self::Continuous),
@@ -222,7 +222,7 @@ mod tests {
         assert_eq!(source(None).hold_from(at).unwrap(), Hold::None);
     }
 
-    /// 期限なしと、暦の外は別のこと。握りつぶすと「捨てない」に化ける。
+    /// 期限なしと、日付の範囲の外は別のこと。黙って捨てると「捨てない」と区別が付かなくなる。
     #[test]
     fn a_span_outside_the_calendar_is_not_the_same_as_no_deadline() {
         let at = Timestamp::parse("2026-03-01T22:30:00+09:00").unwrap();

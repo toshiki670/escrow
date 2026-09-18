@@ -159,7 +159,7 @@ pub fn scan(media_dir: &Path, item: ItemId) -> io::Result<Vec<Asset>> {
     scan_dir(&item_dir(media_dir, item))
 }
 
-/// 置き場所を直接指してのぞく。
+/// 置き場所を直接指して読む。
 ///
 /// 外部ツールのアダプタは `ItemId` を知らず、受け取るのは書き込み先のディレクトリだけ。
 pub fn scan_dir(dir: &Path) -> io::Result<Vec<Asset>> {

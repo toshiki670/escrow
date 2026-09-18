@@ -33,7 +33,7 @@ const ENTRY: &[&str] = &["escrow-app"];
 
 /// 依存の図。左が右を依存に持ってよい、の全部。
 ///
-/// 使っていない辺も載せてよい。ここに無い辺を足したら落ちる。
+/// `Cargo.toml` に無い依存も載せてよい。ここに無い依存を `Cargo.toml` に足したら落ちる。
 const ALLOWED: &[(&str, &[&str])] = &[
     // ワークスペース全体にかかるテスト。crate を1つも依存に持たない。
     ("escrow-tests", &[]),
@@ -57,19 +57,19 @@ const ALLOWED: &[(&str, &[&str])] = &[
     ("escrow-handover", &["escrow-domain", "escrow-event-store"]),
     // 段5 — 組み立てる crate。すべてを組み立てるが、external だけは名前で知らない。
     ("escrow-app", APP),
-    // 段5 — 入口。組み立てる crate だけを見る（#82）。同じ段の中の辺で、前例は
+    // 段5 — 入口。組み立てる crate だけを見る（#82）。同じ段の中の依存で、前例は
     // escrow-external → escrow-config。
     ("escrow-cli", ENTRY),
     ("escrow-gui", ENTRY),
 ];
 
-/// 外部ツールを呼ぶ crate。`escrow-scheduler` 以外は名前も知ってはいけない（#3）。
+/// 外部ツールを呼ぶ crate。名前を知ってよいのは `escrow-scheduler` だけ（#3）。
 ///
 /// 定数で持つのは、crate を改名したときに次のテストが**黙って通る**のを防ぐため。
 /// 名前が実在することを先に確かめる。
 const EXTERNAL: &str = "escrow-external";
 
-/// 依存の辺がすべて #3 の図に在ること。
+/// 依存がすべて #3 の図に在ること。
 #[test]
 fn dependencies_follow_the_one_way_graph() {
     let allowed: std::collections::BTreeMap<&str, BTreeSet<&str>> = ALLOWED
