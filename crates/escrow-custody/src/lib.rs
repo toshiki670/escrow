@@ -1,4 +1,4 @@
-//! 預かりの見張り（#15 のスライス）。
+//! 預かり中の項目の生存確認（#15 のスライス）。
 //!
 //! `holding` の項目を1件受け取り、配信元と突き合わせる。期限まで在り続けたものを
 //! 捨て、消えたものは手元に残す（#1）。
@@ -9,10 +9,10 @@
 //! 行数に出る**こと — 在ることを確かめた回だけイベントが増え、確かめられなかった回は
 //! 何も残らない。
 //!
-//! # どの項目をいつ確かめるかは持たない
+//! # 順番と時刻はスケジューラが決める
 //!
 //! ここに在るのは「1件を1回確かめる」だけ。順番と時刻はスケジューラが決め、
-//! [`Custody::check`] の中の呼び出しがその中で待つ。頻度は巡回の側（#7）。
+//! [`Custody::check`] の中の呼び出しがその中で待つ。頻度は #38 が決める。
 
 use std::path::{Path, PathBuf};
 
@@ -33,7 +33,7 @@ pub enum CustodyError {
     Adapter(#[from] AdapterError),
     #[error("項目 {0} が無い")]
     NoSuchItem(ItemId),
-    #[error("項目 {id} は預かり中ではない: {state}")]
+    #[error("項目 {id} は {state}（確かめるのは預かり中のものだけ）")]
     NotHolding { id: ItemId, state: StateName },
     #[error("手元の実体を扱えない: {path}")]
     Io {
@@ -270,7 +270,7 @@ mod tests {
         id
     }
 
-    /// イベントログに積まれたイベントの本数。誕生を除く。
+    /// イベントログに在るイベントの本数。誕生を除く。
     async fn recorded(store: &EventStore, id: ItemId) -> usize {
         store.log(id).await.unwrap().unwrap().rest.len()
     }
@@ -361,7 +361,7 @@ mod tests {
         assert_eq!(recorded(&store, id).await, before + 1);
     }
 
-    /// 確かめられなければ、期限を過ぎていても捨てない。**行も増えない**（#5）。
+    /// 確かめられなければ、期限を過ぎていても `holding` に残り、**ログもそのまま**（#5）。
     #[tokio::test]
     async fn an_unconfirmed_item_survives_its_deadline() {
         let store = EventStore::open_in_memory().await.unwrap();
@@ -400,7 +400,7 @@ mod tests {
         assert_eq!(recorded(&store, id).await, before);
     }
 
-    /// cookie の失効は項目の問題ではないので、握りつぶさず返す（#5）。
+    /// cookie の失効は項目の問題ではないので、無視せずに返す（#5）。
     #[tokio::test]
     async fn an_expired_cookie_reaches_the_caller() {
         let store = EventStore::open_in_memory().await.unwrap();
@@ -426,7 +426,7 @@ mod tests {
         assert_eq!(recorded(&store, id).await, before);
     }
 
-    /// 預かり中でないものは受け取らない。
+    /// 受け取るのは預かり中のものだけ。
     #[tokio::test]
     async fn only_a_held_item_is_checked() {
         let store = EventStore::open_in_memory().await.unwrap();

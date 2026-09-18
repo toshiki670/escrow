@@ -48,7 +48,7 @@ mod tests {
         assert!(shown.ends_with('…'));
     }
 
-    /// ちょうど収まるぶんには `…` を付けない。
+    /// ちょうど収まるぶんは、そのまま出す。
     #[test]
     fn an_opening_that_fits_keeps_its_ending() {
         let opening = "あ".repeat(HEADLINE_CHARS);

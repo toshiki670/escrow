@@ -1,13 +1,13 @@
 //! 予算と順番（#13）。
 //!
-//! 経路ごとに門を1つ持ち、外へ出る要求はそこで順番を待つ。**数えるものは経路で違う** —
-//! 頻度で測る経路は最後に出した時刻を見て、取得は走っている数を見る。
+//! 経路ごとに予算と順番待ちを1つ持ち、外へ出る要求はそこで順番を待つ。**数えるものは
+//! 経路で違う** — 頻度で測る経路は最後に出した時刻を見て、取得は走っている数を見る。
 //!
-//! # 時計が2つある
+//! # 経過時間と実時間
 //!
-//! 予算と待ち時間は**経過時間**なので [`tokio::time::Instant`] で測る。テストは
-//! `tokio::time::pause` で止めて進められる。一方 [`Plan`] が答える時刻は人が読む
-//! **壁の時計**なので、呼ぶ側が渡した `now` に残りの時間を足して作る。
+//! 予算と待ち時間は**経過時間**なので [`tokio::time::Instant`] で測る。テストでは時間を
+//! 止めて進められる。一方 [`Plan`] が答える時刻は人が読む
+//! **実時間**なので、呼ぶ側が渡した `now` に残りの時間を足して作る。
 
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
@@ -73,7 +73,7 @@ pub struct Plan {
     pub waiting: usize,
     /// 拒否を受けて閉じている、その終わり。開いていれば空。
     ///
-    /// [`Plan::next`] と別に持つのは、**間隔で待っているのか断られて止まっているのかを
+    /// [`Plan::next`] と別に持つのは、**間隔で待っているのか拒否を受けて止まっているのかを
     /// 見せ分けるため**。前者は予定どおりで、後者は人が設定を見直す合図になる。
     pub closed_until: Option<Timestamp>,
 }
@@ -104,7 +104,7 @@ enum Measure {
 struct Ticket {
     deadline: Option<Timestamp>,
     weight: NonZeroU32,
-    /// 並んだ順。締切と重みが同じものを先着順に並べ、同じ札を作らせない。
+    /// 並んだ順。締切と重みが同じものを先着順に並べ、同じ `Ticket` を作らせない。
     seq: u64,
 }
 
@@ -130,14 +130,14 @@ impl PartialOrd for Ticket {
     }
 }
 
-/// 1つの経路の門。
+/// 1つの経路の予算と順番待ち。
 struct Gate {
     measure: Measure,
-    /// 拒否されて `Retry-After` が返らなかったときの、最初の待ち時間。
+    /// 拒否を受けて `Retry-After` が返らなかったときの、最初の待ち時間。
     backoff_base: Duration,
     backoff_max: Duration,
     state: Mutex<GateState>,
-    /// 門の状態が動いたことを待っている側へ知らせる。
+    /// `Gate` の状態が動いたことを待っている側へ知らせる。
     ready: Notify,
 }
 
@@ -150,7 +150,7 @@ struct GateState {
     running: u32,
     /// 拒否を受けて閉じている、その終わり。
     closed_until: Option<Instant>,
-    /// 次に断られたときに待つ時間。連続で倍になる。
+    /// 次に拒否を受けたときに待つ時間。連続で倍になる。
     backoff: Duration,
 }
 
@@ -172,9 +172,10 @@ impl Gate {
         }
     }
 
-    /// 錠が毒されるのは、錠の中で panic したときだけ。中の操作はどれも panic しない。
+    /// `lock()` が `PoisonError` を返すのは、ロックを持ったまま panic したときだけ。中の操作は
+    /// どれも panic しない。
     fn lock(&self) -> MutexGuard<'_, GateState> {
-        self.state.lock().expect("門の状態の錠")
+        self.state.lock().expect("Gate の状態のロック")
     }
 
     /// 順番が来るまで待つ。
@@ -254,15 +255,15 @@ impl Gate {
         Ok(())
     }
 
-    /// 断られた。この経路を待たせ、次に備えて待ち時間を倍にする（#13）。
+    /// 拒否を受けた。この経路を待たせ、次に備えて待ち時間を倍にする（#13）。
     fn rejected(&self, retry_after: Option<Duration>) {
         let mut state = self.lock();
         let wait = retry_after.unwrap_or(state.backoff);
         let until = Instant::now() + wait;
 
-        // 同じ経路の別の呼び出しが、もっと長く待てと言われていることがある。**遅いほうを
-        // 残す** — 両方の指示を満たす時刻はそれだけで、短いほうで上書きすると、
-        // まだ待てと言われている経路へ出ていく。
+        // 同じ経路の別の呼び出しが、もっと長い待ち時間（`Retry-After` か既定）を持っている
+        // ことがある。**遅いほうを残す** — 両方の指示を満たす時刻はそれだけで、短いほうで
+        // 上書きすると、相手がまだ待てと言っている経路へ出ていく。
         state.closed_until = Some(
             state
                 .closed_until
@@ -274,7 +275,7 @@ impl Gate {
         self.ready.notify_waiters();
     }
 
-    /// 通った。次に断られたときの待ち時間を元へ戻す。
+    /// 通った。次に拒否を受けたときの待ち時間を元へ戻す。
     fn passed(&self) {
         self.lock().backoff = self.backoff_base;
     }
@@ -298,7 +299,7 @@ impl Gate {
         }
     }
 
-    /// 門が開くか。**[`Gate::take`] と [`Gate::plan`] の両方がここを読む。**
+    /// `Gate` が開くか。**[`Gate::take`] と [`Gate::plan`] の両方がここを読む。**
     fn opens(&self, state: &GateState, now: Instant) -> Opening {
         let by_measure = match self.measure {
             Measure::Gap(gap) => match state.started_at {
@@ -315,8 +316,8 @@ impl Gate {
         match (Self::closed_for(state, now), by_measure) {
             (Some(closed), Opening::In(measured)) => Opening::In(closed.max(measured)),
             (Some(closed), Opening::Now) => Opening::In(closed),
-            // 走っているものが終わる時刻は分からないので、閉鎖の残りと比べられない。
-            // 閉鎖の終わりは [`Plan::closed_until`] が別に持つ。
+            // 遅いほうを選ぶには両方の時刻が要る。走っているものが終わる時刻は未知なので、
+            // 閉鎖と比べずにそのまま答える。閉鎖の終わりは [`Plan::closed_until`] が別に持つ。
             (_, Opening::WhenOneFinishes) => Opening::WhenOneFinishes,
             (None, opening) => opening,
         }
@@ -331,16 +332,16 @@ impl Gate {
     }
 }
 
-/// 門が開くまで。
+/// `Gate` が開くまで。
 enum Opening {
     Now,
     In(Duration),
     WhenOneFinishes,
 }
 
-/// 列に並んでいる間の札。**取らずに落ちたら列から抜ける。**
+/// 列に並んでいる間、`Ticket` を列に置いておくもの。**取らずに落ちたら列から抜ける。**
 ///
-/// 呼ぶ側の future が捨てられたときに札が残ると、その門は永久に先頭が動かない。
+/// 呼ぶ側が future を `drop` したときに `Queued` が残ると、その `Gate` は永久に先頭が動かない。
 struct Queued<'a> {
     gate: &'a Gate,
     ticket: Ticket,
@@ -366,8 +367,8 @@ impl Permit for Slot<'_> {
         match result {
             Ok(()) => self.gate.passed(),
             Err(AdapterError::Rejected { retry_after, .. }) => self.gate.rejected(*retry_after),
-            // 断られた以外の失敗では待ち時間を戻さない。抑えられている最中の失敗で
-            // 戻すと、次の拒否が最初の待ち時間からやり直しになる。
+            // 待ち時間を戻すのは通ったときだけ。拒否以外の失敗で戻すと、抑えている最中に次の
+            // 拒否が来たとき、最初の待ち時間からやり直しになる。
             Err(_) => {}
         }
     }
@@ -385,7 +386,7 @@ impl Drop for Slot<'_> {
     }
 }
 
-/// 1つのプラットフォームの門。#13 の経路がそのまま並ぶ。
+/// 1つのプラットフォームの `Gate` の組。#13 の経路がそのまま並ぶ。
 struct Gates {
     discover: Gate,
     describe: Gate,
@@ -504,7 +505,8 @@ mod tests {
         Timestamp::parse(text).expect(text)
     }
 
-    /// #2 の既定の待ち時間を持つ門。値をここへ書き写すと、既定を変えても緑のまま古びる。
+    /// #2 の既定の待ち時間を持つ `Gate`。値をここへ書き写すと、既定を変えてもテストが
+    /// 通ったまま古びる。
     fn gate(measure: Measure) -> Gate {
         let schedule = Schedule::default();
         Gate::new(
@@ -514,7 +516,7 @@ mod tests {
         )
     }
 
-    /// #2 の既定の、拒否されたあとの最初の待ち時間。
+    /// #2 の既定の、拒否を受けたあとの最初の待ち時間。
     fn backoff() -> Duration {
         Duration::from_secs(u64::from(
             Schedule::default().rejection_backoff_seconds.get(),
@@ -535,7 +537,7 @@ mod tests {
         Instant::now()
     }
 
-    /// 間隔で測る経路では、2本目が間隔ぶん待たされる（#7 Phase 5 の受け入れ）。
+    /// 間隔で測る経路では、2本目は間隔ぶん待つ（#7 Phase 5 の受け入れ）。
     #[tokio::test(start_paused = true)]
     async fn a_second_request_waits_out_the_gap() {
         let gate = gate(Measure::Gap(Duration::from_secs(900)));
@@ -550,13 +552,13 @@ mod tests {
 
     /// 締切を持つ要求が、重みだけの要求より先に通る（#7 Phase 5 の受け入れ）。
     ///
-    /// 3本を同じ門で待たせ、通った時刻で順番を見る。締切 → 重みの大きいほう →
+    /// 3本を同じ `Gate` で待たせ、通った時刻で順番を見る。締切 → 重みの大きいほう →
     /// 残り、の順に 60 秒ずつずれる。
     #[tokio::test(start_paused = true)]
     async fn a_deadline_goes_before_weight() {
         let gate = gate(Measure::Gap(Duration::from_secs(60)));
 
-        // 門を1回使い、次の 60 秒を閉じる。閉じていないと、先に並んだものが
+        // `Gate` を1回使い、次の 60 秒を閉じる。閉じていないと、先に並んだものが
         // そのまま通ってしまい順番が見えない。
         drop(gate.admit(Demand::weighed(weight(1))).await);
         let start = Instant::now();
@@ -618,7 +620,7 @@ mod tests {
         drop(second);
     }
 
-    /// 断られたら、その経路をしばらく閉じる（#7 Phase 5 の受け入れ）。
+    /// 拒否を受けたら、その経路をしばらく閉じる（#7 Phase 5 の受け入れ）。
     #[tokio::test(start_paused = true)]
     async fn a_rejection_shuts_the_route_instead_of_hammering_it() {
         // 間隔は 1 秒。**待ちの出どころが拒否だけになる**ようにする。
@@ -647,7 +649,7 @@ mod tests {
         assert_eq!(Instant::now() - start, Duration::from_secs(5));
     }
 
-    /// 連続で断られると待ち時間が倍になり、上限で止まる。通れば元へ戻る。
+    /// 連続で拒否を受けると待ち時間が倍になり、上限で止まる。通れば元へ戻る。
     #[tokio::test(start_paused = true)]
     async fn the_wait_doubles_while_rejections_continue() {
         let gate = gate(Measure::Gap(Duration::from_secs(1)));
@@ -696,7 +698,7 @@ mod tests {
         assert_eq!(Instant::now() - start, Duration::from_secs(120));
     }
 
-    /// 断られた以外の失敗では、待ち時間を元へ戻さない。
+    /// 待ち時間を元へ戻すのは通ったときだけ。拒否以外の失敗ではそのまま。
     #[tokio::test(start_paused = true)]
     async fn an_ordinary_failure_leaves_the_wait_where_it_is() {
         let gate = gate(Measure::Gap(Duration::from_secs(1)));
@@ -718,7 +720,7 @@ mod tests {
         assert_eq!(Instant::now() - start, backoff() * 2, "倍のまま");
     }
 
-    /// 諦めた要求は列から抜ける。残ると、その門は先頭が動かなくなる。
+    /// 諦めた要求は列から抜ける。残ると、その `Gate` は先頭が動かなくなる。
     #[tokio::test(start_paused = true)]
     async fn a_waiter_that_gives_up_leaves_the_queue() {
         let gate = Arc::new(gate(Measure::Concurrency(weight(1))));
@@ -739,7 +741,7 @@ mod tests {
         assert_eq!(Instant::now() - start, Duration::ZERO);
     }
 
-    /// 予定は壁の時計で答える（#13）。
+    /// 予定は実時間で答える（#13）。
     #[tokio::test(start_paused = true)]
     async fn the_plan_answers_on_the_wall_clock() {
         let now = at("2026-09-05T12:00:00+09:00");
@@ -755,10 +757,10 @@ mod tests {
         assert_eq!(plan.next, Next::At(at("2026-09-05T12:15:00+09:00")));
     }
 
-    /// 並んだ拒否は、待機を短くしない。
+    /// 並んだ拒否は、長いほうの待機を残す。
     ///
     /// 同じ経路で2つの呼び出しが走り、先に長い `Retry-After`、後から短い
-    /// `Retry-After` が返る。後で上書きすると、まだ待てと言われている経路へ出ていく。
+    /// `Retry-After` が返る。後で上書きすると、相手がまだ待てと言っている経路へ出ていく。
     #[tokio::test(start_paused = true)]
     async fn a_shorter_rejection_does_not_cut_a_longer_one_short() {
         let gate = gate(Measure::Gap(Duration::from_secs(1)));
@@ -808,10 +810,10 @@ mod tests {
 
         let plan = gate.plan(Platform::Youtube, Route::Discover, now);
         assert_eq!(plan.next, Next::At(at("2026-09-05T12:15:00+09:00")));
-        assert_eq!(plan.closed_until, None, "断られてはいない");
+        assert_eq!(plan.closed_until, None, "拒否は受けていない");
     }
 
-    /// 断られたら閉鎖の終わりが入り、過ぎれば空へ戻る。
+    /// 拒否を受けたら閉鎖の終わりが入り、過ぎれば空へ戻る。
     #[tokio::test(start_paused = true)]
     async fn a_rejection_shows_up_as_a_close_until_it_passes() {
         let now = at("2026-09-05T12:00:00+09:00");
@@ -878,7 +880,7 @@ mod tests {
         assert_eq!(now.plus(waited), Some(planned));
     }
 
-    /// 走っているものが終わる時刻は分からない。分かる顔で答えない。
+    /// 走っているものが終わる時刻は未知として答える（`WhenOneFinishes`）。
     #[tokio::test(start_paused = true)]
     async fn a_running_download_has_no_time_to_report() {
         let now = at("2026-09-05T12:00:00+09:00");
@@ -914,7 +916,7 @@ mod tests {
         assert_eq!(counted, 2);
     }
 
-    /// 片方のプラットフォームの予算が、もう片方を縛らない（#13）。
+    /// 予算はプラットフォームごとに独立（#13）。
     #[tokio::test(start_paused = true)]
     async fn one_platform_does_not_block_the_other() {
         let budget = Budget::new(&Schedule::default());
@@ -933,7 +935,7 @@ mod tests {
         assert_eq!(Instant::now() - start, Duration::from_secs(900));
     }
 
-    /// 同じプラットフォームでも、経路が違えば互いを待たない（#13）。
+    /// 同じプラットフォームでも、経路ごとに独立して通る（#13）。
     #[tokio::test(start_paused = true)]
     async fn one_route_does_not_block_another() {
         let budget = Budget::new(&Schedule::default());

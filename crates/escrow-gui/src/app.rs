@@ -3,7 +3,7 @@
 //! イベントストアを読むのは async なので、読み出しは [`Task`] として出し、結果を [`Message`] で
 //! 受け取る。失敗は文字列にして運ぶ — iced の [`Message`] は複製できることを求めるが、
 //! イベントストアと設定の失敗はどちらも複製できない。**画面が出すのは理由の文だけ**なので、
-//! 型を保ったまま運ぶ意味がここには無い。
+//! 型を保ったまま運ぶ意味がここには無い（#7 の「型で締めない所を先に決めておく」）。
 //!
 //! イベントストアを開く手順と読む関数は `escrow-app` が持つ（#82）。ここに在るのは、画面の
 //! 状態とメッセージの往復だけ。
@@ -61,7 +61,7 @@ pub enum Message {
     Opened(Result<Opened, String>),
     /// サイドバーで選んだ。
     Selected(Selection),
-    /// 項目を読み終えた。**どの持ち主のぶんか**を連れて戻る。
+    /// 項目を読み終えた。**どの持ち主のぶんか**を一緒に返す。
     Listed(PersonId, Result<Vec<Listed>, String>),
 }
 
@@ -108,7 +108,7 @@ pub fn update(app: &mut App, message: Message) -> Task<Message> {
             let App::Ready(ready) = app else {
                 return Task::none();
             };
-            // 読んでいる間に選び直されていたら、届いたぶんは捨てる。
+            // 読んでいる間に人が選び直していたら、届いたぶんは無視する。
             if ready.selection != Selection::Person(person) {
                 return Task::none();
             }
