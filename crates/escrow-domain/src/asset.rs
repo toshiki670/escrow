@@ -1,6 +1,6 @@
 //! 手元の実体の置き場所。
 //!
-//! `Asset` はテーブルにならない。#1 のクラス図に在ったものが、ここでは
+//! `Asset` は #1 のクラス図に在ったものだが、ここではテーブルではなく
 //! ファイルシステムの命名規則になる。
 //!
 //! ```text
@@ -85,7 +85,7 @@ pub struct Asset {
     /// 1 から始まる通し番号。ライブが切れた断片は 2, 3 と増える。
     pub ordinal: NonZeroU32,
     /// 拡張子。取得する側が実際に何を書くかで変わる（mp4 / webm など）ので、
-    /// 種類からは決めない。読む側は来たものを受け取る。`.` は含まない。
+    /// 読む側は来たものを受け取る（種類から導かない）。`.` は含まない。
     pub extension: String,
 }
 
@@ -114,7 +114,7 @@ impl Asset {
     /// ファイル名から読み戻す。規則に合わないものは `None`。
     ///
     /// ディレクトリには取得中の中間ファイルなど規則外のものも落ちうるので、
-    /// この関数はどんな文字列を渡されても落ちない。
+    /// この関数はどんな文字列にも答えを返す（規則外なら `None`）。
     pub fn parse_file_name(file_name: &str) -> Option<Self> {
         // ちょうど3つ。`video.1.mp4.part` のように途中で増えた中間ファイルは
         // 4つに割れるのでここで落ちる。まだ取得中のものを実体として数えない。
@@ -161,7 +161,7 @@ pub fn scan(media_dir: &Path, item: ItemId) -> io::Result<Vec<Asset>> {
 
 /// 置き場所を直接指してのぞく。
 ///
-/// 外部ツールのアダプタは `ItemId` を知らず、書き込み先のディレクトリだけを渡される。
+/// 外部ツールのアダプタは `ItemId` を知らず、受け取るのは書き込み先のディレクトリだけ。
 pub fn scan_dir(dir: &Path) -> io::Result<Vec<Asset>> {
     let entries = match fs::read_dir(dir) {
         Ok(entries) => entries,
@@ -218,7 +218,7 @@ mod tests {
         }
     }
 
-    /// 拡張子は種類から決めない。webm が書かれれば webm で持つ。
+    /// 拡張子はファイルから取る。ツールが webm を書けば webm で持つ。
     #[test]
     fn extension_comes_from_the_file_not_the_kind() {
         let webm = Asset::parse_file_name("video.1.webm").unwrap();
@@ -261,7 +261,7 @@ mod tests {
             assert_eq!(AssetKind::of_extension(ext), Some(expected), "{ext}");
         }
 
-        // 知らないものは当てずっぽうで決めない。
+        // 知らない拡張子は当てずに `None`。
         assert_eq!(AssetKind::of_extension("part"), None);
         assert_eq!(AssetKind::of_extension(""), None);
     }

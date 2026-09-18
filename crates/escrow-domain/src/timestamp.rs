@@ -89,7 +89,7 @@ mod tests {
             days(2),
             Timestamp::parse("2026-03-01T22:10:00+09:00").unwrap()
         );
-        // 時差は保たれる。
+        // 時差はそのまま。
         assert_eq!(days(30).to_text(), "2026-03-29T22:10:00+09:00");
     }
 
@@ -129,7 +129,7 @@ mod tests {
         }
     }
 
-    /// 時差は畳まない。#4 が受け取る側へそのまま渡すため。
+    /// 時差はもらったまま保つ。#4 が受け取る側へそのまま渡すため。
     #[test]
     fn keeps_the_offset_it_was_given() {
         let jst = Timestamp::parse("2026-03-01T20:00:00+09:00").unwrap();

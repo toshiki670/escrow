@@ -10,10 +10,11 @@ use crate::url::NormalizedUrl;
 
 /// `Item` の外部ハンドル。
 ///
-/// #4 の `escrow release <id>` が受け取る値で、実体の置き場所もここから導出される（#1）。
+/// #4 の `escrow release <id>` が受け取る値で、実体の置き場所も [`crate::asset`] がここから
+/// 導く（#1）。
 /// `url` が自然キーで、こちらは外へ見せる同一性。
 ///
-/// **`From<i64>` は出さない。** `i64` から作る経路は [`ItemId::new`] だけにしておくと、
+/// **`i64` から作る経路は [`ItemId::new`] だけ。** `From<i64>` を出さずにおくと、
 /// `impl Into<ItemId>` を取る場所へ裸の主キーが推論で滑り込むことがない。逆向きの
 /// `i64::from` は DB へ渡すのに要るので出す。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Constructor, Display, Into)]
@@ -21,9 +22,8 @@ pub struct ItemId(i64);
 
 /// 手放した後も残る、1件の記録。
 ///
-/// `content_type` を別に持たないのは、[`Content`] から導けるため（#1 の
-/// 「計算・導出できるものは持たない」）。並べて持つと、噛み合わない組を
-/// 作れてしまう。
+/// `content_type` は [`Content`] から導く（#1 の「計算・導出できるものは持たない」）。
+/// 並べて持つと、噛み合わない組を作れてしまう。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Item {
     pub id: ItemId,
@@ -51,10 +51,10 @@ impl Item {
     }
 }
 
-/// 見つけた時点で分かっていること。**ログの先頭にちょうど1つ**置かれる（#1）。
+/// 見つけた時点で分かっていること。**ログの先頭にちょうど1つ**在る（#1）。
 ///
-/// 状態を動かすのではなく作るので、[`crate::state::Event`] には入らない。これが
-/// 無いと `url` や `title` がリードモデルの側にしか存在せず、リードモデルを捨てて作り直せない。
+/// 状態を動かすのではなく作るので、[`crate::state::Event`] の外に居る。これがログに
+/// 在るから、`url` や `title` はリードモデルを捨てても戻る。
 ///
 /// [`Item`] との差は `id` と `state` と `state_since` の3つで、どれも誕生の時点では
 /// まだ決まっていない — `id` は DB が採番し、残る2つはログをリプレイして出る。
@@ -116,7 +116,8 @@ mod tests {
         }
     }
 
-    /// 実体の有無は `Content` から導けない。どちらも本文の枠を持つ `Post`（#1）。
+    /// 実体の有無は `Content` とは別に持つ。画像付きもテキストだけも、本文の枠を持つ
+    /// 同じ `Post`（#1）。
     #[test]
     fn whether_there_is_media_is_not_written_in_the_content() {
         let post = Content::Post {
