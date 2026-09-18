@@ -27,13 +27,13 @@ impl NormalizedUrl {
     }
 }
 
-/// 入口から決まる種別。
+/// 入口から分かる種別。
 ///
 /// 正規形と一緒に返す。`/shorts/<id>` を `/watch?v=<id>` へ潰すと `youtube_shorts` と
 /// `youtube_video` を分ける手掛かりが消えるので、**正規化する前**に読む（#1）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TypeHint {
-    /// パスが種別を決めている。
+    /// 入口が種別を決めている。
     Known(ContentType),
     /// YouTube の `/watch?v=` と `youtu.be/` は shorts / video / live のどれの入口にもなる。
     /// 検知はフィードの `link` で決まらなかったぶんを1件ごとの追加取得で埋め、
@@ -56,7 +56,7 @@ pub enum UrlError {
     },
 }
 
-/// 項目の URL を正規形へ写し、入口から決まる種別を一緒に返す。
+/// 項目の URL を正規形へ写し、入口から分かる種別を一緒に返す。
 ///
 /// 種別は正規化と同時に決める（#1 の決め事）。
 pub fn normalize_item(input: &str) -> Result<(NormalizedUrl, TypeHint), UrlError> {

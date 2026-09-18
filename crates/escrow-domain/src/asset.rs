@@ -117,7 +117,7 @@ impl Asset {
     /// この関数はどんな文字列にも答えを返す（規則外なら `None`）。
     pub fn parse_file_name(file_name: &str) -> Option<Self> {
         // ちょうど3つ。`video.1.mp4.part` のように途中で増えた中間ファイルは
-        // 4つに割れるのでここで落ちる。まだ取得中のものを実体として数えない。
+        // 4つに割れるのでここで弾く。まだ取得中のものを実体として数えない。
         let [kind, ordinal_text, extension] =
             <[&str; 3]>::try_from(file_name.split('.').collect::<Vec<_>>()).ok()?;
 
