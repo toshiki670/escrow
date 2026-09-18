@@ -10,7 +10,7 @@
 //!
 //! `link` と `title` と `published` だけ。**配信かどうかの印も、開始時刻も無い。**
 //! `/shorts/` と `/watch?v=` は `link` で分かるが、`/watch?v=` の側は動画か配信かを
-//! 語らない。そこだけ1件ごとの追加取得で埋める（[`crate::ytdlp::YtDlp::schedule`]）。
+//! 決まらない。そこだけ1件ごとの追加取得（yt-dlp）で埋める。
 
 use std::time::Duration;
 
@@ -78,10 +78,10 @@ struct EntryLink {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Sighting {
     pub url: NormalizedUrl,
-    /// `link` が語る種別。`/shorts/` なら決まり、`/watch?v=` なら決まらない。
+    /// `link` から決まる種別。`/shorts/` なら決まり、`/watch?v=` なら決まらない。
     ///
     /// **正規化する前の `link` から決める**（#1）。`/shorts/<id>` を
-    /// `/watch?v=<id>` へ写すと、ショートと動画を分ける唯一の手掛かりが消える。
+    /// `/watch?v=<id>` へ潰すと、ショートと動画を分ける唯一の手掛かりが消える。
     pub hint: TypeHint,
     pub title: String,
     pub published_at: Timestamp,
@@ -116,8 +116,8 @@ fn parse_error(detail: &dyn std::fmt::Display) -> AdapterError {
 
 /// フィードを取ってくるもの。
 ///
-/// 匿名で叩く。#5 の「YouTube の検知は認証不要」を、cookie を渡す手段を持たない形で
-/// 守る。繰り返し叩く経路が匿名なので、**賭けているものがアカウントではなくなる**。
+/// 匿名で叩く。#5 の表の「YouTube の検知（RSS と追加取得）— 不要」を、cookie を渡す手段を
+/// 持たない形で守る。繰り返し叩く経路が匿名なので、**賭けているものがアカウントではなくなる**。
 #[derive(Debug, Clone)]
 pub struct Rss {
     client: reqwest::Client,
@@ -180,7 +180,7 @@ impl Rss {
 
 /// `Retry-After` が指す待ち時間。
 ///
-/// 読むのは秒数の形だけ。HTTP-date の形は空を返し、#2 の既定へ落とす — 日時の書式を
+/// 読むのは秒数の形だけ。HTTP-date の形は空を返し、#2 の既定にする — 日時の書式を
 /// 自前で解くより、設定した待ち時間を使うほうが外れ方が小さい。
 fn retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
     headers
@@ -225,7 +225,7 @@ mod tests {
         );
     }
 
-    /// 秒数の `Retry-After` は読み、それ以外は空にして既定へ落とす。
+    /// 秒数の `Retry-After` は読み、それ以外は空にして既定にする。
     #[test]
     fn retry_after_is_read_only_in_its_seconds_form() {
         let header = |value: &str| {
@@ -261,7 +261,7 @@ mod tests {
         assert_eq!(parse_feed(FEED).unwrap().len(), 15);
     }
 
-    /// ショートは `link` で決まる。#1 の「種別の登録は入れられた URL のパスから決める」。
+    /// ショートは `link` で決まる。#1 の「`content_type` は正規化する前の入口から決める」。
     #[test]
     fn shorts_are_told_apart_by_their_link() {
         let sightings = parse_feed(FEED).unwrap();
@@ -272,7 +272,7 @@ mod tests {
             .count();
         assert_eq!(shorts, 11);
 
-        // 正規形はどちらも同じ /watch?v= になるので、URL からは区別できない。
+        // 正規形はどちらも /watch?v= に潰れるので、URL からは区別できない。
         let short = sightings
             .iter()
             .find(|s| s.hint == TypeHint::Known(ContentType::YoutubeShorts))
@@ -285,7 +285,7 @@ mod tests {
         );
     }
 
-    /// **フィードが語るのは `link` と `title` と `published` だけ。**
+    /// **配信かどうかは追加取得で決まること。**
     ///
     /// `wwJV2mo2US4` は取得した時点で配信中だったが、他の `/watch?v=` の項目と
     /// 見分けが付かない。動画か配信かも、開始時刻も、ここには無い。だから1件ごとの
@@ -303,7 +303,7 @@ mod tests {
         let live = undecided
             .iter()
             .find(|s| s.url.as_str().ends_with("wwJV2mo2US4"))
-            .expect("配信中だった項目が居ること");
+            .expect("配信中だった項目が在ること");
         assert_eq!(live.hint, TypeHint::YoutubeUnknown);
     }
 

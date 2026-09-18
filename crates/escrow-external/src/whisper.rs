@@ -57,7 +57,7 @@ impl Whisper {
 /// 16kHz モノラルの PCM。映像は捨てる。
 pub(crate) fn convert_argv(ffmpeg: &Path, input: &Path, output: &Path) -> Invocation {
     Invocation::new(ffmpeg)
-        // 端末が無い場所で動くので、上書きの問い合わせを待たずに進む。
+        // 端末が無い場所で動くので、上書きの問い合わせを受けない。
         .arg("-nostdin")
         .args(["-loglevel", "error"])
         .arg("-i")
@@ -113,7 +113,7 @@ impl Transcribe for Whisper {
         Box::pin(async move {
             let asset = transcript_asset(ordinal);
 
-            // 変換したものは、落ちても消える場所へ置く。
+            // 変換したものは文字起こしの後は要らないので、落ちても消える場所へ置く。
             let scratch = tempfile::tempdir().map_err(|source| AdapterError::Launch {
                 program: FFMPEG.to_owned(),
                 source,
@@ -180,7 +180,7 @@ mod tests {
         assert!(args.windows(2).any(|w| w == ["-ar", "16000"]));
         assert!(args.windows(2).any(|w| w == ["-ac", "1"]));
         assert!(args.windows(2).any(|w| w == ["-c:a", "pcm_s16le"]));
-        // 音声だけを取り出す。
+        // 映像は文字起こしに要らないので、音声だけを取り出す。
         assert!(args.contains(&"-vn"));
     }
 

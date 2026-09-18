@@ -10,7 +10,7 @@
 //!
 //! gallery-dl は自分の規則でファイル名を付けるので、いったん別の場所へ落として
 //! から #1 の `<kind>.<ordinal>.<ext>` へ移す。命名規則は #1 が決めたもので、
-//! ツールに預けない。
+//! ツールに任せない。
 
 use std::path::{Path, PathBuf};
 
@@ -30,7 +30,7 @@ const PROGRAM: &str = "gallery-dl";
 
 /// このアダプタが cookie を取り出せるブラウザ。
 ///
-/// escrow の [`Browser`] がこの部分集合であることは `escrow-external` の `every_configurable_browser_works_with_every_adapter` が確かめる。
+/// escrow の [`Browser`] がこの部分集合であることは、この crate のテストが確かめる。
 /// gallery-dl は `floorp` / `librewolf` / `orion` / `thorium` / `zen` も受けるが、
 /// 他のアダプタが受けないので [`Browser`] には入っていない。
 pub const SUPPORTED_BROWSERS: &[Browser] = &[
@@ -88,7 +88,7 @@ pub(crate) fn timeline_argv(program: &Path, timeline: &str, browser: Browser) ->
         .arg("--dump-json")
         .args(["-o", "extractor.twitter.text-tweets=true"])
         .args(["-o", "extractor.twitter.cards=ytdl"])
-        // 引用元と RT は URL の繋がりとして記録し、項目にはしない（#1）。
+        // 引用元と RT は項目にせず、引用元は `quoted` の繋がりとして残す（#1）。
         .args(["-o", "extractor.twitter.quoted=false"])
         .args(["-o", "extractor.twitter.retweets=false"])
         .arg(timeline)
@@ -125,7 +125,7 @@ pub(crate) fn download_argv(
 
 /// `--dump-json` は `[種別, ...]` の配列を出す。
 ///
-/// 種別 2 が投稿の見出し（メタデータ）、3 がその投稿に属するファイル、
+/// 種別 2 が投稿のメタデータの行、3 がその投稿に属するファイル、
 /// **-1 が失敗**。実物の出力で確かめてある。
 ///
 /// 失敗が標準エラーではなく出力の中に混ざるので、終了コードや stderr だけを
@@ -171,17 +171,17 @@ pub(crate) fn parse_timeline(stdout: &str) -> Result<Vec<Found>, AdapterError> {
             DIRECTORY => {
                 let meta = items
                     .get(1)
-                    .ok_or_else(|| parse_error(&"見出しに中身が無い"))?;
+                    .ok_or_else(|| parse_error(&"メタデータの行に中身が無い"))?;
                 found.push(post(meta)?);
             }
             // 直前の投稿に属するファイル。1本でもあれば落とす実体がある。
             URL => match found.last_mut() {
                 Some(last) => last.media = MediaPresence::Present,
-                None => return Err(parse_error(&"見出しの前にファイルが出た")),
+                None => return Err(parse_error(&"メタデータの行の前にファイルが出た")),
             },
             // 知らない種別は `Parse` で落とす。黙って捨てると、投稿を載せた新しい形が
             // 来たとき、取りこぼしが「空のタイムライン」に見える。Parse なので判定は
-            // 保留になり、預かり中のものは `holding` に残る（#5）。
+            // 保留になり、`holding` のまま次の回へ回る（#5）。
             other => return Err(parse_error(&format!("知らない出力の種別 {other}"))),
         }
     }
@@ -400,7 +400,7 @@ fn rename_into_place(from: &Path, into: &Path) -> Result<Vec<Asset>, AdapterErro
     if assets.is_empty() {
         return Err(AdapterError::Parse {
             program: PROGRAM.to_owned(),
-            detail: "成功したが実体が置かれていない".to_owned(),
+            detail: "成功したが実体が無い".to_owned(),
         });
     }
 
@@ -457,7 +457,8 @@ mod tests {
         // #5「text-tweets でメディアの無い投稿を拾う」「cards=ytdl でカードを拾う」
         assert!(args.contains(&"extractor.twitter.text-tweets=true"));
         assert!(args.contains(&"extractor.twitter.cards=ytdl"));
-        // 引用元と RT は繋がりとして記録し、項目にはしない（#1 の「1投稿 = 1 Item」）。
+        // 引用元と RT は項目にせず、引用元は `quoted` の繋がりとして残す（#1 の
+        // 「1投稿 = 1 Item」）。
         assert!(args.contains(&"extractor.twitter.quoted=false"));
         assert!(args.contains(&"extractor.twitter.retweets=false"));
         assert!(args.contains(&"--dump-json"));
@@ -505,14 +506,14 @@ mod tests {
         }
     }
 
-    /// ハンドル抜きの正規形になる（#1）。
+    /// ハンドル抜きの正規形へ潰れる（#1）。
     #[test]
     fn urls_are_canonical() {
         let found = parse_timeline(TIMELINE).unwrap();
         assert_eq!(found[0].url.as_str(), "https://x.com/i/status/20");
     }
 
-    /// 見出しに続くファイルがあれば「取得する実体がある」。
+    /// メタデータの行に続くファイルがあれば「取得する実体がある」。
     /// 無ければ本文だけなので、#1 のとおり `kept` から始まる。
     #[test]
     fn files_after_a_post_mean_there_is_something_to_fetch() {
@@ -584,7 +585,7 @@ mod tests {
             r#"[[2, {"date":"2006-03-21 20:50:14","content":"x"}]]"#, // tweet_id が無い
             r#"[[2, {"tweet_id":20,"content":"x"}]]"#,                // 日時が無い
             r#"[[2, {"tweet_id":20,"date":"きのう","content":"x"}]]"#, // 日時が読めない
-            r#"[[3, "https://x/a.jpg", {}]]"#,                        // 見出しの前にファイル
+            r#"[[3, "https://x/a.jpg", {}]]"#,                        // メタデータの行が無い
         ] {
             assert!(
                 matches!(parse_timeline(broken), Err(AdapterError::Parse { .. })),
