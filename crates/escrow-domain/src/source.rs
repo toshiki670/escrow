@@ -34,7 +34,7 @@ pub struct Person {
 
 /// 監視対象。プラットフォーム上の1つのアカウント。
 ///
-/// 持ち主のいない `Source` は作れない（#1）。
+/// `Source` は必ず持ち主を伴う（#1）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Source {
     pub id: SourceId,
@@ -48,8 +48,8 @@ pub struct Source {
     pub hold_days: Option<NonZeroU32>,
     /// 検知の重み。
     ///
-    /// 間隔ではない。間隔を宣言すると、配信元 N 本ぶんの合計が #13 の予算を超えた
-    /// 時点で守れない約束になる。重みなら、実際の頻度は予算から導出される（#1）。
+    /// 重みにしたのは、間隔を宣言すると、配信元 N 本ぶんの合計が #13 の予算を超えた
+    /// 時点で守れない約束になるため。重みなら、実際の頻度は予算から導く（#1）。
     pub priority: NonZeroU32,
     /// いつからいつまで見るか。
     pub monitoring: Monitoring,
@@ -58,7 +58,7 @@ pub struct Source {
 /// 監視の期間（#1）。
 ///
 /// X は継続監視せず、人が宣言した期間の中だけ見る（#5）。YouTube は RSS が
-/// 1チャンネル1回で済むので区切らない。
+/// 1チャンネル1回で済むので、区切らず見続ける。
 ///
 /// **意味があるのは「両方 NULL」と「両方埋まっている」の2つだけ。** DB の
 /// `monitor_from` / `monitor_until` は2列に分かれているが、写した先では1つの値にする。
@@ -120,7 +120,7 @@ impl Source {
 
 /// 取り込まない種別。`Source` ごと、または全対象共通（#1）。
 ///
-/// 当たったものは `Item` に行を作らない。除外されていることはこちらが持つ。
+/// 当たったものの記録はこちらだけが持ち、`Item` には行を作らない。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Exclude {
     pub id: ExcludeId,
@@ -180,7 +180,7 @@ mod tests {
         assert_eq!(Monitoring::Continuous.columns(), (None, None));
     }
 
-    /// 片方だけ決まった行は意味が決まっていないので、型にできない。
+    /// 片方だけ決まった行は意味が決まっていないので、`HalfOpen` で弾く。
     #[test]
     fn half_of_a_period_is_not_a_period() {
         let at = at("2026-09-01T00:00:00+09:00");
@@ -232,7 +232,7 @@ mod tests {
         assert!(absurd.hold_from(at).is_err());
     }
 
-    /// 監視の期間の外では見ない（#1・#5）。
+    /// 見るのは監視の期間の中だけ（#1・#5）。
     #[test]
     fn a_period_is_half_open() {
         let from = Timestamp::parse("2026-09-01T00:00:00+09:00").unwrap();

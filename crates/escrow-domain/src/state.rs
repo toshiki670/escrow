@@ -17,7 +17,7 @@ use crate::timestamp::Timestamp;
 /// [`StateName`] がある。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum State {
-    /// 見つけたが、まだ取得していない。
+    /// 見つけて、取得を待っている。
     Waiting,
     /// 取得中。配信の録画、または VOD のダウンロード。
     Acquiring,
@@ -28,7 +28,7 @@ pub enum State {
     Transcribing { hold: Hold },
     /// 預かり中。この期限まで配信元を確認し続ける。
     ///
-    /// 期限を伴わない `holding` は作れない。#1 の「期限のない預かりを表現できない」を、
+    /// `holding` は必ず期限を伴う。#1 の「期限のない預かりを表現できない」を、
     /// イベントだけでなく状態の側でも成り立たせる。
     Holding { until: Timestamp },
     /// 保持が確定し、引き渡しを待つ。終端ではない。
@@ -201,7 +201,8 @@ impl State {
 pub enum Hold {
     /// この日時まで預かる。期限まで配信元に在り続けたら捨てる。
     Until(Timestamp),
-    /// 期限を持たない。捨てないので `holding` を通らず、そのまま `kept` になる。
+    /// 期限なしで預かる。`holding` は期限まで確かめる状態なので、通らずにそのまま `kept` に
+    /// なる。
     None,
 }
 
@@ -282,9 +283,9 @@ pub enum TranscriptNeed {
 
 /// 状態を動かす出来事。
 ///
-/// 項目の誕生（`discovered`）はここに入らない。状態を**動かす**のではなく**作る**ので、
-/// [`next`] の引数にならない。混ぜると、受け皿を置かないこの関数に不正な腕が9本増える。
-/// 誕生が運ぶものは [`crate::item::Discovered`]。
+/// ここに在るのは状態を**動かす**出来事だけ。項目の誕生（`discovered`）は状態を**作る**ので
+/// [`crate::item::Discovered`] が運び、[`next`] の引数にならない。混ぜると、受け皿を置かない
+/// この関数に不正な腕が9本増える。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
     /// 取得を始めた。
@@ -303,12 +304,12 @@ pub enum Event {
     /// 預かり中に配信元へ在ることを確かめた。**状態は動かない。**
     ///
     /// #5 の「期限が過ぎていても、直近の確認で『在る』が取れていなければ捨てない」に
-    /// 居場所を与える。確認できなかった回は行が増えないので、**沈黙が記録されない
+    /// 居場所を与える。確認できなかった回は行が増えないので、**沈黙が記録に残らない
     /// ことが、そのまま #5 の非対称性になる**（#1）。
     PresenceConfirmed(PresenceConfirmed),
     /// 期限まで配信元に在ることを確かめた。捨ててよい。
     ///
-    /// 証を要求するので、期限が過ぎたというだけで捨てる実装は書けない。
+    /// 証を要求するので、期限が過ぎたというだけで捨てる実装はコンパイルが止める。
     HeldToDeadline(PresenceConfirmed),
     /// 外部が受け取った。
     Released { reference: Option<ReleaseReference> },
@@ -500,7 +501,7 @@ pub fn next(state: &State, event: &Event) -> Result<State, IllegalTransition> {
             | S::Error => return Err(illegal()),
         },
 
-        // 状態を動かさない。確かめたという事実だけが残る（#1）。
+        // 状態はそのまま。確かめたという事実だけが残る（#1）。
         E::PresenceConfirmed(_) => match state {
             S::Holding { until } => S::Holding { until: *until },
             S::Waiting
@@ -547,7 +548,7 @@ pub fn next(state: &State, event: &Event) -> Result<State, IllegalTransition> {
             S::Discarded | S::Released { .. } | S::Deleted | S::Error => return Err(illegal()),
         },
 
-        // 状態を動かさない。何度でも積み上がり、その本数がリトライ回数になる（#1）。
+        // 状態はそのまま。何度でも積み上がり、その本数がリトライ回数になる（#1）。
         E::AttemptFailed { .. } => match state {
             S::Acquiring => S::Acquiring,
             S::Transcribing { hold } => S::Transcribing { hold: *hold },
@@ -637,7 +638,7 @@ mod tests {
         ]
     }
 
-    /// #1 の stateDiagram に描かれている遷移を全部並べたもの。
+    /// #1 の stateDiagram に在る遷移を全部並べたもの。
     /// 図が動いたらここが落ちる。
     #[test]
     fn reproduces_every_transition_in_the_diagram() {
@@ -776,10 +777,10 @@ mod tests {
         }
     }
 
-    /// 図に無い組み合わせはすべて拒まれる。
+    /// 図に無い組み合わせは、`next` がすべて拒む。
     ///
     /// 9 状態 × 11 イベント = 99 通りのうち、通るのはちょうど 20 通り。
-    /// 遷移を増やすとこの数が動くので、図を書き換えずに実装だけ緩めることができない。
+    /// 遷移を増やすとこの数が動くので、実装を緩めるには図の書き換えが要る。
     #[test]
     fn exactly_the_diagram_is_legal() {
         let mut legal = 0;
@@ -800,8 +801,8 @@ mod tests {
 
     /// 期限を運ぶのは `acquired` の1回きり（#1）。
     ///
-    /// `Transcribed` が値を持たないので、`acquired` が `Until(X)`、`transcribed` が
-    /// `Until(Y)` というログは**書けない**。行き先は状態が持っている期限だけが決める。
+    /// `Transcribed` は値を持たないので、ログの期限は `acquired` の `Until(X)` の
+    /// **1つに定まる**。行き先は状態が持っている期限だけが決める。
     #[test]
     fn the_deadline_travels_in_the_state_not_in_transcribed() {
         let acquired = Event::Acquired {
@@ -842,9 +843,9 @@ mod tests {
         );
     }
 
-    /// 失敗は積み上がるだけで状態を動かさない（#1）。
+    /// 失敗は積み上がるだけで、状態はそのまま（#1）。
     ///
-    /// これが無いと `retries_exhausted` の1本しか残らず、リトライ回数を数えられない。
+    /// `retries_exhausted` は終端の1本だけなので、リトライ回数はこのイベントの本数で数える。
     #[test]
     fn failures_pile_up_without_moving_the_state() {
         let failed = Event::AttemptFailed {
@@ -864,7 +865,7 @@ mod tests {
         );
     }
 
-    /// 沈黙で捨てられないこと。証は `Presence::Present` からしか出ない。
+    /// 捨てるには証が要ること。証は `Presence::Present` からしか出ない。
     #[test]
     fn discarding_needs_a_confirmed_presence() {
         assert!(Presence::Unknown.confirmed().is_none());
@@ -918,7 +919,7 @@ mod tests {
 
     /// イベントと判別子が1対1であること。
     ///
-    /// `Discovered` だけは [`Event`] に居ないので、`kind()` からは出てこない。
+    /// `kind()` が出すのは [`Event`] の判別子で、`Discovered` は [`Event`] の外に居る。
     /// 保存の形では他と同じ1行になるので、判別子の側には在る。
     #[test]
     fn every_event_kind_round_trips() {

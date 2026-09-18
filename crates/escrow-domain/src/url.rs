@@ -35,7 +35,7 @@ impl NormalizedUrl {
 pub enum TypeHint {
     /// パスが種別を決めている。
     Known(ContentType),
-    /// YouTube の `/watch?v=` と `youtu.be/` は shorts / video / live を区別しない。
+    /// YouTube の `/watch?v=` と `youtu.be/` は shorts / video / live のどれにも使う。
     /// 検知はフィードの `link` で決まらなかったぶんを1件ごとの追加取得で埋め、
     /// 人の登録は `--type` で受ける（#5）。
     YoutubeUnknown,
@@ -58,7 +58,7 @@ pub enum UrlError {
 
 /// 項目の URL を正規形へ写し、入口が語る種別を一緒に返す。
 ///
-/// 先に正規化して後から種別を訊く形は作らない（#1 の決め事）。
+/// 種別は正規化と同時に決める（#1 の決め事）。
 pub fn normalize_item(input: &str) -> Result<(NormalizedUrl, TypeHint), UrlError> {
     let parsed = parse(input)?;
 
@@ -71,8 +71,8 @@ pub fn normalize_item(input: &str) -> Result<(NormalizedUrl, TypeHint), UrlError
 
 /// 配信元の URL を正規形へ写す。
 ///
-/// ハンドルは受け付けない。改名されうるうえ、不変 ID への解決はネットワークを
-/// 要る仕事で、この関数の責務ではないため。解決してから渡す。
+/// 受け付けるのは解決済みの不変 ID。ハンドルは改名されうるうえ、不変 ID への解決は
+/// ネットワークが要る仕事で、この関数の責務ではないため、解決してから渡す。
 pub fn normalize_source(input: &str) -> Result<NormalizedUrl, UrlError> {
     let parsed = parse(input)?;
 
@@ -222,7 +222,7 @@ fn x_source(url: &Url, input: &str) -> Result<NormalizedUrl, UrlError> {
         ["intent", "user"] => query_value(url, "user_id")
             .ok_or_else(unresolved)?
             .into_owned(),
-        // ハンドルは改名されうるので受け付けない。
+        // ハンドルは改名されうるので、解決前の形は `unresolved`。
         _ => return Err(unresolved()),
     };
 
@@ -364,7 +364,7 @@ mod tests {
             "https://www.youtube.com/channel/UCBR8-60-B28hp2BmDPdntcQ"
         );
 
-        // `@handle` は改名されうるので、解決前の形は受け付けない。
+        // `@handle` は改名されうるので、解決前の形は `UnresolvedSource`。
         assert!(matches!(
             normalize_source("https://www.youtube.com/@YouTube"),
             Err(UrlError::UnresolvedSource { .. })
@@ -384,7 +384,7 @@ mod tests {
             assert_eq!(normalize_source(input).expect(input).as_str(), CANONICAL);
         }
 
-        // ハンドルは改名されうるので、解決前の形は受け付けない。
+        // ハンドルは改名されうるので、解決前の形は `UnresolvedSource`。
         for handle in [
             "https://x.com/jack",
             "https://x.com/i/user/jack",

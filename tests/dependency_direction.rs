@@ -33,7 +33,7 @@ const ENTRY: &[&str] = &["escrow-app"];
 
 /// 依存の図。左が右を依存に持ってよい、の全部。
 ///
-/// 実際に使っているかは問わない。ここに無い辺を足したら落ちる。
+/// 使っていない辺も載せてよい。ここに無い辺を足したら落ちる。
 const ALLOWED: &[(&str, &[&str])] = &[
     // ワークスペース全体にかかるテスト。crate を1つも依存に持たない。
     ("escrow-tests", &[]),
@@ -48,8 +48,8 @@ const ALLOWED: &[(&str, &[&str])] = &[
         "escrow-scheduler",
         &["escrow-domain", "escrow-config", "escrow-external"],
     ),
-    // 段4 — スライス。**同じ段の中も見えない**。handover だけは外へ出ないので
-    // スケジューラも要らない（#15）。
+    // 段4 — スライス。**同じ段の中も見えない**。handover だけは中で完結するので、
+    // スケジューラ抜きで足りる（#15）。
     ("escrow-discovery", SLICE),
     ("escrow-acquisition", SLICE),
     ("escrow-transcription", SLICE),
@@ -112,7 +112,7 @@ fn only_the_scheduler_knows_the_external_tools() {
 
 /// 表がワークスペースの全 crate を覆っていること。
 ///
-/// 覆っていないと、表に載らない crate が誰にも見られずに迂回路を作れる。名前は
+/// 覆っていないと、表に載らない crate が迂回路を作っても誰も気づかない。名前は
 /// ディレクトリではなく `package.name` から取るので、置き場所を変えても追える。
 #[test]
 fn the_graph_covers_every_crate_in_the_workspace() {

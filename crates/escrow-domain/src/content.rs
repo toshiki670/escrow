@@ -67,7 +67,7 @@ impl ContentType {
 
 /// escrow が扱うプラットフォーム。
 ///
-/// #1 のとおり DB には持たない（`url` から判別できるため）。#5 の対応表が
+/// #1 のとおり `url` から判別する値で、DB には列を持たない。#5 の対応表が
 /// 「どのツールを使うか」をこれで引く。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Platform {
@@ -130,8 +130,7 @@ impl fmt::Display for ContentType {
 /// 「`Media` に `body` は無い」を守るのは Rust の enum であって DB ではない（#1）。
 /// DB は平らなカラムを持つだけで、`CHECK` 制約も置かない。保証はここ。
 ///
-/// 種別は中身から導ける（[`Content::content_type`]）ので、並べて持たない。
-/// #1 の「計算・導出できるものは持たない」。
+/// 種別は中身から導く（[`Content::content_type`]）。#1 の「計算・導出できるものは持たない」。
 ///
 /// `Post` も画像や動画を持つので、境目は「メディアを持つほう」ではなく
 /// **本文の枠があるかどうか**（#1）。動画だけの X 投稿は `body` が空の `Post`。
