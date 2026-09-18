@@ -113,11 +113,11 @@ impl Asset {
 
     /// ファイル名から読み戻す。規則に合わないものは `None`。
     ///
-    /// ディレクトリには取得中の中間ファイルなど規則外のものも落ちうるので、
+    /// ディレクトリには取得中の中間ファイルなど規則外のものも在りうるので、
     /// この関数はどんな文字列にも答えを返す（規則外なら `None`）。
     pub fn parse_file_name(file_name: &str) -> Option<Self> {
         // ちょうど3つ。`video.1.mp4.part` のように途中で増えた中間ファイルは
-        // 4つに割れるのでここで落ちる。まだ取得中のものを実体として数えない。
+        // 4つに割れるのでここで弾く。まだ取得中のものを実体として数えない。
         let [kind, ordinal_text, extension] =
             <[&str; 3]>::try_from(file_name.split('.').collect::<Vec<_>>()).ok()?;
 
@@ -159,7 +159,7 @@ pub fn scan(media_dir: &Path, item: ItemId) -> io::Result<Vec<Asset>> {
     scan_dir(&item_dir(media_dir, item))
 }
 
-/// 置き場所を直接指してのぞく。
+/// 置き場所を直接指して読む。
 ///
 /// 外部ツールのアダプタは `ItemId` を知らず、受け取るのは書き込み先のディレクトリだけ。
 pub fn scan_dir(dir: &Path) -> io::Result<Vec<Asset>> {
@@ -226,7 +226,7 @@ mod tests {
         assert_eq!(webm.extension, "webm");
     }
 
-    /// 規則外の名前で落ちないこと。ディレクトリには中間ファイルも落ちる。
+    /// 規則外の名前で落ちないこと。取得する側は中間ファイルも書く。
     #[test]
     fn ignores_names_that_do_not_follow_the_rule() {
         for name in [

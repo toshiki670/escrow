@@ -11,7 +11,7 @@ use crate::url::NormalizedUrl;
 ///
 /// 値はプラットフォーム名を含み、プラットフォームをまたいで重複しない。
 /// 中身を持たない場面（`Exclude` の対象、#6 の絞り込み、DB の列）でも使うので、
-/// [`Content`] とは別に立っている。
+/// [`Content`] とは別の型にしてある。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ContentType {
     YoutubeShorts,
@@ -82,7 +82,7 @@ impl Platform {
 /// subtype が `Media` になる種別。#1 の表で `Media` 側の5つ。
 ///
 /// [`Content::Media`] がこれを持つことで、`content_type` と中身の食い違いが
-/// **表現できなくなる**。両方を並べて持って突き合わせる、という形にしない。
+/// **型の上で無くなる**。両方を並べて持って突き合わせる、という形にしない。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum MediaType {
     YoutubeShorts,
@@ -160,7 +160,7 @@ impl Content {
 
     /// #6 の一覧に出す見出し。`Media` は `title`、`Post` は `body`。
     ///
-    /// 何文字で切るか改行をどう畳むかは表示する側が決めるので、ここでは丸ごと返す（#4）。
+    /// 何文字で切るか改行をどう扱うかは表示する側が決めるので、ここでは丸ごと返す（#4）。
     pub fn headline(&self) -> &str {
         match self {
             Self::Media { title, .. } => title,
