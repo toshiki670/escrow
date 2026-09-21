@@ -1,6 +1,6 @@
 //! URL の正規化。#1 の「URL の正規化」。
 //!
-//! 原則は「可変な表示名ではなく、不変の ID へ寄せる」。ハンドル名は改名されうるので、
+//! 原則は「可変な表示名ではなく、不変の ID へ寄せる」。ハンドル名は持ち主が変えうるので、
 //! URL に残すと改名の瞬間に同じものが別行になる。
 //!
 //! ネットワークへ出ない純関数にしてある。`Item.url` の `UNIQUE` が何を同一と見なすかは
@@ -27,13 +27,13 @@ impl NormalizedUrl {
     }
 }
 
-/// 入口が種別について何を語っているか。
+/// 入口から分かる種別。
 ///
 /// 正規形と一緒に返す。`/shorts/<id>` を `/watch?v=<id>` へ潰すと `youtube_shorts` と
 /// `youtube_video` を分ける手掛かりが消えるので、**正規化する前**に読む（#1）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TypeHint {
-    /// パスが種別を決めている。
+    /// 入口が種別を決めている。
     Known(ContentType),
     /// YouTube の `/watch?v=` と `youtu.be/` は shorts / video / live のどれの入口にもなる。
     /// 検知はフィードの `link` で決まらなかったぶんを1件ごとの追加取得で埋め、
@@ -56,7 +56,7 @@ pub enum UrlError {
     },
 }
 
-/// 項目の URL を正規形へ写し、入口が語る種別を一緒に返す。
+/// 項目の URL を正規形へ写し、入口から分かる種別を一緒に返す。
 ///
 /// 種別は正規化と同時に決める（#1 の決め事）。
 pub fn normalize_item(input: &str) -> Result<(NormalizedUrl, TypeHint), UrlError> {
@@ -115,7 +115,7 @@ fn parse(input: &str) -> Result<Url, UrlError> {
 }
 
 fn host_kind(url: &Url) -> Option<Host> {
-    // ホストの大文字小文字は url crate が畳んでいる。
+    // ホストは URL Standard が ASCII を小文字に揃えるので、小文字だけを並べる。
     match url.host_str()? {
         "youtube.com" | "www.youtube.com" | "m.youtube.com" | "music.youtube.com" => {
             Some(Host::Youtube)
@@ -144,7 +144,7 @@ fn youtube_item(url: &Url, input: &str) -> Result<(NormalizedUrl, TypeHint), Url
     };
 
     let (id, hint) = match segments(url).as_slice() {
-        // 種別を決められる入口。
+        // 種別が決まる入口。
         ["shorts", id] => (
             (*id).to_owned(),
             TypeHint::Known(ContentType::YoutubeShorts),
@@ -180,7 +180,7 @@ fn x_item(url: &Url, input: &str) -> Result<(NormalizedUrl, TypeHint), UrlError>
         input: input.to_owned(),
     };
 
-    // ハンドルは改名されうるので落とし、不変の ID だけを残す。
+    // ハンドルは持ち主が変えうるので落とし、不変の ID だけを残す。
     // x.com/i/status/<id> は 307 で現ハンドルの URL へ飛ぶので、出典としては読める。
     let (kind, id) = match segments(url).as_slice() {
         // /<handle>/status/<id> と、その後ろに /photo/1 などが付く形。

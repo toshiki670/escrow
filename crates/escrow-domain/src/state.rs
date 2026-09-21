@@ -190,7 +190,7 @@ impl State {
         }
     }
 
-    /// 終端。人が再取得を指示しない限り動かない。
+    /// 終端。人が再取得を指示したときだけ動く。
     pub const fn is_terminal(&self) -> bool {
         !self.is_live()
     }
@@ -208,7 +208,7 @@ pub enum Hold {
 
 /// 預かる日数が大きすぎて、期限が日時にならないとき。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
-#[error("{days} 日先は暦の外")]
+#[error("{days} 日先は表せる範囲の外")]
 pub struct HoldTooFar {
     pub days: std::num::NonZeroU32,
 }
@@ -221,7 +221,7 @@ impl Hold {
     /// `acquired` を書く直前の時刻を渡す。
     ///
     /// 空を返さないのは、[`Hold::None`]（期限なし＝捨てない）と、日数が表せる範囲を
-    /// 超えたこととが**意味の反転した2つ**だから。片方をもう片方に化けさせない。
+    /// 超えたこととが**意味の反転した2つ**だから。片方をもう片方として返さない。
     pub fn from_days(
         days: Option<std::num::NonZeroU32>,
         acquired_at: Timestamp,
@@ -281,11 +281,11 @@ pub enum TranscriptNeed {
     NotNeeded,
 }
 
-/// 状態を動かす出来事。
+/// 状態を動かすイベント。
 ///
 /// 項目の誕生（`discovered`）は状態を**動かす**のではなく**作る**ので、
 /// [`crate::item::Discovered`] が運ぶ。[`next`] の引数にはならず、混ぜると受け皿を置かない
-/// この関数に不正な腕が9本増える。
+/// この関数に不正なアームが9本増える。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
     /// 取得を始めた。
@@ -301,7 +301,7 @@ pub enum Event {
     Transcribed,
     /// 預かり中に配信元から消えた。手元のものを残す。
     SourceGone,
-    /// 預かり中に配信元へ在ることを確かめた。**状態は動かない。**
+    /// 預かり中に配信元へ在ることを確かめた。**状態はそのまま。**
     ///
     /// #5 の「期限が過ぎていても、直近の確認で『在る』が取れていなければ捨てない」に
     /// 居場所を与える。確認できなかった回は行が増えないので、**沈黙が記録に残らない
@@ -315,7 +315,7 @@ pub enum Event {
     Released { reference: Option<ReleaseReference> },
     /// 人が消した。
     Deleted,
-    /// 取得か文字起こしが1回失敗した。**状態は動かない。**
+    /// 取得か文字起こしが1回失敗した。**状態はそのまま。**
     ///
     /// リトライ回数はこのイベントを数えて導出する。`RetriesExhausted` は終端なので、
     /// それだけでは最後の1回しか残らず数えられない（#1）。
@@ -328,7 +328,7 @@ pub enum Event {
 
 /// ログに残るイベントの判別子。DB の `item_event.kind`（#1）。
 ///
-/// [`Event`] より1つ多い。`Discovered` は状態を動かさないので [`Event`] には無いが、
+/// [`Event`] より1つ多い。`Discovered` は状態を作るので [`Event`] の外に居るが、
 /// 保存の形では他と同じ1行になる。**行を読む側はこの enum で全域に分岐し**、
 /// `Discovered` を先頭の1件へ、残りを [`Event`] へ振り分ける。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -548,7 +548,7 @@ pub fn next(state: &State, event: &Event) -> Result<State, IllegalTransition> {
             S::Discarded | S::Released { .. } | S::Deleted | S::Error => return Err(illegal()),
         },
 
-        // 状態はそのまま。何度でも積み上がり、その本数がリトライ回数になる（#1）。
+        // 状態はそのまま。何度でも増え、その本数がリトライ回数になる（#1）。
         E::AttemptFailed { .. } => match state {
             S::Acquiring => S::Acquiring,
             S::Transcribing { hold } => S::Transcribing { hold: *hold },
@@ -816,7 +816,7 @@ mod tests {
         assert_eq!(holding, State::Holding { until: deadline() });
     }
 
-    /// 期限を伴わない `holding` が作れないこと（#1）。
+    /// `holding` は必ず期限を伴うこと（#1）。
     ///
     /// `holding` へ入る経路は2本だけで、どちらも期限を要する。
     #[test]
@@ -843,7 +843,7 @@ mod tests {
         );
     }
 
-    /// 失敗は積み上がるだけで、状態はそのまま（#1）。
+    /// 失敗は増えるだけで、状態はそのまま（#1）。
     ///
     /// `retries_exhausted` は終端の1本だけなので、リトライ回数はこのイベントの本数で数える。
     #[test]

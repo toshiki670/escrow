@@ -15,7 +15,7 @@ use crate::url::NormalizedUrl;
 /// `url` が自然キーで、こちらは外へ見せる同一性。
 ///
 /// **`i64` から作る経路は [`ItemId::new`] だけ。** `From<i64>` を出さずにおくと、
-/// `impl Into<ItemId>` を取る場所へ裸の主キーが推論で滑り込むことがない。逆向きの
+/// `impl Into<ItemId>` を取る場所へ型の無い `i64` が推論で入り込むことがない。逆向きの
 /// `i64::from` は DB へ渡すのに要るので出す。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Constructor, Display, Into)]
 pub struct ItemId(i64);
@@ -34,13 +34,13 @@ pub struct Item {
     /// 配信の開始予定時刻。予約枠でなければ空。
     ///
     /// 予約枠を見つけた時点で分かり、始まってしまえば二度と取れない。巻き戻し
-    /// 禁止の配信は開始に間に合わせないと頭を失うので、この時刻に取得を予約する
+    /// 禁止の配信は開始に間に合わせないと頭が取れないので、この時刻に取得を予約する
     /// （#1・#5）。
     pub scheduled_start_at: Option<Timestamp>,
     /// いまの状態。預かりの期限は `Holding` が伴っている（#1）。
     pub state: State,
-    /// この状態になった日時。**状態が変わらなかったイベントでは動かない** — 生存確認や
-    /// 1回の失敗を書いても、`holding` になった日時はそのまま。
+    /// この状態になった日時。**状態が変わらなかったイベントではそのまま** — 生存確認や
+    /// 1回の失敗を書いても、`holding` になった日時は変わらない。
     pub state_since: Timestamp,
     pub content: Content,
 }
