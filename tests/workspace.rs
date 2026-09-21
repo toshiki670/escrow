@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 pub struct Member {
     /// `Cargo.toml` の `package.name`。ディレクトリ名ではない。
     pub name: String,
+    /// ワークスペースのルートからの相対パス。置き場所の包含（`app/` の下に在るか、など）を
+    /// `Path::starts_with` で判定できる。
     pub dir: PathBuf,
     pub manifest: toml::Table,
 }
@@ -26,6 +28,25 @@ pub fn manifest_at(dir: &Path) -> toml::Table {
         .unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
 
+/// `workspace.members` の1項目が指すディレクトリ。
+///
+/// cargo はグロブを受けるが、escrow が使うのは `app/crates/slices/*` のように**末尾が `*`**
+/// の形だけなので、それだけを展開する。他の形はそのまま返し、`Cargo.toml` を読む所で落ちる。
+fn expand(root: &Path, member: &str) -> Vec<PathBuf> {
+    let Some(group) = member.strip_suffix("/*") else {
+        return vec![PathBuf::from(member)];
+    };
+    let group_dir = root.join(group);
+    let mut dirs: Vec<PathBuf> = std::fs::read_dir(&group_dir)
+        .unwrap_or_else(|e| panic!("{}: {e}", group_dir.display()))
+        .map(|entry| entry.expect("読めるエントリ").path())
+        .filter(|path| path.is_dir())
+        .map(|path| Path::new(group).join(path.file_name().expect("ディレクトリ名")))
+        .collect();
+    dirs.sort();
+    dirs
+}
+
 /// `workspace.members` に挙がっているもの全部。
 pub fn members() -> Vec<Member> {
     let root = root();
@@ -33,9 +54,9 @@ pub fn members() -> Vec<Member> {
         .as_array()
         .expect("workspace.members は配列")
         .iter()
-        .map(|member| {
-            let dir = root.join(member.as_str().expect("member は文字列"));
-            let manifest = manifest_at(&dir);
+        .flat_map(|member| expand(&root, member.as_str().expect("member は文字列")))
+        .map(|dir| {
+            let manifest = manifest_at(&root.join(&dir));
             let name = manifest["package"]["name"]
                 .as_str()
                 .expect("package.name は文字列")
@@ -72,8 +93,9 @@ impl Member {
             }
         }
 
+        let dir = root().join(&self.dir);
         let mut found = Vec::new();
-        walk(&self.dir, &self.dir, &mut found);
+        walk(&dir, &dir, &mut found);
         found.sort();
         found
     }
