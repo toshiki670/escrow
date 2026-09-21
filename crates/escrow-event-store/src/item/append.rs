@@ -13,7 +13,7 @@ use super::read_model::{Columns, state_of};
 use crate::{EventStore, EventStoreError, Seq, WRITE, timestamp};
 
 impl EventStore {
-    /// 項目を起票する。
+    /// 項目の誕生を書く。
     ///
     /// ログの先頭に `discovered` を1つ書き、そこからリードモデルの行を作る。`url` の
     /// `UNIQUE` はリードモデルが持っているが、両方を同じトランザクションで書くので、

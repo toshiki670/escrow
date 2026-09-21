@@ -1,7 +1,7 @@
-//! Phase 4.2 の受け入れ（#7）。
+//! イベントストアの受け入れ（#7・#15）。
 //!
 //! - イベントを追記してリプレイした結果と、リードモデルの `item` が一致する
-//! - 同じ `seq` を2回書くと `UNIQUE` が弾く
+//! - 同じ `seq` を2回書くと `Superseded` になる
 //! - 期限は `acquired` の1回で確定し、そこから先は状態が運ぶ
 //! - 記録に残るのは確認できた回だけ（#5 の非対称性）
 
@@ -281,11 +281,11 @@ async fn confirming_presence_records_the_fact_without_moving_the_state() {
     assert_eq!(
         row.item.state,
         State::Holding { until: deadline },
-        "確かめただけでは状態は動かない"
+        "確かめただけなら holding のまま"
     );
     assert_eq!(
         row.item.state_since, became_holding,
-        "holding になった日時も動かない"
+        "holding になった日時もそのまま"
     );
     // 確かめた事実は3件とも残っている。
     assert_eq!(row.seq.get(), 6);
@@ -380,7 +380,7 @@ async fn an_illegal_transition_never_reaches_the_log() {
     assert_eq!(store.log(id).await.unwrap().unwrap().rest.len(), 0);
 }
 
-/// 同じ URL の起票は1回だけ（#1 の一意キー）。
+/// 同じ URL の誕生は1回だけ（#1 の一意キー）。
 #[tokio::test]
 async fn the_same_url_cannot_be_discovered_twice() {
     let (store, source) = seeded().await;

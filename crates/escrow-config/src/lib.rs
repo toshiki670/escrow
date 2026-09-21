@@ -4,7 +4,7 @@
 //! 認証の取得元、ファイルの置き場所 — がここに来る。
 //!
 //! **設定ファイルの項目と設定画面の項目は一対一に保つ**（#2）。そのため [`Config`] は
-//! ファイルに書いてあるとおりの値を持ち、`~` の展開も `db_path` の既定も畳み込まない。
+//! ファイルに書いてあるとおりの値を持ち、`~` の展開も `db_path` の既定も当てない。
 //! 環境と突き合わせて実際の場所を出すのは [`Paths`] の仕事で、下流はそちらだけを見る。
 
 pub mod tools;
@@ -110,7 +110,7 @@ pub struct Auth {
 pub struct Schedule {
     /// 拒否を受けて `Retry-After` が返らなかったときに待つ秒数。
     pub rejection_backoff_seconds: NonZeroU32,
-    /// 連続で拒否を受けるたびに待ち時間を倍にする、その上限の秒数。
+    /// 連続で断られるたびに待ち時間を倍にする、その上限の秒数。
     pub rejection_max_backoff_seconds: NonZeroU32,
     pub youtube: Limits,
     pub x: Limits,
@@ -129,8 +129,7 @@ pub struct Limits {
     pub describe_gap_seconds: NonZeroU32,
     /// 配信元にまだ在るかを確かめる間隔の下限。秒。
     ///
-    /// 生存確認は預かり中の全件をまとめて叩くので、この間隔が要求を時間で分ける役も
-    /// 兼ねる（#13）。
+    /// 生存確認は預かり中の全件をまとめて叩くので、この間隔が塊を散らす役も兼ねる（#13）。
     pub probe_gap_seconds: NonZeroU32,
     /// 同時に走らせる取得の数。
     ///
@@ -145,7 +144,7 @@ pub struct Tools {
     /// 外部ツールを探すディレクトリ。PATH に足す。
     ///
     /// PATH で見つからなかったものを、ここから探す。GUI アプリはターミナルと違う PATH で
-    /// 動く（`.zshrc` を読まない）ので、Homebrew や mise で入れたものを見つけられない
+    /// 起動される（`.zshrc` を読まない）ので、Homebrew や mise で入れたものを見つけられない
     /// ことがある（#2）。
     pub extra_paths: Vec<String>,
 }
@@ -171,7 +170,7 @@ impl TryFrom<String> for Language {
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
         // 前後の空白と `auto` の大文字小文字だけ正す。言語コードそのものは
-        // 文字起こし側が解釈するので、escrow は畳まない。
+        // 文字起こし側が解釈するので、escrow は触らない。
         let trimmed = value.trim();
 
         if trimmed.is_empty() {
@@ -209,10 +208,8 @@ impl fmt::Display for Language {
 /// どのアダプタでも使えるものだけ。渡らない先もある — YouTube の検知は匿名で、
 /// cookie を受け取る手段を持たない（#5）。
 ///
-/// どのアダプタが何を受けるかは、それぞれのアダプタが持つ
-/// （`escrow_external::<tool>::SUPPORTED_BROWSERS`）。ここが部分集合であることは
-/// `escrow-external` のテストが確かめる。綴りを自由にすると、渡した先で初めて
-/// 落ちる値を設定できてしまうので enum にしてある。
+/// どのアダプタが何を受けるかは、それぞれのアダプタが持つ。綴りを自由にすると、渡した先で
+/// 初めて落ちる値を設定できてしまうので enum にしてある。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Browser {
@@ -303,7 +300,7 @@ impl Default for Auth {
 
 /// 既定値の `NonZeroU32`。構築を1か所に集める。
 fn positive(value: u32) -> NonZeroU32 {
-    NonZeroU32::new(value).expect("既定値は 0 ではない")
+    NonZeroU32::new(value).expect("既定値は 1 以上")
 }
 
 impl Default for Schedule {
@@ -397,8 +394,7 @@ impl Config {
 
 /// 環境が決める場所。
 ///
-/// `directories` 経由で取るので、macOS では #2 が書いた
-/// `~/Library/Application Support/escrow` と同じ値になる。テストでは差し替える。
+/// macOS では #2 の `~/Library/Application Support/escrow`。テストでは差し替える。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Dirs {
     home: PathBuf,
@@ -433,7 +429,7 @@ impl Dirs {
         &self.home
     }
 
-    /// 設定ファイルの場所。**場所は固定**（読むために場所が要るため、#2）。
+    /// 設定ファイルの場所。**設定の外で決まる**（読むために場所が要るため、#2）。
     pub fn config_file(&self) -> PathBuf {
         self.config_dir.join("config.toml")
     }
@@ -474,7 +470,7 @@ impl Paths {
 /// [`std::path`] の概念ではないので、その一段だけがここの仕事。
 ///
 /// **成分の切り出しは [`Path::components`] に任せる。** 区切りが何文字か、
-/// 重複した区切りをどう畳むか、`~other` が別の成分かは、すべてそちらが答える。
+/// 重複した区切りをどうまとめるか、`~other` が別の成分かは、すべてそちらが答える。
 /// 自分で文字列を切ると環境差が入り込む。
 ///
 /// **相対パスはホーム基準にする。** プロセスの CWD を基準にすると、ターミナルから
@@ -704,7 +700,7 @@ interval_hours = 0
         assert_eq!(expand("/tmp/~/x", home), Path::new("/tmp/~/x"));
     }
 
-    /// 区切りの重複や `.` は [`Path::components`] が畳む。自分では扱わない。
+    /// 区切りの重複や `.` は [`Path::components`] がまとめる。自分では扱わない。
     #[test]
     fn the_path_parser_normalizes_the_rest() {
         let home = Path::new("/Users/t");
@@ -772,11 +768,11 @@ min_free_gib = 50
             .unwrap()
             .map(|e| e.unwrap().file_name())
             .collect();
-        assert_eq!(left, ["config.toml"], "一時ファイルが残っていない");
+        assert_eq!(left, ["config.toml"], "残るのは config.toml だけ");
         assert_eq!(Config::load(&path).unwrap().storage.min_free_gib, 99);
     }
 
-    /// `auto` の大文字小文字と前後の空白は正す。言語コードそのものは畳まない。
+    /// `auto` の大文字小文字と前後の空白は正す。言語コードそのものは触らない。
     #[test]
     fn the_auto_sentinel_tolerates_spelling() {
         for raw in ["auto", "AUTO", "Auto", "  auto  "] {

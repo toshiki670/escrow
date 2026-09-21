@@ -16,7 +16,7 @@ use escrow_domain::url::NormalizedUrl;
 use super::ReadModelRow;
 use crate::{EventStore, EventStoreError, RowError, Seq, content_type_of, normalized, timestamp};
 
-/// `item` の1行と、その状態を決めた最後のイベントの番号。ここから先はドメイン型。
+/// `item` の1行と、その項目の最後のイベントの番号。ここから先はドメイン型。
 struct Row {
     id: i64,
     source_id: i64,
@@ -417,7 +417,7 @@ mod tests {
     /// 崩し方ごとに、どのエラーになるはずかを見る述語。
     type Expected = fn(&RowError) -> bool;
 
-    /// 壊れた行ははっきり落とす。#1 の「`NULL` を許すのはこの列だけ」が
+    /// 壊れた行は `RowError` で弾く。#1 の「`NULL` を許すのはこの列だけ」が
     /// 文書ではなく parse として効いていること。
     #[tokio::test]
     async fn refuses_rows_that_break_the_null_rules() {

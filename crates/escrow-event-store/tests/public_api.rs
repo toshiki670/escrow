@@ -3,8 +3,8 @@
 //! `escrow-domain` のモジュール一覧と同じ形。用途ごとの関数を足そうとすると
 //! 表の編集が要るので、**必ず差分に現れる**。
 //!
-//! そのうえで #7 の受け入れ「リードモデルを直接書き換える関数が無いこと」を、名前ではなく
-//! **SQL の置き場所**で確かめる。リードモデルへ書く文が追記と作り直しの2ファイルにしか
+//! そのうえで、リードモデルを直接書き換える関数を公開 API に置かないこと（#15）を、名前では
+//! なく **SQL の置き場所**で確かめる。リードモデルへ書く文が追記と作り直しの2ファイルにしか
 //! 無い限り、ログとリードモデルがずれる書き方は存在しない。
 
 use std::collections::BTreeSet;
@@ -63,7 +63,7 @@ fn src() -> PathBuf {
 /// `src/` 以下の `.rs` を、crate 相対のパスと**本体だけ**の中身で返す。
 ///
 /// 末尾の `#[cfg(test)] mod tests` から先は落とす。リードモデルを壊してから作り直す確認の
-/// ように、テストはリードモデルへ直接書くことがある。見たいのは出荷するコードの経路のほう。
+/// ように、テストはリードモデルへ直接書くことがある。見たいのはテストの外のコードのほう。
 fn sources() -> Vec<(String, String)> {
     fn walk(dir: &Path, root: &Path, found: &mut Vec<(String, String)>) {
         for entry in std::fs::read_dir(dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display())) {
@@ -132,7 +132,7 @@ fn the_pool_never_leaves_the_crate() {
     );
 }
 
-/// リードモデルへ書く SQL が、追記と作り直しの2ファイルにしか無いこと（#7 の受け入れ）。
+/// リードモデルへ書く SQL が、追記と作り直しの2ファイルだけに在ること（#7 の受け入れ）。
 #[test]
 fn only_appending_and_rebuilding_touch_the_read_model() {
     let allowed: BTreeSet<&str> = WRITES_THE_READ_MODEL.iter().copied().collect();

@@ -148,7 +148,7 @@ mod tests {
             })
             .await;
 
-        assert!(again.is_err(), "別の持ち主でも同じ配信元は二度入らない");
+        assert!(again.is_err(), "同じ配信元は持ち主が違っても1回だけ");
     }
 
     /// #1 の「持ち主のいない `Source` は作れない」。

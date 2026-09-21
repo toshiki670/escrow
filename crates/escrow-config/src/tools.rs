@@ -1,11 +1,11 @@
 //! 外部ツールを探す。
 //!
 //! **この解決器は crate に1つだけ置く。** #5 のアダプタが実際に呼ぶ場所と、
-//! #2 の設定画面が「どこで見つかったか」を表示する値は、同じ1つの値にする。
+//! #2 の設定画面が「どこで見つかったか」と表示する場所は、同じ1つにする。
 //! 2か所に書くと、画面の表示と実際の挙動がずれる。
 //!
 //! 探し方は PATH が先、`tools.extra_paths` が後（#2）。GUI アプリはターミナルと違う
-//! PATH で動く（`.zshrc` を読まない）ので、Homebrew や mise で入れたものを
+//! PATH で起動される（`.zshrc` を読まない）ので、Homebrew や mise で入れたものを
 //! 見つけられないことがある。`extra_paths` はそのときに探す場所。
 
 use std::ffi::OsStr;
@@ -16,8 +16,8 @@ use std::path::{Path, PathBuf};
 ///
 /// 一覧の出所は #5 の対応表。#2 の設定画面と #3 の `depends_on` もそこから来る。
 ///
-/// `ffmpeg` は #5 が「yt-dlp が内部で呼ぶので escrow は直接叩かない」としていたが、
-/// 文字起こしのアダプタが直接使う。`whisper-cli` が WAV しか読めないため。
+/// `ffmpeg` は yt-dlp が内部で呼ぶのに加えて、文字起こしのアダプタが直接叩く（#5）。
+/// `whisper-cli` が WAV しか読めないため。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Tool {
     YtDlp,
@@ -124,7 +124,7 @@ impl Resolver {
             .collect()
     }
 
-    /// 見つからなかったものだけ。取得を始める前の検査になる。
+    /// 見つからなかったものだけ（#2 の `[tools]` の一覧）。
     pub fn missing(&self) -> Vec<Tool> {
         Tool::ALL
             .into_iter()

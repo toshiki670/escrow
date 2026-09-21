@@ -62,7 +62,7 @@ impl EventStore {
         Ok(Some(log_of(rows)?))
     }
 
-    /// ログをリプレイした、いまの状態。リードモデルを読まない。
+    /// ログをリプレイした、いまの `Item`。リードモデルを読まない。
     pub async fn replay(&self, id: ItemId) -> Result<Option<Item>, EventStoreError> {
         let Some(log) = self.log(id).await? else {
             return Ok(None);

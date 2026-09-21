@@ -1,6 +1,6 @@
 //! 項目のイベントと、そのリードモデル（#15）。
 //!
-//! 誕生（[`EventStore::discover`]）と追記（[`EventStore::append`]）、`rebuild` がそこから導く
+//! 誕生（[`EventStore::discover`]）と追記（[`EventStore::append`]）と、そこから導ける
 //! リードモデル。
 
 use escrow_domain::item::{Discovered, Item, ItemId};
@@ -16,7 +16,7 @@ mod replay;
 pub(crate) use read_model::Columns;
 pub(crate) use replay::{EventRow, log_of};
 
-/// リードモデルから読んだ1件と、その状態を決めた最後のイベントの番号。
+/// リードモデルから読んだ1件と、その項目の最後のイベントの番号。
 ///
 /// 次のイベントを書くときにこの `seq` を渡すので、**読んでから書くまでの間に誰かが
 /// 動かしていれば `UNIQUE` が弾く**。読み出しが必ず番号を一緒に返すので、根拠を持たずに
@@ -50,7 +50,7 @@ pub struct Log {
 }
 
 impl Log {
-    /// ログをリプレイして、いまの状態を作る。
+    /// ログをリプレイして、いまの `Item` を作る。
     ///
     /// リプレイの1歩は #1 の状態遷移そのもの。イベントを保存する形にしたので、手で書いた
     /// 全域関数がそのままここで使える（#15）。

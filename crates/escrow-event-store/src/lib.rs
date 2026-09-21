@@ -1,23 +1,19 @@
 //! イベントの追記とリードモデル（#15）。
 //!
-//! 唯一の真実は `item_event` で、追記しかしない。`item` は `rebuild` がそこから導く
-//! リードモデルで、**いつでも捨てて作り直せる**。読むのはリードモデル、書くのはイベント、
-//! という分け方（CQRS）。
+//! 唯一の真実は `item_event` で、追記しかしない。`item` はそこから導けるリードモデルで、
+//! **いつでも捨てて作り直せる**。読むのはリードモデル、書くのはイベント、という分け方（CQRS）。
 //!
 //! **イベントを書く経路は [`EventStore::discover`] と [`EventStore::append`] の2つだけ。**
 //! リードモデルはその2つを通ってしか動かないので、ログとリードモデルがずれる書き方が
 //! そもそも書けない。
-//! 何を公開してよいかは `tests/public_api.rs` の表が決める。
 //!
-//! **Young, 2010 の基本の Event Store が持つのは、イベントの表と Aggregates 表（aggregate
-//! ごとのいまの版を非正規化して持つ。版はイベントの表から導ける）で、操作は `SaveChanges` /
-//! `GetEventsFor` の2つだけ。** escrow の [`EventStore`] は版の表を置かず、版はイベントの表
-//! から都度導く。そこに、どのイベントからも導けない catalog（`person` / `source` /
-//! `exclude`。いまの値の行を直接書く）とリードモデル（`item`）を同じ SQLite に置き、
-//! リードモデルへの問い合わせを公開 API に持つ（#84）。
+//! Young, 2010 の基本の Event Store から何を変えたかは、`docs/rules/architecture.md` の表の
+//! 「状態の持ち方」の行（#84）。
 //!
 //! 集約でディレクトリを切っていて、いまは `item` だけ。このファイルには集約に
 //! 依存しない仕組み — 接続・番号・行を読むときの失敗 — を置く。
+
+// 何を公開してよいかは `tests/public_api.rs` の表が決める。
 
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
@@ -128,7 +124,7 @@ impl EventStoreError {
 /// 行をドメイン型へ写せなかったとき。
 ///
 /// #1 が「`NULL` を許すのはこの列だけ」と決めたぶんが、ここで実際に効く。
-/// 黙って捨てるとイベントストアが静かに壊れるので、名前を付けて外へ出す。
+/// 黙って無視するとイベントストアが静かに壊れるので、名前を付けて外へ出す。
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum RowError {
     #[error("item {id}: 知らない種別 `{value}`")]
@@ -275,7 +271,7 @@ impl EventStore {
 ///
 /// 正規化を通した値しか入れないので、ずれていたら誰かが手で書き換えたか、
 /// 正規化の規則が変わったかのどちらか。黙って新しい形へ読み替えると `UNIQUE` と
-/// 食い違うので、はっきり落とす。
+/// 食い違うので、`RowError` で弾く。
 fn normalized(id: i64, column: &'static str, value: &str) -> Result<NormalizedUrl, RowError> {
     let bad = || RowError::UnnormalizedUrl {
         id,
@@ -363,7 +359,7 @@ mod tests {
         );
     }
 
-    /// 開き直しても `open` がリードモデルを二重に作らないこと。
+    /// 開き直しても、リードモデルは1つのまま。
     ///
     /// `_sqlx_migrations` が覚えているのは移行だけで、リードモデルはその外。
     /// 覚えていない側で `IF NOT EXISTS` が効いていることを確かめる。

@@ -11,8 +11,7 @@ use crate::{EventStore, EventStoreError, READ_MODEL, WRITE};
 impl EventStore {
     /// リードモデルを DROP して作り直し、ログから埋め直す。
     ///
-    /// 戻すのは作り直した項目の数。DDL の写しは `read_models/item.sql` の1つきりで、
-    /// 起動時にリードモデルを作るのと同じものを流す。
+    /// 戻すのは作り直した項目の数。起動時にリードモデルを作るのと同じ DDL を流す。
     pub async fn rebuild(&self) -> Result<u64, EventStoreError> {
         let mut tx = self.pool.begin_with(WRITE).await?;
 
@@ -208,8 +207,7 @@ mod tests {
     /// 引き渡し済みの項目と、繋がりを持つ投稿も、作り直しで元に戻ること。
     ///
     /// 状態と対でしか意味を持たない値（`release_reference`）と、subtype ごとの値
-    /// （`title` / `body` / 繋がりの URL）が、どれもリードモデルの側にしか無い状態に
-    /// なっていないことの確認（#1）。
+    /// （`title` / `body` / 繋がりの URL）が、どれもログから戻ることの確認（#1）。
     #[tokio::test]
     async fn released_items_and_linked_posts_survive_a_rebuild() {
         let (store, source) = crate::testing::seeded().await;
