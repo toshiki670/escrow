@@ -3,18 +3,20 @@
 //! 最上位は `app/`（Composition Root と、それが組み立てる crate）と `ui/`（入口）。
 //! `escrow-app` の配下は入口を知らず、入口は `escrow-app` しか知らない（#82）。`app/crates/`
 //! の中では、子（`scheduler/external`）を依存に持てるのは親だけ、`slices/` の中は互いを知らない
-//! （#15）。横並びの `event-store` / `config` / `scheduler` / `external` / スライスの間だけは
-//! 構造から決まらないので、その分を [`SIDE_BY_SIDE`] の表で持つ。
+//! （`docs/rules/architecture.md`「段4 のスライスは互いを知らない」）。横並びの `event-store` /
+//! `config` / `scheduler` / `external` / スライスの間だけは構造から決まらないので、その分を
+//! [`SIDE_BY_SIDE`] の表で持つ。
 //!
-//! #13 の「外部アクセスはすべて1か所を通す」を守らせているのは規約ではなく **crate の置き場所**
-//! で、外部ツールの crate が `scheduler/` の子である限り、迂回はコンパイルエラーになる。
+//! #13 の「外部アクセスはすべて1か所を通す」を守らせているのは規約ではなく **crate の分け方**
+//! で、外部ツールの crate を依存に持つのが `escrow-scheduler` だけである限り、迂回はコンパイル
+//! エラーになる。その前提を、`external` が `scheduler/` の子であるという置き場所で固定する。
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use escrow_tests::{Member, members};
 
-/// Composition Root（#82）。`app/crates/` の中を組み立てる。
+/// 段5 の、組み立てる crate（#82）。`app/crates/` の中を組み立てる。
 const APP: &str = "app";
 
 /// `escrow-app` が組み立てる crate の置き場所。この下からの相対パスが役割の語。
@@ -26,19 +28,19 @@ const DOMAIN: &str = "domain";
 /// 段4 のスライスの群。`app/crates/` からの相対。
 const SLICES: &str = "slices";
 
-/// 入口。`escrow-app` だけを見る。**緩めて `app/crates/` を見せない** — 緩めた瞬間に、
+/// 段5 の入口。`escrow-app` だけを見る。**緩めて `app/crates/` を見せない** — 緩めた瞬間に、
 /// 入口ごとにイベントストアを開いて組み立て直す経路ができ、画面ごとに足す関数が1つの入口にしか
 /// 届かなくなる。
 const UI: &str = "ui";
 
-/// ワークスペース全体の守り。読むのは `Cargo.toml` とソースと規約だけ。
+/// ワークスペース全体の守り。持ってよい依存は `tests/Cargo.toml` のとおり。
 const TESTS: &str = "tests";
 
 /// 外部ツールを呼ぶ crate と、その場所。
 ///
 /// 包含の規則は「在るなら守る」しか言えず、`app/crates/` 直下へ動かすと「external を知るのは
-/// scheduler だけ」（#13）が黙って消える。crate 名で書くのは、改名したときに次のテストが
-/// 黙って通るのを防ぐため。
+/// scheduler だけ」（#13）が黙って消える。crate 名で書くのは、改名したときに
+/// [`the_external_tools_stay_under_the_scheduler`] が黙って通るのを防ぐため。
 const EXTERNAL: (&str, &str) = ("escrow-external", "app/crates/scheduler/external");
 
 /// `app/crates/` に横並びで置く crate の間で、左が右を依存に持ってよいもの。
@@ -48,11 +50,13 @@ const EXTERNAL: (&str, &str) = ("escrow-external", "app/crates/scheduler/externa
 /// **緩めて「横並びは全部よい」にしない** — スライスが `config` を読む経路ができる。設定の値は
 /// `escrow-app` と `scheduler` が読んでスライスへ渡す。
 const SIDE_BY_SIDE: &[(&str, &[&str])] = &[
+    // 段2 — 永続化・設定・外部ツール。config だけは external が読む。
     ("event-store", &[]),
     ("config", &[]),
-    ("scheduler", &["config", "scheduler/external"]),
     ("scheduler/external", &["config"]),
-    // handover は scheduler 抜きで足りる（#15）。表が言うのは持ってよいものの上限。
+    // 段3 — 外部アクセスの受付。external を依存に持つ唯一の crate。
+    ("scheduler", &["config", "scheduler/external"]),
+    // 段4 — スライス。handover は scheduler 抜きで足りる（#15）。表が言うのは持ってよいものの上限。
     ("slices", &["event-store", "scheduler"]),
 ];
 
@@ -108,14 +112,16 @@ fn violation(from: &Member, to: &Member, dirs: &BTreeSet<&Path>) -> Option<&'sta
     match (from_place, to_place) {
         (Place::Ui, Place::App) => None,
         (Place::Ui, _) => Some("入口が依存に持てるのは escrow-app だけ（#82）"),
-        (Place::Tests, _) => Some("tests/ が読むのは Cargo.toml とソースと規約だけ"),
+        (Place::Tests, _) => {
+            Some("tests/ が読むのは Cargo.toml とソースと規約だけ（tests/Cargo.toml）")
+        }
         (Place::App, Place::Crate(_)) => None,
         (Place::App, _) => Some("escrow-app が組み立てるのは app/crates/ の中"),
         (Place::Crate(_), Place::Crate(role)) if role == Path::new(DOMAIN) => None,
         (Place::Crate(from_role), Place::Crate(to_role))
             if from_role.starts_with(SLICES) && to_role.starts_with(SLICES) =>
         {
-            Some("スライスは互いを知らない（#15）")
+            Some("段4 のスライスは互いを知らない（docs/rules/architecture.md）")
         }
         (Place::Crate(from_role), Place::Crate(to_role)) => {
             let from_key = row_key(from_role);
