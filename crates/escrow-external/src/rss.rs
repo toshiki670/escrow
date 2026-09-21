@@ -9,8 +9,8 @@
 //! # 1件から分かること
 //!
 //! `link` と `title` と `published` だけ。**配信かどうかの印も、開始時刻も無い。**
-//! `/shorts/` と `/watch?v=` は `link` で分かるが、`/watch?v=` の側は動画か配信かを
-//! 語らない。そこだけ1件ごとの追加取得で埋める（[`crate::ytdlp::YtDlp::schedule`]）。
+//! `/shorts/` と `/watch?v=` は `link` で分かるが、`/watch?v=` の側は動画か配信かは
+//! 決まらない。そこだけ1件ごとの追加取得（yt-dlp）で埋める。
 
 use std::time::Duration;
 
@@ -47,7 +47,7 @@ pub(crate) fn feed_url(source: &NormalizedUrl) -> Option<String> {
 /// `<entry>` だけなので混ざらない。
 ///
 /// **`channelId` を必須にしている。** 項目が0件なのは、まだ何も上げていない
-/// 配信元でありうる正しい姿だが、エラーページを渡された姿でもある。区別が付かないと
+/// 配信元でありうる正しい状態だが、エラーページが返ってきた状態でもある。区別が付かないと
 /// 「消えたチャンネル」が「新着なし」として静かに通る。フィードなら必ず在って
 /// エラーページには無いものを1つ要求して、そこで分ける。
 #[derive(Debug, Deserialize)]
@@ -62,7 +62,7 @@ struct Feed {
 struct FeedEntry {
     title: String,
     link: EntryLink,
-    /// 枠を作った時刻。予約枠は、作られた瞬間にここへ出る（#5）。
+    /// 枠を作った時刻。予約枠は、配信者が作った瞬間にここへ出る（#5）。
     published: String,
 }
 
@@ -74,12 +74,11 @@ struct EntryLink {
 
 /// フィードで見つけた1件。
 ///
-/// [`crate::Found`] にはまだ足りない — `/watch?v=` の側は種別が
-/// 決まっていない。
+/// [`crate::Found`] になる前の形。`/watch?v=` の側の種別は、追加取得で埋める。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Sighting {
     pub url: NormalizedUrl,
-    /// `link` が語る種別。`/shorts/` なら決まり、`/watch?v=` なら決まらない。
+    /// `link` から決まる種別。`/shorts/` なら決まり、`/watch?v=` なら決まらない。
     ///
     /// **正規化する前の `link` から決める**（#1）。`/shorts/<id>` を
     /// `/watch?v=<id>` へ潰すと、ショートと動画を分ける唯一の手掛かりが消える。
@@ -117,8 +116,8 @@ fn parse_error(detail: &dyn std::fmt::Display) -> AdapterError {
 
 /// フィードを取ってくるもの。
 ///
-/// cookie を持たない。#5 の「YouTube の検知は認証不要」を、渡す手段を持たない形で
-/// 守る。繰り返し叩く経路が匿名なので、**賭けているものがアカウントではなくなる**。
+/// 匿名で叩く。#5 の表の「YouTube の検知（RSS と追加取得）— 不要」を、cookie を渡す手段を
+/// 持たない形で守る。繰り返し叩く経路が匿名なので、**賭けているものがアカウントではなくなる**。
 #[derive(Debug, Clone)]
 pub struct Rss {
     client: reqwest::Client,
@@ -162,7 +161,7 @@ impl Rss {
                 url: source.as_str().to_owned(),
             });
         }
-        // 断られたことは一時的な失敗と分ける（#13）。**この経路にだけ合図が在る** —
+        // 相手が断ったことは一時的な失敗と分ける（#13）。**この経路にだけ合図が在る** —
         // yt-dlp と gallery-dl はどの失敗でも終了コードが 1 で、文言から拒否を
         // 読み取るのは当てにならない（#5）。
         if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
@@ -181,7 +180,7 @@ impl Rss {
 
 /// `Retry-After` が指す待ち時間。
 ///
-/// 読むのは秒数の形だけ。HTTP-date の形は空を返し、#2 の既定へ落とす — 日時の書式を
+/// 読むのは秒数の形だけ。HTTP-date の形は空を返し、#2 の既定にする — 日時の書式を
 /// 自前で解くより、設定した待ち時間を使うほうが外れ方が小さい。
 fn retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
     headers
@@ -226,7 +225,7 @@ mod tests {
         );
     }
 
-    /// 秒数の `Retry-After` は読み、それ以外は空にして既定へ落とす。
+    /// 秒数の `Retry-After` は読み、それ以外は空にして既定にする。
     #[test]
     fn retry_after_is_read_only_in_its_seconds_form() {
         let header = |value: &str| {
@@ -262,7 +261,7 @@ mod tests {
         assert_eq!(parse_feed(FEED).unwrap().len(), 15);
     }
 
-    /// ショートは `link` で決まる。#1 の「種別は正規化する前の入口から決める」。
+    /// ショートは `link` で決まる。#1 の「`content_type` は正規化する前の入口から決める」。
     #[test]
     fn shorts_are_told_apart_by_their_link() {
         let sightings = parse_feed(FEED).unwrap();
@@ -286,7 +285,7 @@ mod tests {
         );
     }
 
-    /// **フィードは配信かどうかを語らない。**
+    /// **配信かどうかは追加取得で決まること。**
     ///
     /// `wwJV2mo2US4` は取得した時点で配信中だったが、他の `/watch?v=` の項目と
     /// 見分けが付かない。動画か配信かも、開始時刻も、ここには無い。だから1件ごとの
@@ -304,7 +303,7 @@ mod tests {
         let live = undecided
             .iter()
             .find(|s| s.url.as_str().ends_with("wwJV2mo2US4"))
-            .expect("配信中だった項目が居ること");
+            .expect("配信中だった項目が在ること");
         assert_eq!(live.hint, TypeHint::YoutubeUnknown);
     }
 
@@ -324,7 +323,7 @@ mod tests {
         );
     }
 
-    /// フィードでないものを渡されたら落ちること。
+    /// フィードでないものが来たら落ちること。
     ///
     /// 黙って空の一覧を返すと、エラーページが「新着なし」として通ってしまう。
     #[test]

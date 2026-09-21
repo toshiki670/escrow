@@ -7,14 +7,14 @@
 //! # 認証は経路ごとに決まる
 //!
 //! #5 が「認証は人が明示した対象にしか掛からない」と決めたので、cookie は共通の
-//! 前置きから外し、要る呼び出しだけが足す。
+//! 引数から外し、要る呼び出しだけが足す。
 //!
 //! | 呼び出し | 認証 | 理由 |
 //! |---|---|---|
-//! | [`schedule_argv`] | 無し | 検知の追加取得。繰り返し叩くので匿名に保つ |
-//! | [`describe_argv`] | cookie | 人が登録した URL。メン限がありうる |
-//! | [`probe_argv`] | cookie | 生存確認。匿名で足りるかは未検証（#5） |
-//! | [`download_argv`] | cookie | メン限の取得に要る |
+//! | 検知の追加取得 | 無し | 繰り返し叩くので匿名に保つ |
+//! | 人が登録した URL の中身 | cookie | メン限がありうる |
+//! | 生存確認 | cookie | 匿名で足りるかは未検証（#5） |
+//! | 取得 | cookie | メン限の取得に要る |
 
 use std::path::{Path, PathBuf};
 
@@ -35,7 +35,7 @@ const PROGRAM: &str = "yt-dlp";
 /// このアダプタが cookie を取り出せるブラウザ。
 ///
 /// `--cookies-from-browser` が挙げるもの。escrow の [`Browser`] がこの部分集合で
-/// あることは `escrow-external` の `every_configurable_browser_works_with_every_adapter` が確かめる。yt-dlp は `whale` も受けるが、
+/// あることは、この crate のテストが確かめる。yt-dlp は `whale` も受けるが、
 /// 他のアダプタが受けないので [`Browser`] には入っていない。
 pub const SUPPORTED_BROWSERS: &[Browser] = &[
     Browser::Brave,
@@ -67,7 +67,7 @@ impl YtDlp {
 pub struct Schedule {
     /// 動画か配信か。`live_status` が決める。
     pub media_type: MediaType,
-    /// 予約枠なら開始予定時刻。始まってしまった配信には入らない。
+    /// 予約枠なら開始予定時刻。入るのは開始前の配信だけ。
     pub scheduled_start_at: Option<Timestamp>,
 }
 
@@ -76,7 +76,7 @@ pub struct Schedule {
 /// どの呼び出しにも渡すもの。**cookie はここに入れない。**
 fn base(program: &Path) -> Invocation {
     Invocation::new(program)
-        // 利用者の設定ファイルに引きずられない。出力形式を変えられていると、
+        // 利用者の設定ファイルを無視して動かす。利用者が出力形式を変えていると、
         // 読み取りの層が理由なく落ちる。
         .arg("--ignore-config")
         .arg("--no-warnings")
@@ -89,7 +89,7 @@ fn with_cookies(invocation: Invocation, browser: Browser) -> Invocation {
         .arg(browser.as_str())
 }
 
-/// 検知の追加取得。フィードが語らない「動画か配信か」と開始時刻を、ここで埋める。
+/// 検知の追加取得。フィードからは決まらない「動画か配信か」と開始時刻を、ここで埋める。
 ///
 /// 引数は [`describe_argv`] と同じで、違うのは cookie の有無だけ。
 pub(crate) fn schedule_argv(program: &Path, url: &NormalizedUrl) -> Invocation {
@@ -121,7 +121,7 @@ pub(crate) fn probe_argv(program: &Path, url: &NormalizedUrl, browser: Browser) 
 /// 出力の名前は #1 の `<kind>.<ordinal>.<ext>`。拡張子は yt-dlp が決めるので、
 /// こちらは stem だけ指定して、落ちたものを後から走査する。
 ///
-/// 配信は `--live-from-start` で頭から録る。予約枠を待つことはしない（#5）。
+/// 配信は `--live-from-start` で頭から録る。予約枠はプロセスを抱えて待たない（#5）。
 pub(crate) fn download_argv(
     program: &Path,
     url: &NormalizedUrl,
@@ -143,7 +143,7 @@ pub(crate) fn download_argv(
 /// `--dump-json` の、escrow が使う項目だけ。
 ///
 /// 知らないキーは無視する。yt-dlp は項目を足すので、`deny_unknown_fields` に
-/// すると足された日に読めなくなる。
+/// すると足した日に読めなくなる。
 #[derive(Debug, Deserialize)]
 struct VideoMetadata {
     webpage_url: String,
@@ -159,8 +159,8 @@ struct VideoMetadata {
 impl VideoMetadata {
     /// `live_status` を #1 の種別へ写す。
     ///
-    /// ショートはここでは決まらない — 正規形が動画と同じ `/watch?v=` なので、
-    /// yt-dlp から見て両者は区別が付かない。決めるのはフィードの `link`（#1）。
+    /// ショートを決めるのはフィードの `link`（#1） — 正規形が動画と同じ `/watch?v=` なので、
+    /// yt-dlp から見て両者は区別が付かない。
     ///
     /// アーカイブも配信中も `youtube_live`。#1 の「配信中かアーカイブかは種別
     /// ではない」。
@@ -237,7 +237,7 @@ pub(crate) fn parse_probe(completed: &Completed) -> Presence {
 
 /// 消えたと断定できる応答か。
 ///
-/// **一覧の保守が正しさを左右しない。** 外れれば `Unknown` になり、`holding` の
+/// **一覧は便宜で、正しさは #5 の非対称性が持つ。** 外れれば `Unknown` になり、`holding` の
 /// まま次の回へ回るだけ。当たれば `kept` へ早く移せる、という便宜（#5）。
 fn says_gone(stderr: &str) -> bool {
     const GONE: [&str; 4] = [
@@ -352,7 +352,7 @@ impl YtDlp {
         if assets.is_empty() {
             return Err(AdapterError::Parse {
                 program: PROGRAM.to_owned(),
-                detail: "成功したが実体が置かれていない".to_owned(),
+                detail: "成功したが実体が無い".to_owned(),
             });
         }
         Ok(assets)
@@ -403,7 +403,7 @@ mod tests {
         );
     }
 
-    /// **検知は cookie を渡さない**（#5）。
+    /// **検知は匿名で叩く**（#5）。
     ///
     /// 繰り返し叩くのはこの経路なので、匿名に保つことで賭けているものが
     /// アカウントではなくなる。引数が1つでも増えたら落ちるよう、無いことを
@@ -422,7 +422,7 @@ mod tests {
 
     /// 認証が要る経路は、#2 の1つの設定から来たブラウザを渡す。
     ///
-    /// gallery-dl だけ認証が効いて yt-dlp が落ちる、という非対称を作らない。
+    /// yt-dlp も gallery-dl と同じ1つの設定を受けるので、認証の効き方が2つのツールで揃う。
     #[test]
     fn authenticated_routes_carry_the_configured_browser() {
         for invocation in [
@@ -441,7 +441,7 @@ mod tests {
         }
     }
 
-    /// 利用者の設定ファイルに引きずられないこと。手元の `~/.config/yt-dlp` が
+    /// 利用者の設定ファイルを無視すること。手元の `~/.config/yt-dlp` が
     /// 出力形式を変えていると、読み取りの層が理由なく落ちる。
     #[test]
     fn every_call_ignores_the_users_own_config() {
@@ -471,7 +471,7 @@ mod tests {
         );
         let args = invocation.args_as_str().unwrap();
 
-        // #5「配信は --live-from-start で頭から録る。予約枠は待たない」
+        // #5「予約枠はプロセスを抱えて待たない」。配信は `--live-from-start` で頭から録る
         assert!(args.contains(&"--live-from-start"));
         assert!(!args.iter().any(|a| a.starts_with("--wait-for-video")));
         // #1 の `<kind>.<ordinal>.<ext>`。拡張子は yt-dlp が決める。
@@ -561,7 +561,7 @@ mod tests {
         );
     }
 
-    /// yt-dlp は出力の項目を足す。知らないキーで落ちてはいけない。
+    /// yt-dlp は出力の項目を足す。知らないキーが来ても読めること。
     #[test]
     fn unknown_keys_do_not_break_the_reader() {
         let json = r#"{"webpage_url":"https://www.youtube.com/watch?v=dQw4w9WgXcQ",
@@ -632,7 +632,7 @@ mod tests {
         }
     }
 
-    /// 成功していても出力が空なら「在る」とは言わない。
+    /// 成功していても出力が空なら `Unknown`。「在る」と言えるのは出力が在るときだけ。
     #[test]
     fn an_empty_answer_is_not_a_confirmation() {
         let empty = Completed {

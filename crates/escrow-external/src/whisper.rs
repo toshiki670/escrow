@@ -2,7 +2,7 @@
 //!
 //! # ffmpeg を挟む理由
 //!
-//! `whisper-cli` は **WAV しか読めない**（実測。m4a を渡すと
+//! `whisper-cli` が**読めるのは WAV だけ**（実測。m4a を渡すと
 //! `read_audio_data: failed to read audio data`）。取得したものは mp4 や m4a なので、
 //! 16kHz モノラルの PCM へ落としてから渡す。
 //!
@@ -57,7 +57,7 @@ impl Whisper {
 /// 16kHz モノラルの PCM。映像は捨てる。
 pub(crate) fn convert_argv(ffmpeg: &Path, input: &Path, output: &Path) -> Invocation {
     Invocation::new(ffmpeg)
-        // 端末を持たないので、上書きの問い合わせで止まらせない。
+        // 端末が無い場所で動くので、対話の入力を閉じて動かす。
         .arg("-nostdin")
         .args(["-loglevel", "error"])
         .arg("-i")
@@ -89,7 +89,7 @@ pub(crate) fn transcribe_argv(
         .arg("-l")
         .arg(language.to_string())
         .arg("-ovtt")
-        // 結果以外を出させない。読み取る側が余計な行を見なくて済む。
+        // 出すのは結果だけ。読み取る側が余計な行を見なくて済む。
         .arg("-np")
         .arg("-of")
         .arg(output_stem)
@@ -113,7 +113,7 @@ impl Transcribe for Whisper {
         Box::pin(async move {
             let asset = transcript_asset(ordinal);
 
-            // 変換したものは残さない。落ちても消える場所へ置く。
+            // 変換したものは文字起こしの後は要らないので、落ちても消える場所へ置く。
             let scratch = tempfile::tempdir().map_err(|source| AdapterError::Launch {
                 program: FFMPEG.to_owned(),
                 source,
@@ -144,7 +144,7 @@ impl Transcribe for Whisper {
                 });
             }
 
-            // 成功と言われても、書かれていなければ文字起こしは無い。
+            // whisper が成功と言っても、ファイルを書いていなければ文字起こしは無い。
             let written = into.join(asset.file_name());
             if !written.is_file() {
                 return Err(AdapterError::Parse {
@@ -176,11 +176,11 @@ mod tests {
         );
         let args = invocation.args_as_str().unwrap();
 
-        // whisper-cli は 16kHz モノラルの PCM しか読めない。
+        // whisper-cli が読むのは 16kHz モノラルの PCM だけ。
         assert!(args.windows(2).any(|w| w == ["-ar", "16000"]));
         assert!(args.windows(2).any(|w| w == ["-ac", "1"]));
         assert!(args.windows(2).any(|w| w == ["-c:a", "pcm_s16le"]));
-        // 映像は要らない。
+        // 映像は文字起こしに要らないので、音声だけを取り出す。
         assert!(args.contains(&"-vn"));
     }
 
@@ -272,7 +272,7 @@ mod tests {
 
         assert_eq!(asset.file_name(), "transcript.1.vtt");
         let written = std::fs::read_to_string(dir.path().join(asset.file_name())).unwrap();
-        assert!(written.starts_with("WEBVTT"), "VTT として書かれていること");
+        assert!(written.starts_with("WEBVTT"), "VTT として書いてあること");
     }
 
     fn find(program: &str) -> Option<PathBuf> {
