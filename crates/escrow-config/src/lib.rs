@@ -4,7 +4,7 @@
 //! 認証の取得元、ファイルの置き場所 — がここに来る。
 //!
 //! **設定ファイルの項目と設定画面の項目は一対一に保つ**（#2）。そのため [`Config`] は
-//! ファイルに書いてあるとおりの値を持ち、`~` の展開も `db_path` の既定も畳み込まない。
+//! ファイルに書いてあるとおりの値を持ち、`~` の展開も `db_path` の既定も当てない。
 //! 環境と突き合わせて実際の場所を出すのは [`Paths`] の仕事で、下流はそちらだけを見る。
 
 pub mod tools;
@@ -36,7 +36,7 @@ pub enum ConfigError {
 
 /// #2 の項目表。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-// 綴り違いを黙って既定へ落とすと、設定したつもりが効かない。はっきり落とす。
+// 綴り違いははっきり落とす。黙って既定へ落とすと、設定したつもりが効かない。
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     pub storage: Storage,
@@ -58,7 +58,7 @@ pub struct Storage {
     pub media_dir: String,
     /// DB の場所。空なら Application Support 配下。
     pub db_path: String,
-    /// これを下回ったら取得を始めない。単位は GiB（2^30 バイト、#2）。
+    /// 取得を始める前に要る空き。単位は GiB（2^30 バイト、#2）。
     pub min_free_gib: u32,
 }
 
@@ -68,7 +68,7 @@ pub struct Check {
     /// `holding` の項目をまとめて確認する間隔。
     ///
     /// 検知（`Source.priority` と #13 の予算）とは別の概念なので、こちらは共通設定（#1）。
-    /// ディスクが逼迫したら詰める（#7 の巡回）。
+    /// ディスクが逼迫したら間隔を詰める（#7 の巡回）。
     pub interval_hours: NonZeroU32,
 }
 
@@ -96,7 +96,7 @@ pub struct Transcribe {
 pub struct Auth {
     /// cookie を取り出すブラウザ。
     ///
-    /// **生の認証情報は持たない。** cookie 本体をファイルに書かず、取り出し元だけを持つ（#2）。
+    /// **ファイルに置くのは取り出し元だけ**で、cookie 本体（生の認証情報）は書かない（#2）。
     /// プラットフォームごとに分けないのは、同じブラウザにログインしているため。
     pub cookies_from: Browser,
 }
@@ -169,8 +169,8 @@ impl TryFrom<String> for Language {
     type Error = EmptyLanguage;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        // 前後の空白と `auto` の綴り揺れだけ吸収する。言語コードそのものは
-        // 文字起こし側が解釈するので、escrow は畳まない。
+        // 前後の空白と `auto` の大文字小文字だけ正す。言語コードそのものは
+        // 文字起こし側が解釈するので、escrow は触らない。
         let trimmed = value.trim();
 
         if trimmed.is_empty() {
@@ -208,10 +208,8 @@ impl fmt::Display for Language {
 /// どのアダプタでも使えるものだけ。渡らない先もある — YouTube の検知は匿名で、
 /// cookie を受け取る手段を持たない（#5）。
 ///
-/// どのアダプタが何を受けるかは、それぞれのアダプタが持つ
-/// （`escrow_external::<tool>::SUPPORTED_BROWSERS`）。ここが部分集合であることは
-/// `escrow-external` のテストが確かめる。綴りを自由にすると、渡した先で初めて
-/// 落ちる値を設定できてしまうので enum にしてある。
+/// どのアダプタが何を受けるかは、それぞれのアダプタが持つ。綴りを自由にすると、渡した先で
+/// 初めて落ちる値を設定できてしまうので enum にしてある。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Browser {
@@ -302,7 +300,7 @@ impl Default for Auth {
 
 /// 既定値の `NonZeroU32`。構築を1か所に集める。
 fn positive(value: u32) -> NonZeroU32 {
-    NonZeroU32::new(value).expect("既定値は 0 ではない")
+    NonZeroU32::new(value).expect("既定値は 1 以上")
 }
 
 impl Default for Schedule {
@@ -330,7 +328,7 @@ impl Default for Limits {
 impl Config {
     /// 設定ファイルを読む。**無ければ既定を返す。**
     ///
-    /// 初回起動でファイルが無いのは異常ではない。壊れている場合だけ落とす。
+    /// 初回起動ではファイルが無いのが普通。壊れている場合だけ落とす。
     pub fn load(path: &Path) -> Result<Self, ConfigError> {
         let text = match std::fs::read_to_string(path) {
             Ok(text) => text,
@@ -346,12 +344,11 @@ impl Config {
         Self::from_toml(&text)
     }
 
-    /// 設定画面から書き戻す。**コメントは保持しない**（#2）。
+    /// 設定画面から書き戻す。**書くのは項目だけで、TOML のコメントは消える**（#2）。
     ///
-    /// 同じディレクトリの一時ファイルへ書いてから rename する。途中で落ちても、
-    /// 切れた設定ファイルが残らない。[`Config::load`] は無いファイルだけ既定に
-    /// 落として壊れたファイルは落とすので、**自分の書き込みでその状態を作らない**
-    /// ようにしておく。
+    /// 同じディレクトリの一時ファイルへ書いてから rename する。途中で落ちても、元の
+    /// ファイルがそのまま残る。[`Config::load`] は無いファイルだけ既定に落として壊れた
+    /// ファイルは落とすので、**自分の書き込みでは「無い」か「完全」のどちらかにしておく**。
     pub fn save(&self, path: &Path) -> Result<(), ConfigError> {
         use std::io::Write as _;
 
@@ -397,8 +394,7 @@ impl Config {
 
 /// 環境が決める場所。
 ///
-/// `directories` 経由で取るので、macOS では #2 が書いた
-/// `~/Library/Application Support/escrow` と同じ値になる。テストでは差し替える。
+/// macOS では #2 の `~/Library/Application Support/escrow`。テストでは差し替える。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Dirs {
     home: PathBuf,
@@ -433,7 +429,7 @@ impl Dirs {
         &self.home
     }
 
-    /// 設定ファイルの場所。**設定で変えられない**（読むために場所が要るため、#2）。
+    /// 設定ファイルの場所。**設定の外で決まる**（読むために場所が要るため、#2）。
     pub fn config_file(&self) -> PathBuf {
         self.config_dir.join("config.toml")
     }
@@ -468,13 +464,13 @@ impl Paths {
     }
 }
 
-/// 設定に書かれたパスを実際の場所へ写す。
+/// 設定に書いてあるパスを実際の場所へ写す。
 ///
 /// 先頭の1成分が `~` のときだけホームへ差し替える。`~` はシェルの記法で
 /// [`std::path`] の概念ではないので、その一段だけがここの仕事。
 ///
 /// **成分の切り出しは [`Path::components`] に任せる。** 区切りが何文字か、
-/// 重複した区切りをどう畳むか、`~other` が別の成分かは、すべてそちらが答える。
+/// 重複した区切りをどうまとめるか、`~other` が別の成分かは、すべてそちらが答える。
 /// 自分で文字列を切ると環境差が入り込む。
 ///
 /// **相対パスはホーム基準にする。** プロセスの CWD を基準にすると、ターミナルから
@@ -581,7 +577,7 @@ concurrent_acquisitions = 1
         assert_eq!(Config::load(&path).unwrap(), config);
     }
 
-    /// 綴り違いは黙って既定へ落とさない。設定したつもりが効かないのを防ぐ。
+    /// 綴り違いははっきり落とす。設定したつもりが効かないのを防ぐ。
     #[test]
     fn a_misspelled_key_is_refused() {
         let typo = r#"
@@ -591,7 +587,7 @@ media_dirs = "~/Movies/escrow"
         assert!(Config::from_toml(typo).is_err());
     }
 
-    /// 間隔に 0 は無い。`NonZeroU32` なので読む時点で落ちる。
+    /// 間隔は 1 以上。`NonZeroU32` なので読む時点で落ちる。
     #[test]
     fn a_zero_interval_is_refused() {
         let zero = r#"
@@ -601,7 +597,7 @@ interval_hours = 0
         assert!(Config::from_toml(zero).is_err());
     }
 
-    /// 予算に 0 も無い。0 は「無制限」ではなく「一度も出さない」に見えるので、
+    /// 予算も 1 以上。0 は「無制限」ではなく「一度も出さない」に見えるので、
     /// 読む時点で落とす。
     #[test]
     fn a_zero_budget_is_refused() {
@@ -648,7 +644,7 @@ interval_hours = 0
             assert_eq!(config.auth.cookies_from, browser);
         }
 
-        // 一部のアダプタしか知らない綴りは、共通設定として使えないので入れていない。
+        // 共通設定に入るのは、全アダプタが知る綴りだけ。一部のアダプタしか知らないものは外。
         for only_one_tool in ["whale", "librewolf", "zen", "netscape"] {
             let toml = format!("[auth]\ncookies_from = \"{only_one_tool}\"\n");
             assert!(Config::from_toml(&toml).is_err(), "{only_one_tool}");
@@ -704,7 +700,7 @@ interval_hours = 0
         assert_eq!(expand("/tmp/~/x", home), Path::new("/tmp/~/x"));
     }
 
-    /// 区切りの重複や `.` は [`Path::components`] が畳む。自分では扱わない。
+    /// 区切りの重複や `.` は [`Path::components`] がまとめる。自分では扱わない。
     #[test]
     fn the_path_parser_normalizes_the_rest() {
         let home = Path::new("/Users/t");
@@ -772,11 +768,11 @@ min_free_gib = 50
             .unwrap()
             .map(|e| e.unwrap().file_name())
             .collect();
-        assert_eq!(left, ["config.toml"], "一時ファイルが残っていない");
+        assert_eq!(left, ["config.toml"], "残るのは config.toml だけ");
         assert_eq!(Config::load(&path).unwrap().storage.min_free_gib, 99);
     }
 
-    /// `auto` の綴り揺れと前後の空白は吸収する。言語コードそのものは畳まない。
+    /// `auto` の大文字小文字と前後の空白は正す。言語コードそのものは触らない。
     #[test]
     fn the_auto_sentinel_tolerates_spelling() {
         for raw in ["auto", "AUTO", "Auto", "  auto  "] {

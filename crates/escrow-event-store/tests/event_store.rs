@@ -1,9 +1,9 @@
-//! Phase 4.2 の受け入れ（#7）。
+//! イベントストアの受け入れ（#7・#15）。
 //!
 //! - イベントを追記してリプレイした結果と、リードモデルの `item` が一致する
-//! - 同じ `seq` を2回書くと弾かれる
+//! - 同じ `seq` を2回書くと `Superseded` になる
 //! - 期限は `acquired` の1回で確定し、そこから先は状態が運ぶ
-//! - 沈黙は記録されない（#5 の非対称性）
+//! - 記録に残るのは確認できた回だけ（#5 の非対称性）
 
 use std::num::NonZeroU32;
 
@@ -190,7 +190,7 @@ async fn the_deadline_is_fixed_once_and_carried_by_the_state() {
     agrees(&store, id).await;
 }
 
-/// 読んでから書くまでに動いていれば弾かれる（#15）。
+/// 読んでから書くまでに動いていれば `Superseded` で弾く（#15）。
 #[tokio::test]
 async fn writing_from_a_stale_seq_is_refused() {
     let (store, source) = seeded().await;
@@ -202,7 +202,7 @@ async fn writing_from_a_stale_seq_is_refused() {
         .await
         .unwrap();
 
-    // 2つの担い手が同じ姿を読んだ。
+    // 2つの書き手が同じ行を読んだ。
     let seen = store.item(id).await.unwrap().unwrap().seq;
 
     store
@@ -224,7 +224,7 @@ async fn writing_from_a_stale_seq_is_refused() {
         "{second:?}"
     );
 
-    // 弾かれた側のイベントはログにもリードモデルにも入っていない。
+    // ログもリードモデルも、弾く前のまま。
     assert_eq!(
         store.item(id).await.unwrap().unwrap().item.state,
         State::Acquiring
@@ -232,9 +232,9 @@ async fn writing_from_a_stale_seq_is_refused() {
     assert_eq!(store.log(id).await.unwrap().unwrap().rest.len(), 1);
 }
 
-/// 状態を動かさないイベントは、`state_since` を動かさない（#1）。
+/// `state_since` が動くのは、状態が動いたときだけ（#1）。
 ///
-/// 確認できなかった回は行が増えないので、**沈黙が記録されないことが、そのまま
+/// 確認できなかった回は行が増えないので、**沈黙が記録に残らないことが、そのまま
 /// #5 の非対称性になる**。
 #[tokio::test]
 async fn confirming_presence_records_the_fact_without_moving_the_state() {
@@ -281,11 +281,11 @@ async fn confirming_presence_records_the_fact_without_moving_the_state() {
     assert_eq!(
         row.item.state,
         State::Holding { until: deadline },
-        "確かめただけでは状態は動かない"
+        "確かめただけなら holding のまま"
     );
     assert_eq!(
         row.item.state_since, became_holding,
-        "holding になった日時も動かない"
+        "holding になった日時もそのまま"
     );
     // 確かめた事実は3件とも残っている。
     assert_eq!(row.seq.get(), 6);
@@ -353,7 +353,7 @@ async fn retries_are_counted_from_the_log() {
     );
 }
 
-/// 図に無い遷移は、書く前に弾かれる。
+/// 図に無い遷移は、書く前に `next` が弾く。
 #[tokio::test]
 async fn an_illegal_transition_never_reaches_the_log() {
     let (store, source) = seeded().await;
@@ -380,7 +380,7 @@ async fn an_illegal_transition_never_reaches_the_log() {
     assert_eq!(store.log(id).await.unwrap().unwrap().rest.len(), 0);
 }
 
-/// 同じ URL は二度起票できない（#1 の一意キー）。
+/// 同じ URL の誕生は1回だけ（#1 の一意キー）。
 #[tokio::test]
 async fn the_same_url_cannot_be_discovered_twice() {
     let (store, source) = seeded().await;

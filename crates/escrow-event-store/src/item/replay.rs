@@ -62,7 +62,7 @@ impl EventStore {
         Ok(Some(log_of(rows)?))
     }
 
-    /// ログをリプレイした、いまの姿。リードモデルを読まない。
+    /// ログをリプレイした、いまの `Item`。リードモデルを読まない。
     pub async fn replay(&self, id: ItemId) -> Result<Option<Item>, EventStoreError> {
         let Some(log) = self.log(id).await? else {
             return Ok(None);
@@ -174,7 +174,7 @@ fn event_of(row: &EventRow) -> Result<Event, RowError> {
     let missing = |column| RowError::EventMissingColumn { id, kind, column };
 
     Ok(match kind {
-        // 先頭にしか来ない。log_of がそれを確かめている。
+        // 来るのは先頭だけ。log_of がそれを確かめている。
         EventKind::Discovered => return Err(RowError::LogDoesNotBegin { id }),
         EventKind::AcquisitionStarted => Event::AcquisitionStarted,
         EventKind::Acquired => Event::Acquired {
@@ -210,7 +210,7 @@ fn event_of(row: &EventRow) -> Result<Event, RowError> {
     })
 }
 
-/// 保存された確認の行を、証として読み直す。
+/// 保存してある確認の行を、証として読み直す。
 ///
 /// 証は「確かめた」という事実の型で、行が在ること自体がその事実。書いた時点で
 /// [`Presence::Present`] が取れていなければ行は無い（#1 の「沈黙は記録されない」）。

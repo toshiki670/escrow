@@ -1,7 +1,7 @@
 //! 外部ツールを探す。
 //!
 //! **この解決器は crate に1つだけ置く。** #5 のアダプタが実際に呼ぶ場所と、
-//! #2 の設定画面が「どこで見つかったか」を表示する値は、同じものでなければならない。
+//! #2 の設定画面が「どこで見つかったか」と表示する場所は、同じ1つにする。
 //! 2か所に書くと、画面の表示と実際の挙動がずれる。
 //!
 //! 探し方は PATH が先、`tools.extra_paths` が後（#2）。GUI アプリはターミナルと違う
@@ -16,8 +16,8 @@ use std::path::{Path, PathBuf};
 ///
 /// 一覧の出所は #5 の対応表。#2 の設定画面と #3 の `depends_on` もそこから来る。
 ///
-/// `ffmpeg` は #5 が「yt-dlp が内部で呼ぶので escrow は直接叩かない」としていたが、
-/// 文字起こしのアダプタが直接使う。`whisper-cli` が WAV しか読めないため。
+/// `ffmpeg` は yt-dlp が内部で呼ぶのに加えて、文字起こしのアダプタが直接叩く（#5）。
+/// `whisper-cli` が WAV しか読めないため。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Tool {
     YtDlp,
@@ -124,7 +124,7 @@ impl Resolver {
             .collect()
     }
 
-    /// 見つからなかったものだけ。取得を始める前の門になる。
+    /// #2 の `[tools]` の一覧のうち、見つからなかったもの。
     pub fn missing(&self) -> Vec<Tool> {
         Tool::ALL
             .into_iter()
@@ -217,7 +217,7 @@ mod tests {
         );
     }
 
-    /// 両方に在れば PATH が勝つ。#3 の「PATH の順で解決される」と揃える。
+    /// 両方に在れば PATH を先に採る。#3 の「PATH の順で解決される」と揃える。
     #[test]
     fn the_path_wins_over_extra_paths() {
         let on_path = tempfile::tempdir().unwrap();
@@ -233,7 +233,7 @@ mod tests {
         assert_eq!(resolver.resolve(Tool::YtDlp), Resolution::Found(expected));
     }
 
-    /// 名前が合っていても、**このプロセスが実行できなければ**見つけたことにしない。
+    /// 見つけたことにするのは、名前が合い、かつ**このプロセスが実行できる**もの。
     ///
     /// `0o010` / `0o001` は「誰かに実行ビットが立っている」が自分では起動できない。
     /// 見つけたことにすると、PATH の後ろに在る本物を隠して実行時に落ちる。

@@ -1,22 +1,19 @@
 //! イベントの追記とリードモデル（#15）。
 //!
-//! 唯一の真実は `item_event` で、追記しかしない。`item` はそこから作られるリードモデルで、
+//! 唯一の真実は `item_event` で、追記しかしない。`item` はそこから導けるリードモデルで、
 //! **いつでも捨てて作り直せる**。読むのはリードモデル、書くのはイベント、という分け方（CQRS）。
 //!
 //! **イベントを書く経路は [`EventStore::discover`] と [`EventStore::append`] の2つだけ。**
 //! リードモデルはその2つを通ってしか動かないので、ログとリードモデルがずれる書き方が
 //! そもそも書けない。
-//! 何を公開してよいかは `tests/public_api.rs` の表が決める。
 //!
-//! **Young, 2010 の基本の Event Store が持つのは、イベントの表と Aggregates 表（aggregate
-//! ごとのいまの版を非正規化して持つ。版はイベントの表から導ける）で、操作は `SaveChanges` /
-//! `GetEventsFor` の2つだけ。** escrow の [`EventStore`] は版の表を置かず、版はイベントの表
-//! から都度導く。そこに、どのイベントからも導けない catalog（`person` / `source` /
-//! `exclude`。いまの値の行を直接書く）とリードモデル（`item`）を同じ SQLite に置き、
-//! リードモデルへの問い合わせを公開 API に持つ（#84）。
+//! Young, 2010 の基本の Event Store から何を変えたかは、`docs/rules/architecture.md` の表の
+//! 「状態の持ち方」の行（#84）。
 //!
 //! 集約でディレクトリを切っていて、いまは `item` だけ。このファイルには集約に
 //! 依存しない仕組み — 接続・番号・行を読むときの失敗 — を置く。
+
+// 何を公開してよいかは `tests/public_api.rs` の表が決める。
 
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
@@ -47,12 +44,12 @@ static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
 
 /// 書き込みのトランザクションの開き方。
 ///
-/// 既定の `BEGIN`（deferred）は最初の `SELECT` で読み取りの錠を取り、そのあと書き込みへ
-/// 上げようとする。**SQLite はこの上げ方に `busy_timeout` を効かせない** — 互いに待つと
+/// 既定の `BEGIN`（deferred）は最初の `SELECT` で読み取りのロックを取り、そのあと書き込みへ
+/// 昇格しようとする。**SQLite はこの昇格に `busy_timeout` を効かせない** — 互いに待つと
 /// 解けなくなるので、待たずに `SQLITE_BUSY` を返す。それでは「読み直して決め直す」に
 /// 落ちず、`database is locked` のまま止まる（#7）。
 ///
-/// 先に書き込みの錠を取れば `busy_timeout` が効き、待ったうえで
+/// 先に書き込みのロックを取れば `busy_timeout` が効き、待ったうえで
 /// `(item_id, seq)` の UNIQUE が競合を弾く。
 const WRITE: &str = "BEGIN IMMEDIATE";
 
@@ -79,7 +76,7 @@ impl Seq {
     ///
     /// 上限で頭打ちになるが、そこで止まっても**同じ番号を二度書くことになるので
     /// UNIQUE が弾く**。43 億件目に届かない上限を `Option` で持ち回るより、
-    /// 既にある制約に落ちてもらうほうが呼ぶ側が素直になる。
+    /// 既にある制約で止めるほうが呼ぶ側が単純になる。
     pub const fn next(self) -> Self {
         Self(self.0.saturating_add(1))
     }
@@ -127,14 +124,14 @@ impl EventStoreError {
 /// 行をドメイン型へ写せなかったとき。
 ///
 /// #1 が「`NULL` を許すのはこの列だけ」と決めたぶんが、ここで実際に効く。
-/// 握りつぶすとイベントストアが静かに壊れるので、名前を付けて外へ出す。
+/// 黙って無視するとイベントストアが静かに壊れるので、名前を付けて外へ出す。
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum RowError {
     #[error("item {id}: 知らない種別 `{value}`")]
     UnknownContentType { id: i64, value: String },
     #[error("item {id}: 知らない状態 `{value}`")]
     UnknownState { id: i64, value: String },
-    #[error("item {id}: 種別 {content_type} は {column} を要るが NULL")]
+    #[error("item {id}: 種別 {content_type} には {column} が要るが NULL")]
     MissingColumn {
         id: i64,
         content_type: ContentType,
@@ -152,7 +149,7 @@ pub enum RowError {
         state: StateName,
         column: &'static str,
     },
-    #[error("item {id}: 状態 {state} は {column} を要るが NULL")]
+    #[error("item {id}: 状態 {state} には {column} が要るが NULL")]
     StateMissingColumn {
         id: i64,
         state: StateName,
@@ -195,7 +192,7 @@ pub enum RowError {
     UnknownExcludeType { id: i64, value: String },
     #[error("item {id}: 知らないイベント `{value}`")]
     UnknownEventKind { id: i64, value: String },
-    #[error("item {id}: イベント {kind} は {column} を要るが NULL")]
+    #[error("item {id}: イベント {kind} には {column} が要るが NULL")]
     EventMissingColumn {
         id: i64,
         kind: EventKind,
@@ -270,11 +267,11 @@ impl EventStore {
 
 // ---------------------------------------------------------------- 行を読む
 
-/// 保存されている URL が正規形のままか確かめる。
+/// 行の URL が正規形のままか確かめる。
 ///
-/// 正規化を通した値しか入れないので、ずれていたら手で書き換えられたか、
+/// 正規化を通した値しか入れないので、ずれていたら誰かが手で書き換えたか、
 /// 正規化の規則が変わったかのどちらか。黙って新しい形へ読み替えると `UNIQUE` と
-/// 食い違うので、はっきり落とす。
+/// 食い違うので、`RowError` で弾く。
 fn normalized(id: i64, column: &'static str, value: &str) -> Result<NormalizedUrl, RowError> {
     let bad = || RowError::UnnormalizedUrl {
         id,
@@ -362,9 +359,9 @@ mod tests {
         );
     }
 
-    /// 開き直しても `open` がリードモデルを二重に作らないこと。
+    /// 開き直しても、リードモデルは1つのまま。
     ///
-    /// リードモデルは移行に載らないので、`_sqlx_migrations` は「もう作った」を覚えていない。
+    /// `_sqlx_migrations` が覚えているのは移行だけで、リードモデルはその外。
     /// 覚えていない側で `IF NOT EXISTS` が効いていることを確かめる。
     #[tokio::test]
     async fn opening_an_existing_database_keeps_its_read_model() {
@@ -393,7 +390,7 @@ mod tests {
         let path = dir.path().join("escrow.db");
 
         let store = EventStore::open(&path).await.unwrap();
-        // このバイナリが知らない移行が当たっている、という体。
+        // このバイナリが知らない移行が当たっている、という形にする。
         sqlx::query(
             "INSERT INTO _sqlx_migrations \
              (version, description, installed_on, success, checksum, execution_time) \

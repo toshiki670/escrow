@@ -28,7 +28,7 @@ CREATE TABLE source (
     -- 進行中の預かりには遡らない — 期限は取得完了の時点で確定する（#1）。
     hold_days     INTEGER,
     -- 監視の期間。両方 NULL なら区切らず継続して監視する。片方だけ埋まった行は
-    -- 意味が決まっていないので、読み出しの parse が撥ねる。
+    -- 意味が決まっていないので、読み出しの parse が弾く。
     monitor_from  TEXT,
     monitor_until TEXT
 ) STRICT;
@@ -43,9 +43,9 @@ CREATE TABLE exclude (
 
 -- 唯一の真実。追記のみで、書き換えも削除もしない（#15）。
 --
--- `item_id` はリードモデルを**参照しない**。リードモデルは捨てて作り直せるものなので、
--- 真実の側がそこへ外部キーを張ると、`rebuild` の DROP が連鎖してログごと消える。項目の
--- 同一性はこのテーブルが持ち、番号もここから採る。
+-- 項目の**同一性と採番はこのテーブルが持ち**、リードモデルへは外部キーを張らない（#1）。
+-- リードモデルは捨てて作り直せるものなので、真実の側がそこへ外部キーを張ると、`rebuild` の
+-- DROP が連鎖してログごと消える。
 --
 -- 代わりに `source_id` を全ての行が持ち、削除の連鎖をここで受ける（#1 の
 -- 「`SOURCE` を消すと、その `ITEM` と `ITEM_EVENT` も消える」）。値は誕生の時点で
@@ -84,5 +84,5 @@ CREATE TABLE item_event (
 -- 片方が落ちる。「毎回 WHERE 句を書く」規律が、忘れられない制約になる（#15）。
 CREATE UNIQUE INDEX item_event_seq ON item_event(item_id, seq);
 
--- #1 の索引表。同じ配信元を二度登録できないようにする。
+-- #1 の索引表。同じ配信元の登録を1回にする。
 CREATE UNIQUE INDEX source_url ON source(url);
