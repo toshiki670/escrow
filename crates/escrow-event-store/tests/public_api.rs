@@ -132,7 +132,7 @@ fn the_pool_never_leaves_the_crate() {
     );
 }
 
-/// リードモデルへ書く SQL が、追記と作り直しの2ファイルだけに在ること（#7 の受け入れ）。
+/// リードモデルへ書く SQL が、追記と作り直しの2ファイルだけに在ること（#15）。
 #[test]
 fn only_appending_and_rebuilding_touch_the_read_model() {
     let allowed: BTreeSet<&str> = WRITES_THE_READ_MODEL.iter().copied().collect();

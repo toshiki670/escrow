@@ -124,7 +124,7 @@ impl Resolver {
             .collect()
     }
 
-    /// 見つからなかったものだけ（#2 の `[tools]` の一覧）。
+    /// #2 の `[tools]` の一覧のうち、見つからなかったもの。
     pub fn missing(&self) -> Vec<Tool> {
         Tool::ALL
             .into_iter()

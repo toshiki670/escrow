@@ -127,7 +127,7 @@ impl EventStore {
             return Err(EventStoreError::NoSuchItem(id));
         };
 
-        // 番号がずれていれば、この決定は呼ぶ側が古い状態を見て下したもの。
+        // 番号がずれていれば、この決定は呼ぶ側が古い行を見て下したもの。
         // 同時に走る2つのうち片方は、この先の UNIQUE も弾く。
         if u32::try_from(row.seq).is_ok_and(|seq| seq != after.get()) {
             return Err(EventStoreError::Superseded);
@@ -279,7 +279,7 @@ mod tests {
         let source = seed_into(&engine).await;
         let id = a_holding_item(&engine, source).await;
 
-        // もう1つの書き手が同じファイルを開き、同じ状態を読む。
+        // もう1つの書き手が同じファイルを開き、同じ行を読む。
         let cli = EventStore::open(&path).await.unwrap();
         let seen = engine.item(id).await.unwrap().unwrap().seq;
         assert_eq!(cli.item(id).await.unwrap().unwrap().seq, seen);

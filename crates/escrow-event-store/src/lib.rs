@@ -390,7 +390,7 @@ mod tests {
         let path = dir.path().join("escrow.db");
 
         let store = EventStore::open(&path).await.unwrap();
-        // このバイナリが知らない移行が当たっている、という状態を作る。
+        // このバイナリが知らない移行が当たっている、という形にする。
         sqlx::query(
             "INSERT INTO _sqlx_migrations \
              (version, description, installed_on, success, checksum, execution_time) \

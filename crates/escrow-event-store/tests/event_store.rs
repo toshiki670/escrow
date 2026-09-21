@@ -202,7 +202,7 @@ async fn writing_from_a_stale_seq_is_refused() {
         .await
         .unwrap();
 
-    // 2つの書き手が同じ状態を読んだ。
+    // 2つの書き手が同じ行を読んだ。
     let seen = store.item(id).await.unwrap().unwrap().seq;
 
     store

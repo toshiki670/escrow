@@ -19,8 +19,9 @@ pub(crate) use replay::{EventRow, log_of};
 /// リードモデルから読んだ1件と、その項目の最後のイベントの番号。
 ///
 /// 次のイベントを書くときにこの `seq` を渡すので、**読んでから書くまでの間に誰かが
-/// 動かしていれば `UNIQUE` が弾く**。読み出しが必ず番号を一緒に返すので、根拠を持たずに
-/// 書く経路がそもそも作れない。
+/// 動かしていれば [`append`](crate::EventStore::append) が
+/// [`Superseded`](crate::EventStoreError::Superseded) で弾く**。
+/// 読み出しが必ず番号を一緒に返すので、根拠を持たずに書く経路がそもそも作れない。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReadModelRow {
     pub item: Item,
