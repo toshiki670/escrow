@@ -1,7 +1,7 @@
 //! バイナリ名とバージョンの結線を、実際に起動して確かめる。
 //!
 //! ここが壊れると #3 の Cask が PATH へ繋ぐ先と #4 が呼ぶ名前がずれるが、
-//! crate 名（escrow-cli）とバイナリ名（escrow）が違うため型では守れない。
+//! crate 名（escrow-cli）とバイナリ名（escrow）が違うため、守れるのはこのテストだけ。
 
 use std::process::Command;
 

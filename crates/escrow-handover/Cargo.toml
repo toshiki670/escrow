@@ -6,8 +6,8 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
-# 外へ出ないので、スケジューラを要らない（#15）。#4 の list と release は
-# イベントストアと手元のファイルしか触らない。
+# 中で完結するので、スケジューラ抜きで足りる（#15）。#4 の list と release が触るのは
+# イベントストアと手元のファイルだけ。
 [dependencies]
 escrow-domain.workspace = true
 escrow-event-store.workspace = true

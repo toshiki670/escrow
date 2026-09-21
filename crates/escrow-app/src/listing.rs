@@ -68,8 +68,8 @@ impl Listed {
 
 /// 新しいものから順に並べる（#6 のモック）。
 ///
-/// 並べ替えを SQL へ渡さないのは、`published_at` が時差を保つ text だからで、
-/// 字面の順は時刻の順にならない（#1）。[`Timestamp`] は瞬間で比べる。
+/// 並べ替えは [`Timestamp`] の瞬間で行う。`published_at` は時差を保つ text で、SQL の
+/// 字面の順は時刻の順と違う（#1）。
 pub(crate) fn newest_first(listed: &mut [Listed]) {
     listed.sort_by_key(|listed| Reverse(listed.published_at));
 }
@@ -160,7 +160,7 @@ mod tests {
         let jst = listed(Some("○○の雑談配信"), None, "2026-03-01T08:00:00+09:00");
         assert_eq!(jst.published_on(), "2026-03-01");
 
-        // 同じ瞬間でも、UTC で言われたなら前日になる。
+        // 同じ瞬間でも、UTC で書いてあれば前日になる。
         let utc = listed(Some("○○の雑談配信"), None, "2026-02-28T23:00:00+00:00");
         assert_eq!(utc.published_on(), "2026-02-28");
     }

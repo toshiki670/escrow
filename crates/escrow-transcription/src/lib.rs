@@ -3,8 +3,8 @@
 //! `transcribing` の項目を1件受け取り、**断片ごとに1本**作って `Transcribed` まで
 //! 進める（#1）。
 //!
-//! **取得のスライスを知らない。** 何を文字起こしするかは手元のディレクトリを走査して
-//! 決めるので、前の段から渡してもらう必要が無い。行き先も `Transcribing` が伴っている
+//! **何を文字起こしするかは手元のディレクトリを走査して決める。** 取得のスライスを
+//! 知らず、前の段から渡してもらう必要が無い。行き先も `Transcribing` が伴っている
 //! 期限が決めるので、`Transcribed` は値を運ばない（#1）。
 
 use std::path::{Path, PathBuf};
@@ -111,7 +111,7 @@ mod tests {
     use std::num::NonZeroU32;
     use std::sync::Mutex;
 
-    /// 呼ばれた実体を控えるだけの文字起こし。
+    /// 受け取った実体を控えるだけの文字起こし。
     struct FakeTranscribe {
         calls: Mutex<Vec<String>>,
     }

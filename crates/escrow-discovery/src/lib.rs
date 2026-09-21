@@ -5,7 +5,7 @@
 //!
 //! ここに在るのは「1つの配信元を1回見る」だけで、**いつ見るかは持たない**。順番と
 //! 時刻はスケジューラが決め、`sweep` の中の呼び出しがその中で待つ。どの配信元を
-//! どれだけの頻度で見るかは巡回の側（Phase 6、#7）。
+//! どれだけの頻度で見るかは巡回の側（#33）。
 
 use escrow_domain::item::{Discovered, ItemId};
 use escrow_domain::source::{Exclude, Source};
@@ -40,7 +40,7 @@ impl<'a> Discovery<'a> {
     /// - 監視の期間の外。X はこの期間の中だけ見る（#5）ので、期間を持つ配信元では
     ///   外に居る間は外へも出ない
     ///
-    /// 除外に当たった種別も行を作らない。除外されていることは [`Exclude`] が持つ（#1）。
+    /// 除外に当たった種別も行を作らない。除外の事実を持つのは [`Exclude`]（#1）。
     /// 既にリードモデルに在るものは飛ばす — 判定は `Item.url` の一意キー。
     pub async fn sweep(
         &self,
@@ -182,7 +182,7 @@ mod tests {
         }
     }
 
-    /// 除外に当たったものは**行を作らない**（#1）。
+    /// 除外に当たったものは行を作らない（#1）。
     #[tokio::test]
     async fn excluded_kinds_never_become_rows() {
         let (store, source) = seeded(Monitoring::Continuous, true).await;
@@ -205,7 +205,7 @@ mod tests {
         assert_eq!(item.content_type(), ContentType::YoutubeVideo);
     }
 
-    /// 二度目の巡回で同じものを見つけても、行は増えない（#1 の一意キー）。
+    /// 同じものは何度見つけても行は1つ（#1 の一意キー）。
     #[tokio::test]
     async fn sweeping_twice_does_not_duplicate() {
         let (store, source) = seeded(Monitoring::Continuous, true).await;
@@ -225,7 +225,7 @@ mod tests {
         assert!(second.is_empty(), "二度目は起票しない");
     }
 
-    /// 監視の期間の外では、外へも出ない（#1・#5）。
+    /// 外へ出るのは監視の期間の中だけ（#1・#5）。
     #[tokio::test]
     async fn nothing_happens_outside_the_monitoring_period() {
         let period = Monitoring::new(

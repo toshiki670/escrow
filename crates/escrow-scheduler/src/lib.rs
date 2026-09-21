@@ -21,9 +21,9 @@
 //!
 //! # 予算は要求を出す側の外に在る
 //!
-//! 各経路が自分で自分を抑える形だと、経路が複数ある時点で合計を誰も知らない（#13）。
-//! [`budget::Budget`] が経路ごとの門を持ち、`escrow-external` の外向きの呼び出しは
-//! 1本残らずそこを通る。
+//! [`budget::Budget`] が経路ごとに予算と順番待ちを持ち、`escrow-external` の外向きの呼び出しは
+//! 1本残らずそこを通る。各経路が自分で自分を抑える形だと、経路が複数ある時点で合計を
+//! 誰も知らない（#13）。
 //!
 
 pub mod budget;
@@ -47,7 +47,7 @@ use escrow_external::ytdlp::YtDlp;
 
 /// 外部アクセスの語彙。**スライスが触れてよい外の世界はこれで全部**（#15）。
 ///
-/// `escrow-external` で定義されたものを、そのままここから見せる。写しを作らないので
+/// `escrow-external` が定義するものを、そのままここから見せる。写しを作らないので
 /// 型は1つきりで、変換の層も要らない。
 pub use budget::{Demand, Next, Plan};
 pub use escrow_external::{
@@ -157,14 +157,14 @@ impl Scheduler {
 
     /// 文字起こしをするもの。
     ///
-    /// **予算を通らない。** whisper はローカルで動き、外へ要求を出さない（#13）。
+    /// **予算の外に在る。** whisper はローカルで動き、外へ要求を出さない（#13）。
     pub const fn transcriber(&self) -> &dyn Transcribe {
         &self.whisper
     }
 
     /// いつ出すつもりかを、経路ごとに答える（#13）。UI がこれを読む。
     ///
-    /// `now` は答えを壁の時計へ写すための起点（[`budget`] の「時計が2つある」）。
+    /// `now` は答えを実時間へ写すための起点（[`budget`] の「経過時間と実時間」）。
     pub fn plan(&self, now: Timestamp) -> Vec<Plan> {
         self.budget.plan(now)
     }
@@ -262,10 +262,10 @@ mod tests {
         )
     }
 
-    /// 予算が、包みを通った実際の呼び出しに掛かること。
+    /// 予算が、`Adapters` を通った実際の呼び出しに掛かること。
     ///
-    /// 門そのものの振る舞いは [`budget`] の単体テストが見る。ここが見るのは**繋がり** —
-    /// [`Turn`] → `Admit` → `through` → 包み → ツール が1本になっていること。
+    /// `Gate` そのものの振る舞いは [`budget`] の単体テストが見る。ここが見るのは**繋がり** —
+    /// [`Turn`] → `Admit` → `through` → `Adapters::describe` → ツール が1本になっていること。
     #[tokio::test(start_paused = true)]
     async fn the_budget_applies_to_a_call_that_goes_through_the_adapters() {
         let adapters = adapters();

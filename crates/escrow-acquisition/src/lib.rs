@@ -3,11 +3,11 @@
 //! `waiting` の項目を1件受け取り、取得して次の状態まで進める。行き先は #1 の
 //! 3つのスイッチが決める — 文字起こしする実体があるか、預かりの期限があるか。
 //!
-//! **文字起こしのスライスを呼ばない。** 取得が終われば状態が `transcribing` に
-//! なるので、次に誰が拾うかは状態が決める（#15 の Blackboard）。順序をコードの
+//! **取得が終わったら、行き先の状態を書いて終わる。** 文字起こしへ進む項目も、次に誰が拾うかは
+//! 状態が決める（#15 の Blackboard）。順序をコードの
 //! 呼び出し順で持たないから、スライス同士が互いを知らずに済む。
 //!
-//! リトライ・空き容量の門・待ち行列は Phase 6（#7）。ここは1件を1回運ぶだけ。
+//! リトライは #35、空き容量の判定・待ち行列は #33 が持つ。ここは1件を1回運ぶだけ。
 
 use std::path::Path;
 
@@ -128,7 +128,7 @@ mod tests {
     use std::num::NonZeroU32;
     use std::sync::Mutex;
 
-    /// 落ちるものを置く代わりの取得。スケジューラが見せている trait だけを満たす。
+    /// 実体を落とす代わりに置くだけの取得。スケジューラが見せている trait だけを満たす。
     ///
     /// **`escrow-external` を名前で知らずに差し替えられる**こと自体が、port が
     /// スケジューラの公開 API だという確認になっている（#15）。
@@ -231,8 +231,7 @@ mod tests {
 
     /// 音が入っていれば文字起こしへ回る（#1 のスイッチ表）。
     ///
-    /// **ここで文字起こしを呼ばない。** 状態が `transcribing` になるだけで、
-    /// 次に誰が拾うかは状態が決める（#15）。
+    /// **ここでは状態を `transcribing` にするだけ。** 次に誰が拾うかは状態が決める（#15）。
     #[tokio::test]
     async fn audible_media_stops_at_transcribing() {
         let store = EventStore::open_in_memory().await.unwrap();
@@ -303,7 +302,7 @@ mod tests {
 
     /// 取得で落ちたら `acquiring` のまま残る。リードモデルを見れば、どこで止まったか分かる。
     ///
-    /// リトライと `error` への遷移は Phase 6 の担当（#7）。
+    /// リトライと `error` への遷移は #35 の担当。
     #[tokio::test]
     async fn a_failed_download_leaves_the_item_where_it_stopped() {
         let store = EventStore::open_in_memory().await.unwrap();
@@ -324,7 +323,7 @@ mod tests {
     /// 期限の起点は**取得が終わった瞬間**（#1）。
     ///
     /// 取得に時間が掛かるほど、始めた時刻を起点にする形との差が開く。ここでは
-    /// 取得の中で時間を進め、期限がそちら側から数えられていることを見る。
+    /// 取得の中で時間を進め、期限をそちら側から数えていることを見る。
     #[tokio::test]
     async fn the_deadline_counts_from_when_the_download_finished() {
         struct Slow;
@@ -361,7 +360,7 @@ mod tests {
         );
     }
 
-    /// 図に無い出発点からは動かない。
+    /// 動けるのは図の出発点（`waiting`）からだけ。
     #[tokio::test]
     async fn only_a_waiting_item_can_start() {
         let store = EventStore::open_in_memory().await.unwrap();
