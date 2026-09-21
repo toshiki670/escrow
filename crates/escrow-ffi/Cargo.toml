@@ -1,0 +1,37 @@
+[package]
+name = "escrow-ffi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# Rust 以外の入口が読み込む形。SwiftUI（#79）は staticlib を `.app` へ静的に繋ぐ。
+# `lib` はテストと下の bin のため。
+[lib]
+crate-type = ["lib", "staticlib"]
+
+# Swift のバインディングを生成する。`uniffi` の CLI を bin として持たせるのは、cargo の
+# artifact dependency が stable に無いため（UniFFI の手引きどおり）。
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+required-features = ["cli"]
+
+# 段5 の入口。組み立てる crate だけを見る（#82）。
+[dependencies]
+escrow-app.workspace = true
+thiserror.workspace = true
+uniffi = { workspace = true, features = ["tokio"] }
+
+[dev-dependencies]
+# テストがイベントストアへ置く形は escrow-app が持つ（#82）。
+escrow-app = { workspace = true, features = ["fixture"] }
+tempfile.workspace = true
+tokio.workspace = true
+
+[features]
+cli = ["uniffi/cli", "uniffi/cargo-metadata"]
+
+[lints]
+workspace = true

@@ -78,17 +78,24 @@ impl Member {
         found
     }
 
-    /// その member が名前を知っている escrow-* の crate。
+    /// その member が名前を知っている crate 全部。
     ///
     /// **dev-dependencies も含める。** テストの中でだけ迂回できるなら、迂回路は在る。
-    pub fn escrow_dependencies(&self) -> std::collections::BTreeSet<String> {
+    pub fn dependencies(&self) -> std::collections::BTreeSet<String> {
         ["dependencies", "dev-dependencies", "build-dependencies"]
             .iter()
             .filter_map(|table| self.manifest.get(*table))
             .filter_map(toml::Value::as_table)
             .flat_map(toml::Table::keys)
-            .filter(|name| name.starts_with("escrow-"))
             .cloned()
+            .collect()
+    }
+
+    /// その member が名前を知っている escrow-* の crate。
+    pub fn escrow_dependencies(&self) -> std::collections::BTreeSet<String> {
+        self.dependencies()
+            .into_iter()
+            .filter(|name| name.starts_with("escrow-"))
             .collect()
     }
 }

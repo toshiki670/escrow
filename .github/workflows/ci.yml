@@ -29,3 +29,23 @@ jobs:
 
       # nextest は doctest を実行しないので、そこだけ cargo test で拾う。
       - run: cargo test --workspace --doc
+
+  # SwiftUI の入口（#79）。cargo の外に居るので、上の check とは別に建てる。
+  # runner の macOS 26 は Liquid Glass の下限（swift/Escrow/Info.plist の LSMinimumSystemVersion）。
+  swift:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+
+      # 書き方の検査。`swift format` は Xcode 16 以降に同梱で、設定ファイルは置かず既定に従う。
+      - run: swift format lint --strict --recursive swift/Escrow/Sources/Escrow swift/Escrow/Package.swift
+
+      # cargo → uniffi-bindgen → swift build（警告は落とす）→ .app。手元と同じ1本。
+      - run: swift/Escrow/build.sh
+
+      # #3 の Cask が要求する形 — GUI と CLI が同じ MacOS/ に居て、署名が通る。
+      - run: |
+          test -x swift/Escrow/dist/Escrow.app/Contents/MacOS/escrow-gui
+          test -x swift/Escrow/dist/Escrow.app/Contents/MacOS/escrow
+          codesign --verify swift/Escrow/dist/Escrow.app

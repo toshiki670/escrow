@@ -62,6 +62,9 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // escrow-external → escrow-config。
     ("escrow-cli", ENTRY),
     ("escrow-gui", ENTRY),
+    // Rust 以外の入口が読み込む形（#79）。Swift はここが export したものしか呼べないので、
+    // Swift 側は cargo の外に居ても、escrow の crate を名前で知る経路はここで止まる。
+    ("escrow-ffi", ENTRY),
 ];
 
 /// 外部ツールを呼ぶ crate。名前を知ってよいのは `escrow-scheduler` だけ（#3）。
@@ -69,6 +72,10 @@ const ALLOWED: &[(&str, &[&str])] = &[
 /// 定数で持つのは、crate を改名したときに次のテストが**黙って通る**のを防ぐため。
 /// 名前が実在することを先に確かめる。
 const EXTERNAL: &str = "escrow-external";
+
+/// Rust 以外の入口が読み込む crate（#79）。cargo の外に出る形（`staticlib` / `cdylib`）を持ち、
+/// `uniffi` を名前で知ってよいのはこれだけ。
+const FFI: &str = "escrow-ffi";
 
 /// 依存がすべて #3 の図に在ること。
 #[test]
@@ -106,6 +113,46 @@ fn only_the_scheduler_knows_the_external_tools() {
             knows,
             member.name == "escrow-scheduler",
             "{} から {EXTERNAL} への依存",
+            member.name
+        );
+    }
+}
+
+/// cargo の外へ出る口は `escrow-ffi` だけ（#79）。
+///
+/// Swift は `.a` を繋ぐだけなので、上の表では見えない。別の crate が `staticlib` を出したり
+/// `uniffi` を依存に持ったりすれば、Swift から `escrow-app` を経ずに呼べる経路ができる。
+/// そこを塞ぐのはこのテストで、`Cargo.toml` の `crate-type` と依存の名前で見る。
+#[test]
+fn only_the_ffi_crate_opens_a_door_out_of_cargo() {
+    assert!(
+        ALLOWED.iter().any(|(name, _)| *name == FFI),
+        "{FFI} がワークスペースに無い。改名したなら FFI も直す"
+    );
+
+    for member in members() {
+        let crate_types: Vec<&str> = member
+            .manifest
+            .get("lib")
+            .and_then(|lib| lib.get("crate-type"))
+            .and_then(toml::Value::as_array)
+            .map(|types| types.iter().filter_map(toml::Value::as_str).collect())
+            .unwrap_or_default();
+        let opens = crate_types
+            .iter()
+            .any(|t| *t == "staticlib" || *t == "cdylib");
+        assert_eq!(
+            opens,
+            member.name == FFI,
+            "{} の crate-type: {crate_types:?}",
+            member.name
+        );
+
+        let knows_uniffi = member.dependencies().contains("uniffi");
+        assert_eq!(
+            knows_uniffi,
+            member.name == FFI,
+            "{} から uniffi への依存",
             member.name
         );
     }
