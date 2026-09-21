@@ -21,6 +21,9 @@ esac
 
 cd "$root"
 
+# login shell でない所（エディタの Run ボタンなど）から呼ばれると cargo が PATH に無い。rustup が置く env を読む。
+command -v cargo >/dev/null 2>&1 || . "$HOME/.cargo/env"
+
 # Rust の C 依存（cc crate 経由）が既定で host の版を向くので、Swift と同じ下限へ揃える。揃えないと
 # 「built for newer macOS version」の警告が object ごとに出る。
 export MACOSX_DEPLOYMENT_TARGET=26.0
