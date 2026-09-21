@@ -172,8 +172,8 @@ impl Gate {
         }
     }
 
-    /// `lock()` が `PoisonError` を返すのは、ロックを持ったまま panic したときだけ。中の操作は
-    /// どれも panic しない。
+    /// `Mutex::lock` が `PoisonError` を返すのは、ロックを持ったまま panic したときだけ。中の
+    /// 操作はどれも panic しない。
     fn lock(&self) -> MutexGuard<'_, GateState> {
         self.state.lock().expect("Gate の状態のロック")
     }
@@ -339,7 +339,8 @@ enum Opening {
     WhenOneFinishes,
 }
 
-/// 列に並んでいる間、`Ticket` を列に置いておくもの。**取らずに落ちたら列から抜ける。**
+/// 列に並んでいる間、`Ticket` を列に置いておくもの。**呼ぶ側が取らずに `drop` すれば列から
+/// 抜ける。**
 ///
 /// 呼ぶ側が future を `drop` したときに `Queued` が残ると、その `Gate` は永久に先頭が動かない。
 struct Queued<'a> {
@@ -537,7 +538,7 @@ mod tests {
         Instant::now()
     }
 
-    /// 間隔で測る経路では、2本目は間隔ぶん待つ（#7 Phase 5 の受け入れ）。
+    /// 間隔で測る経路では、2本目は間隔ぶん待つ（#13「経路と測り方」）。
     #[tokio::test(start_paused = true)]
     async fn a_second_request_waits_out_the_gap() {
         let gate = gate(Measure::Gap(Duration::from_secs(900)));
@@ -550,7 +551,7 @@ mod tests {
         assert_eq!(Instant::now() - start, Duration::from_secs(900));
     }
 
-    /// 締切を持つ要求が、重みだけの要求より先に通る（#7 Phase 5 の受け入れ）。
+    /// 締切を持つ要求が、重みだけの要求より先に通る（#13「畳む。締切1つに乗せる」）。
     ///
     /// 3本を同じ `Gate` で待たせ、通った時刻で順番を見る。締切 → 重みの大きいほう →
     /// 残り、の順に 60 秒ずつずれる。
@@ -620,7 +621,7 @@ mod tests {
         drop(second);
     }
 
-    /// 拒否を受けたら、その経路をしばらく閉じる（#7 Phase 5 の受け入れ）。
+    /// 拒否を受けたら、その経路をしばらく閉じる（#13「断られたときの待ち方」）。
     #[tokio::test(start_paused = true)]
     async fn a_rejection_shuts_the_route_instead_of_hammering_it() {
         // 間隔は 1 秒。**待ちの出どころが拒否だけになる**ようにする。

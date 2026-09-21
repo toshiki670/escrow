@@ -262,10 +262,10 @@ mod tests {
         )
     }
 
-    /// 予算が、`Adapters` が返すものを通った実際の呼び出しに掛かること。
+    /// 予算が、`Adapters` を通った実際の呼び出しに掛かること。
     ///
     /// `Gate` そのものの振る舞いは [`budget`] の単体テストが見る。ここが見るのは**繋がり** —
-    /// [`Turn`] → `Admit` → `through` → `Adapters` が返すもの → ツール が1本になっていること。
+    /// [`Turn`] → `Admit` → `through` → `Adapters::describe` → ツール が1本になっていること。
     #[tokio::test(start_paused = true)]
     async fn the_budget_applies_to_a_call_that_goes_through_the_adapters() {
         let adapters = adapters();
