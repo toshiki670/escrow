@@ -2,7 +2,7 @@
 //
 // ダッシュボードと設定は項目だけ置く。中身は別のスライス（#30）。
 
-import EscrowBridge
+import EscrowBindings
 import SwiftUI
 
 struct ContentView: View {
@@ -96,8 +96,8 @@ private struct ItemsOf: View {
       }
     }
     .navigationTitle(person.name)
-    // 選び直すと前の読み出しは取り消される。橋の向こうの読み出しは止まらないので、
-    // 届いたぶんを捨てるのはここ。
+    // 選び直すと SwiftUI が前の Task を取り消す。`escrow-ffi` の future は取り消しを受けずに
+    // 最後まで走るので、届いたぶんを捨てるのはここ。
     .task(id: person.id) {
       listing = .loading
       do {

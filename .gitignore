@@ -24,4 +24,4 @@ target
 swift/Escrow/.build
 swift/Escrow/dist
 swift/Escrow/Sources/EscrowFFI
-swift/Escrow/Sources/EscrowBridge
+swift/Escrow/Sources/EscrowBindings

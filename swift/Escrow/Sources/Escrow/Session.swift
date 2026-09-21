@@ -1,7 +1,7 @@
 // 画面の状態。イベントストアを開く手順と読む関数は `escrow-app` が持ち（#82）、ここに在るのは
-// 開いたか・何を選んだか・一覧を読み終えたか、だけ。Iced 版の `app.rs` と同じ形。
+// 開いたか・何を選んだか・一覧を読み終えたか、だけ。
 
-import EscrowBridge
+import EscrowBindings
 
 /// サイドバーで選べるもの（#6）。
 enum Selection: Hashable {
@@ -12,7 +12,6 @@ enum Selection: Hashable {
 
 /// `Person` を選んだときのメイン。
 enum Listing {
-  /// 読んでいる最中。
   case loading
   case loaded([Listed])
   case failed(String)
@@ -26,7 +25,7 @@ enum Phase {
   case ready(Escrow, [Person])
 }
 
-/// 失敗の理由。橋は原因まで繋いだ1つの文で返す（`escrow-ffi` の `FfiError`）。
+/// 失敗の理由。`escrow-ffi` は原因まで繋いだ1つの文で返す（`FfiError`）。
 func why(_ error: Error) -> String {
   if case FfiError.Failed(let message) = error {
     return message

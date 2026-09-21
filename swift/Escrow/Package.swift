@@ -21,11 +21,11 @@ let package = Package(
   targets: [
     // UniFFI が生成する C の層。header と modulemap は `build.sh` が置く。
     .systemLibrary(name: "EscrowFFI", path: "Sources/EscrowFFI"),
-    // UniFFI が生成する Swift の層。`Escrow.swift` は `build.sh` が置く。
+    // UniFFI が生成する Swift の層（bindings）。`Escrow.swift` は `build.sh` が置く。
     .target(
-      name: "EscrowBridge",
+      name: "EscrowBindings",
       dependencies: ["EscrowFFI"],
-      path: "Sources/EscrowBridge",
+      path: "Sources/EscrowBindings",
       swiftSettings: [.swiftLanguageMode(.v5)],
       linkerSettings: [
         .unsafeFlags(["-L", rustTargetDir]),
@@ -38,7 +38,7 @@ let package = Package(
     ),
     .executableTarget(
       name: "Escrow",
-      dependencies: ["EscrowBridge"],
+      dependencies: ["EscrowBindings"],
       path: "Sources/Escrow",
       swiftSettings: [
         .defaultIsolation(MainActor.self),

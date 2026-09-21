@@ -62,7 +62,7 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // escrow-external → escrow-config。
     ("escrow-cli", ENTRY),
     ("escrow-gui", ENTRY),
-    // Rust 以外の入口が読み込む形（#79）。Swift はここが export したものしか呼べないので、
+    // Rust 以外の入口が読み込む形（#79）。Swift が呼べるのはここが export したものだけなので、
     // Swift 側は cargo の外に居ても、escrow の crate を名前で知る経路はここで止まる。
     ("escrow-ffi", ENTRY),
 ];
@@ -118,13 +118,14 @@ fn only_the_scheduler_knows_the_external_tools() {
     }
 }
 
-/// cargo の外へ出る口は `escrow-ffi` だけ（#79）。
+/// Rust 以外の言語へ公開する crate は `escrow-ffi` だけ（#79）。`docs/rules/architecture.md` の
+/// 段5「入口。組み立てる」を、cargo の外に居る入口へ当てたもの — 入口が見るのは `escrow-app` だけ。
 ///
 /// Swift は `.a` を繋ぐだけなので、上の表では見えない。別の crate が `staticlib` を出したり
 /// `uniffi` を依存に持ったりすれば、Swift から `escrow-app` を経ずに呼べる経路ができる。
 /// そこを塞ぐのはこのテストで、`Cargo.toml` の `crate-type` と依存の名前で見る。
 #[test]
-fn only_the_ffi_crate_opens_a_door_out_of_cargo() {
+fn only_the_ffi_crate_is_exported_beyond_rust() {
     assert!(
         ALLOWED.iter().any(|(name, _)| *name == FFI),
         "{FFI} がワークスペースに無い。改名したなら FFI も直す"

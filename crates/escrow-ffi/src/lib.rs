@@ -5,14 +5,14 @@
 //! ものだけをここで詰め替える（`Listed` は accessor しか無いので record へ、`AppError` は
 //! 文へ）。
 //!
-//! `App` のメソッドは関数になる。UniFFI は写した Object へのメソッドの export をまだ持たない
-//! （uniffi-rs の `examples/remote-types` が TODO に挙げている）。
+//! `App` のメソッドは関数になる。UniFFI が写した Object に export できるのは関数だけで、
+//! メソッドは uniffi-rs の `examples/remote-types` が TODO に挙げている。
 
 use std::sync::Arc;
 
 use escrow_app::{Headline, Person, PersonId};
 
-/// [`escrow_app::App`]。Swift 側の名前は `App` にしない — SwiftUI の `App` protocol と衝突する。
+/// [`escrow_app::App`]。Swift 側では `Escrow` と呼ぶ。`App` は SwiftUI の `App` protocol と衝突する。
 type Escrow = escrow_app::App;
 
 uniffi::setup_scaffolding!();
@@ -62,7 +62,8 @@ impl From<&escrow_app::Listed> for Listed {
 
 /// 入口へ返す失敗。原因まで繋いだ1つの文。
 ///
-/// 画面が出すのは理由の文だけなので、型を保ったまま運ばない（`escrow-gui` と同じ判断）。
+/// 画面が出すのは理由の文だけなので、文だけを運ぶ。**型で締めていないのは決めてのこと**
+/// （`docs/rules/documentation.md`「型で締めなかった所は、そう書く」）。
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 #[uniffi(flat_error)]
 pub enum FfiError {
@@ -127,11 +128,10 @@ fn why(error: &dyn std::error::Error) -> String {
 mod tests {
     use super::*;
 
-    /// #30 の受け入れを、橋の向こうへ渡る値で見る。状態と種別は #1 の表の値そのまま、
+    /// #30 の受け入れを、Swift へ渡る直前の値で見る。状態と種別は #1 の表の値そのまま、
     /// 新しいものが先、項目0件の持ち主は空。
     ///
-    /// 仕込みは [`escrow_app::App::seeded`]（#82）。描いた結果は Swift 側の目視で、ここは
-    /// Swift へ渡る直前の値のほう。
+    /// 仕込みは [`escrow_app::App::seeded`]（#82）。描いた結果は Swift 側で目視する。
     #[tokio::test]
     async fn the_records_that_cross_the_bridge_carry_the_listing() {
         let media = tempfile::tempdir().unwrap();
