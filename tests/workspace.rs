@@ -100,17 +100,40 @@ impl Member {
         found
     }
 
-    /// その member が名前を知っている escrow-* の crate。
+    /// その member が名前を知っている crate 全部。
     ///
     /// **dev-dependencies も含める。** テストの中でだけ迂回できるなら、迂回路は在る。
-    pub fn escrow_dependencies(&self) -> std::collections::BTreeSet<String> {
+    pub fn dependencies(&self) -> std::collections::BTreeSet<String> {
         ["dependencies", "dev-dependencies", "build-dependencies"]
             .iter()
             .filter_map(|table| self.manifest.get(*table))
             .filter_map(toml::Value::as_table)
             .flat_map(toml::Table::keys)
-            .filter(|name| name.starts_with("escrow-"))
             .cloned()
             .collect()
+    }
+
+    /// その member が名前を知っている escrow-* の crate。
+    pub fn escrow_dependencies(&self) -> std::collections::BTreeSet<String> {
+        self.dependencies()
+            .into_iter()
+            .filter(|name| name.starts_with("escrow-"))
+            .collect()
+    }
+
+    /// `[lib] crate-type`。無ければ空（cargo の既定は `lib` だけ）。
+    pub fn crate_types(&self) -> Vec<String> {
+        self.manifest
+            .get("lib")
+            .and_then(|lib| lib.get("crate-type"))
+            .and_then(toml::Value::as_array)
+            .map(|types| {
+                types
+                    .iter()
+                    .filter_map(toml::Value::as_str)
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 }
