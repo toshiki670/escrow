@@ -1,19 +1,15 @@
 [workspace]
 resolver = "3"
 members = [
-    "crates/escrow-domain",
-    "crates/escrow-event-store",
-    "crates/escrow-config",
-    "crates/escrow-external",
-    "crates/escrow-scheduler",
-    "crates/escrow-discovery",
-    "crates/escrow-acquisition",
-    "crates/escrow-transcription",
-    "crates/escrow-custody",
-    "crates/escrow-handover",
-    "crates/escrow-app",
-    "crates/escrow-cli",
-    "crates/escrow-gui",
+    "app",
+    "app/crates/domain",
+    "app/crates/event-store",
+    "app/crates/config",
+    "app/crates/scheduler",
+    "app/crates/scheduler/external",
+    "app/crates/slices/*",
+    "ui/cli",
+    "ui/gui",
     "tests",
 ]
 
@@ -25,17 +21,17 @@ license = "MIT"
 repository = "https://github.com/toshiki670/escrow"
 
 [workspace.dependencies]
-escrow-domain = { path = "crates/escrow-domain" }
-escrow-event-store = { path = "crates/escrow-event-store" }
-escrow-config = { path = "crates/escrow-config" }
-escrow-external = { path = "crates/escrow-external" }
-escrow-scheduler = { path = "crates/escrow-scheduler" }
-escrow-discovery = { path = "crates/escrow-discovery" }
-escrow-acquisition = { path = "crates/escrow-acquisition" }
-escrow-transcription = { path = "crates/escrow-transcription" }
-escrow-custody = { path = "crates/escrow-custody" }
-escrow-handover = { path = "crates/escrow-handover" }
-escrow-app = { path = "crates/escrow-app" }
+escrow-domain = { path = "app/crates/domain" }
+escrow-event-store = { path = "app/crates/event-store" }
+escrow-config = { path = "app/crates/config" }
+escrow-external = { path = "app/crates/scheduler/external" }
+escrow-scheduler = { path = "app/crates/scheduler" }
+escrow-discovery = { path = "app/crates/slices/discovery" }
+escrow-acquisition = { path = "app/crates/slices/acquisition" }
+escrow-transcription = { path = "app/crates/slices/transcription" }
+escrow-custody = { path = "app/crates/slices/custody" }
+escrow-handover = { path = "app/crates/slices/handover" }
+escrow-app = { path = "app" }
 clap = { version = "4.6", features = ["derive"] }
 anyhow = "1.0"
 chrono = "0.4"
