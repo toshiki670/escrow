@@ -50,13 +50,14 @@ const EXTERNAL: (&str, &str) = ("escrow-external", "app/crates/scheduler/externa
 /// **緩めて「横並びは全部よい」にしない** — スライスが `config` を読む経路ができる。設定の値は
 /// `escrow-app` と `scheduler` が読んでスライスへ渡す。
 const SIDE_BY_SIDE: &[(&str, &[&str])] = &[
-    // 段2 — 永続化・設定・外部ツール。config だけは external が読む。
+    // 段2 — 永続化・設定・外部ツール。同じ段の中の依存は external → config だけ。
     ("event-store", &[]),
     ("config", &[]),
     ("scheduler/external", &["config"]),
     // 段3 — 外部アクセスの受付。external を依存に持つ唯一の crate。
     ("scheduler", &["config", "scheduler/external"]),
-    // 段4 — スライス。handover は scheduler 抜きで足りる（#15）。表が言うのは持ってよいものの上限。
+    // 段4 — スライス。handover は scheduler 抜きで足りる（#15。まとめた理由は #101）。表が言うのは
+    // 持ってよいものの上限。
     ("slices", &["event-store", "scheduler"]),
 ];
 
