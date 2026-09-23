@@ -125,10 +125,18 @@ private func rows(_ listed: [Listed]) -> [Row] {
   listed.enumerated().map { Row(id: $0.offset, item: $0.element) }
 }
 
-/// 見出し。`Media` は `title`、`Post` は `body` の1行目（#6）。
+/// どちらの見出しからも文字を取り出す。切るかどうかは列幅が決める（#82）。
 private func shown(_ headline: Headline) -> String {
   switch headline {
   case .title(let title): title
   case .opening(let opening): opening
   }
+}
+
+/// 失敗の理由。`escrow-ffi` は原因まで繋いだ1つの文で返す（`FfiError`）。
+private func why(_ error: Error) -> String {
+  if case FfiError.Failed(let message) = error {
+    return message
+  }
+  return String(describing: error)
 }

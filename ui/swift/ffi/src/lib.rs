@@ -1,9 +1,4 @@
-//! Rust 以外から `escrow-app` を呼ぶ入口（#79）。
-//!
-//! UniFFI がここの公開 API から Swift の関数を生成する。`escrow-app` の型のうち、UniFFI が
-//! 運べる形のものはそのまま通し（`Person` / `Headline` は写し、`App` は handle）、運べない
-//! ものだけをここで詰め替える（`Listed` は accessor しか無いので record へ、`AppError` は
-//! 文へ）。
+//! Swift から `escrow-app` を呼ぶ入口（#79）。UniFFI がここの公開 API から Swift の関数を生成する。
 //!
 //! `App` のメソッドは関数になる。UniFFI が写した Object に export できるのは関数だけで、
 //! メソッドは uniffi-rs の `examples/remote-types` が TODO に挙げている。
@@ -12,12 +7,12 @@ use std::sync::Arc;
 
 use escrow_app::{Headline, Person, PersonId};
 
-/// [`escrow_app::App`]。Swift 側では `Escrow` と呼ぶ。`App` は SwiftUI の `App` protocol と衝突する。
+/// Swift 側の名前。`App` は SwiftUI の `App` protocol と衝突する。
 type Escrow = escrow_app::App;
 
 uniffi::setup_scaffolding!();
 
-// 識別子は i64 で運ぶ。`escrow-app` の引数が `i64` で受けるのと同じ形（#82）。
+// `PersonId` は i64 の newtype（#1）。UniFFI はその中身を運び、Swift は `Int64` で受ける。
 uniffi::custom_type!(PersonId, i64, {
     remote,
     lower: |id| id.into(),
@@ -36,11 +31,15 @@ pub enum Headline {
     Opening(String),
 }
 
-/// 開いたイベントストア。Swift 側は handle として持ち、ここの関数へ渡し返す。
+/// 設定を読み、イベントストアを開いた状態（[`escrow_app::App`]）。Swift は handle として持ち、
+/// ここの関数へ渡し返す。
 #[uniffi::remote(Object)]
 pub struct Escrow;
 
 /// 一覧の1行（#6）。[`escrow_app::Listed`] は accessor しか公開しないので、値へ写す。
+///
+/// 日付・状態・種別は text。**決めて緩めた**ところで、#1 の表の値をそのまま画面へ出す
+/// （[`escrow_app::Listed::state`]）。
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct Listed {
     pub published_on: String,
@@ -62,8 +61,8 @@ impl From<&escrow_app::Listed> for Listed {
 
 /// 入口へ返す失敗。原因まで繋いだ1つの文。
 ///
-/// 画面が出すのは理由の文だけなので、文だけを運ぶ。**型で締めていないのは決めてのこと**
-/// （`docs/rules/documentation.md`「型で締めなかった所は、そう書く」）。
+/// 画面が出すのは理由の文だけなので、文だけを運ぶ。**決めて緩めた**ところで、#7「型で締めない所を
+/// 先に決めておく」に当たる。
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 #[uniffi(flat_error)]
 pub enum FfiError {
@@ -77,7 +76,9 @@ impl From<escrow_app::AppError> for FfiError {
     }
 }
 
-/// 設定の言う場所でイベントストアを開く。
+/// [`escrow_app::App::open`] を Swift から呼ぶ。返す handle を以降の関数へ渡し返す。
+///
+/// 名前を `open` にすると、Swift の予約語と重なって `` `open`() `` になる。
 ///
 /// # Errors
 ///
@@ -87,7 +88,7 @@ pub async fn open_escrow() -> Result<Arc<Escrow>, FfiError> {
     Ok(Arc::new(Escrow::open().await?))
 }
 
-/// 配信元の持ち主を全部。
+/// [`escrow_app::App::persons`] をそのまま渡す。
 ///
 /// # Errors
 ///
@@ -97,7 +98,7 @@ pub async fn persons(escrow: Arc<Escrow>) -> Result<Vec<Person>, FfiError> {
     Ok(escrow.persons().await?)
 }
 
-/// 選んだ持ち主の項目を、一覧の1行の形で新しい順に。
+/// [`escrow_app::App::items_of`] の結果を [`Listed`] へ写して渡す。
 ///
 /// # Errors
 ///
@@ -113,6 +114,9 @@ pub async fn items_of(escrow: Arc<Escrow>, person: PersonId) -> Result<Vec<Liste
 }
 
 /// 失敗の理由を、原因まで繋いで1つの文にする。
+///
+/// `escrow-app` の失敗は「設定を読めない」のように段階を言い、直す先（設定ファイルか
+/// DB か）を言うのは原因の側。そこまで出して、画面が直す先を示す。
 fn why(error: &dyn std::error::Error) -> String {
     let mut text = error.to_string();
     let mut cause = error.source();

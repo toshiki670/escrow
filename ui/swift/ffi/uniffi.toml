@@ -1,3 +1,3 @@
-# Swift 側のモジュール名。生成物は `Escrow.swift` と、C の層 `EscrowFFI`（header と modulemap）。
+# 生成物の名前。`Escrow.swift` と、それが `import` する C の層 `EscrowFFI`（header と modulemap）。
 [bindings.swift]
 module_name = "Escrow"

@@ -44,10 +44,12 @@ const TESTS: &str = "tests";
 const EXTERNAL: (&str, &str) = ("escrow-external", "app/crates/scheduler/external");
 
 /// Rust 以外の言語へ公開する crate と、その場所（#79）。Swift の入口の Rust 側で、`ui/swift/` の
-/// 子。cargo の外に出る形（`staticlib` / `cdylib`）を持ち、`uniffi` を名前で知ってよいのはこれだけ。
+/// 子。Rust の外（C ABI）へ出る形（`staticlib` / `cdylib`）を持ち、`uniffi` を名前で知ってよいのは
+/// これだけ。
 ///
-/// Swift は `.a` を繋ぐだけなので、上の置き場所の規則では見えない。別の crate が `staticlib` を
-/// 出したり `uniffi` を依存に持ったりすれば、Swift から `escrow-app` を経ずに呼べる経路ができる。
+/// 置き場所の規則が届くのは crate 同士の依存までで、Swift が繋ぐ `.a` はその外に在る。別の crate が
+/// `staticlib` を出したり `uniffi` を依存に持ったりすれば、Swift から `escrow-app` を経ずに呼べる
+/// 経路ができる。
 const FFI: (&str, &str) = ("escrow-ffi", "ui/swift/ffi");
 
 /// `app/crates/` に横並びで置く crate の間で、左が右を依存に持ってよいもの。

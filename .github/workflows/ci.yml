@@ -31,7 +31,7 @@ jobs:
       - run: cargo test --workspace --doc
 
   # SwiftUI の入口（#79）。cargo の外に居るので、上の check とは別に建てる。
-  # runner の macOS 26 は Liquid Glass の下限（ui/swift/Info.plist の LSMinimumSystemVersion）。
+  # runner の macOS 26 は、ui/swift/project.yml の deploymentTarget と同じ。
   swift:
     runs-on: macos-latest
     steps:
@@ -44,8 +44,8 @@ jobs:
       # 書き方の検査。`swift format` は Xcode 16 以降に同梱で、設定ファイルは置かず既定に従う。
       - run: swift format lint --strict --recursive ui/swift/Sources/Escrow
 
-      # cargo → uniffi-bindgen → xcodegen → xcodebuild。手元と同じ1本。
-      # #3 の Cask が要求する形 — GUI と CLI が同じ MacOS/ に居て、署名が通る。
+      # 建てるのは手元と同じ1本（ui/swift/build.sh）。
+      # 見るのは #3 の Cask が要求する形 — GUI と CLI が同じ MacOS/ に居て、署名が通る。
       - run: |
           app="$(ui/swift/build.sh)"
           test -x "$app/Contents/MacOS/escrow-gui"

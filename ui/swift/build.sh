@@ -28,12 +28,11 @@ command -v cargo >/dev/null 2>&1 || . "$HOME/.cargo/env"
 # 「built for newer macOS version」の警告が object ごとに出る。
 export MACOSX_DEPLOYMENT_TARGET=26.0
 
-# 1. Rust。staticlib（escrow-ffi）と CLI。CLI も同じ .app に入る（#3）。
+# CLI も同じ .app に入る（#3）。
 # shellcheck disable=SC2086
 cargo build $cargo_flag -p escrow-ffi -p escrow-cli
 
-# 2. バインディング。staticlib の中の metadata から Swift と C の層を生成する。
-#    modulemap のモジュール名は crate 名から付くので、Swift 側の `canImport(EscrowFFI)` に合わせる。
+# modulemap のモジュール名は crate 名から付くので、Swift 側の `canImport(EscrowFFI)` に合わせる。
 bindgen="cargo run --quiet $cargo_flag -p escrow-ffi --features cli --bin uniffi-bindgen --"
 lib="$root/target/$profile/libescrow_ffi.a"
 mkdir -p "$here/Sources/EscrowFFI" "$here/Sources/EscrowBindings"
@@ -41,7 +40,6 @@ $bindgen --headers "$lib" "$here/Sources/EscrowFFI"
 $bindgen --modulemap --module-name EscrowFFI --modulemap-filename module.modulemap "$lib" "$here/Sources/EscrowFFI"
 $bindgen --swift-sources "$lib" "$here/Sources/EscrowBindings"
 
-# 3. Xcode。project.yml から .xcodeproj を作って建てる。
 xcodegen generate --quiet --spec "$here/project.yml" --project "$here"
 mkdir -p "$here/.build"
 xcodebuild -project "$here/Escrow.xcodeproj" -scheme Escrow -configuration "$configuration" \
