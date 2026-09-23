@@ -17,6 +17,8 @@ settings:
     CODE_SIGN_STYLE: Manual
     # 使っていない部分を落とす。Xcode の素の既定は NO で、app の template が YES にしている。
     DEAD_CODE_STRIPPING: "YES"
+    # 警告で落とす。`cargo clippy -- -D warnings` に当たる層（CONTRIBUTING.md「検査の3層」）。
+    SWIFT_TREAT_WARNINGS_AS_ERRORS: "YES"
     # Swift の層が `import EscrowFFI` で読む C の層。header と modulemap は `build.sh` が置く。
     SWIFT_INCLUDE_PATHS: $(SRCROOT)/Sources/EscrowFFI
   configs:
