@@ -1,0 +1,81 @@
+# Xcode の project を生成する種（#79）。`.xcodeproj` は commit せず、`build.sh` が xcodegen で
+# 毎回作る —— pbxproj は差分が読めないので、レビューが読むのはこのファイル。
+#
+# 組み立て（`.app` の形・Info.plist・署名）は Xcode が行う。ここが持つのは escrow の事情だけ
+# —— Rust の staticlib をどう繋ぐか、CLI を同じ `.app` へ入れること、Swift の層を分けること。
+
+name: Escrow
+options:
+  createIntermediateGroups: true
+  deploymentTarget:
+    macOS: "26.0"
+
+settings:
+  base:
+    # ad-hoc 署名（#3「署名」）。Apple Silicon が起動するのは署名の有る実行ファイルだけ。
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGN_STYLE: Manual
+    # 使っていない部分を落とす。Xcode の素の既定は NO で、app の template が YES にしている。
+    DEAD_CODE_STRIPPING: "YES"
+    # Swift の層が `import EscrowFFI` で読む C の層。header と modulemap は `build.sh` が置く。
+    SWIFT_INCLUDE_PATHS: $(SRCROOT)/Sources/EscrowFFI
+  configs:
+    debug:
+      ESCROW_RUST_TARGET_DIR: $(SRCROOT)/../../target/debug
+    release:
+      ESCROW_RUST_TARGET_DIR: $(SRCROOT)/../../target/release
+      # 記号を落とす。Xcode が既定で落とすのは archive のときだけで、配るのは build の出来上がり。
+      DEPLOYMENT_POSTPROCESSING: "YES"
+      STRIP_INSTALLED_PRODUCT: "YES"
+
+targets:
+  # UniFFI が生成する Swift の層。`build.sh` が置く。手で書く層と分けるのは、UniFFI の Swift 6
+  # 対応が部分的で、生成コードだけ Swift 5 の言語モードで建てるため。
+  EscrowBindings:
+    type: library.static
+    platform: macOS
+    sources:
+      - path: Sources/EscrowBindings
+    settings:
+      base:
+        SWIFT_VERSION: "5.0"
+
+  Escrow:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/Escrow
+    dependencies:
+      - target: EscrowBindings
+      # `cargo rustc -- --print native-static-libs` が挙げたもの。
+      - sdk: Security.framework
+      - sdk: CoreFoundation.framework
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDevelopmentRegion: ja
+        # #3 の `.app` の形（`Contents/MacOS/escrow-gui`）。
+        CFBundleExecutable: $(EXECUTABLE_NAME)
+        CFBundleName: $(PRODUCT_NAME)
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
+        NSHighResolutionCapable: true
+    settings:
+      base:
+        # `.app` は Escrow、中の実行ファイルは escrow-gui。CLI の `escrow` と APFS（大文字小文字を
+        # 区別しない）で同じファイルにならないよう、大文字小文字では分けない。
+        PRODUCT_NAME: Escrow
+        EXECUTABLE_NAME: escrow-gui
+        PRODUCT_BUNDLE_IDENTIFIER: com.github.toshiki670.escrow
+        SWIFT_VERSION: "6.0"
+        OTHER_SWIFT_FLAGS: -default-isolation MainActor -enable-upcoming-feature NonisolatedNonsendingByDefault
+        LIBRARY_SEARCH_PATHS: $(ESCROW_RUST_TARGET_DIR)
+        OTHER_LDFLAGS: -lescrow_ffi -liconv
+    postBuildScripts:
+      - name: CLI を同じ .app へ入れる
+        script: cp -f "$ESCROW_RUST_TARGET_DIR/escrow" "$BUILT_PRODUCTS_DIR/$EXECUTABLE_FOLDER_PATH/escrow"
+        inputFiles:
+          - $(ESCROW_RUST_TARGET_DIR)/escrow
+        outputFiles:
+          - $(BUILT_PRODUCTS_DIR)/$(EXECUTABLE_FOLDER_PATH)/escrow

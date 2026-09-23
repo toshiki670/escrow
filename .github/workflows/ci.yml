@@ -38,14 +38,16 @@ jobs:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
 
+      # .xcodeproj は project.yml から作るので、その道具を入れる。
+      - run: brew install xcodegen
+
       # 書き方の検査。`swift format` は Xcode 16 以降に同梱で、設定ファイルは置かず既定に従う。
-      - run: swift format lint --strict --recursive ui/swift/Sources/Escrow ui/swift/Package.swift
+      - run: swift format lint --strict --recursive ui/swift/Sources/Escrow
 
-      # cargo → uniffi-bindgen → swift build（警告は落とす）→ .app。手元と同じ1本。
-      - run: ui/swift/build.sh
-
+      # cargo → uniffi-bindgen → xcodegen → xcodebuild。手元と同じ1本。
       # #3 の Cask が要求する形 — GUI と CLI が同じ MacOS/ に居て、署名が通る。
       - run: |
-          test -x ui/swift/dist/Escrow.app/Contents/MacOS/escrow-gui
-          test -x ui/swift/dist/Escrow.app/Contents/MacOS/escrow
-          codesign --verify ui/swift/dist/Escrow.app
+          app="$(ui/swift/build.sh)"
+          test -x "$app/Contents/MacOS/escrow-gui"
+          test -x "$app/Contents/MacOS/escrow"
+          codesign --verify --deep --strict "$app"

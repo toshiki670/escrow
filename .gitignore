@@ -22,6 +22,7 @@ target
 
 # SwiftUI の入口（#79）。生成物と出来上がり。作るのは ui/swift/build.sh
 ui/swift/.build
-ui/swift/dist
+ui/swift/Escrow.xcodeproj
+ui/swift/Info.plist
 ui/swift/Sources/EscrowFFI
 ui/swift/Sources/EscrowBindings
