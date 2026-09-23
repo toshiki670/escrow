@@ -72,7 +72,9 @@ pub enum FfiError {
 
 impl From<escrow_app::AppError> for FfiError {
     fn from(error: escrow_app::AppError) -> Self {
-        Self::Failed(why(&error))
+        // `{:#}` は原因まで `: ` で繋ぐ。`escrow-app` の失敗は段階を言い、直す先（設定ファイルか
+        // DB か）を言うのは原因の側なので、そこまで出す。
+        Self::Failed(format!("{:#}", anyhow::Error::from(error)))
     }
 }
 
@@ -111,21 +113,6 @@ pub async fn items_of(escrow: Arc<Escrow>, person: PersonId) -> Result<Vec<Liste
         .iter()
         .map(Listed::from)
         .collect())
-}
-
-/// 失敗の理由を、原因まで繋いで1つの文にする。
-///
-/// `escrow-app` の失敗は「設定を読めない」のように段階を言い、直す先（設定ファイルか
-/// DB か）を言うのは原因の側。そこまで出して、画面が直す先を示す。
-fn why(error: &dyn std::error::Error) -> String {
-    let mut text = error.to_string();
-    let mut cause = error.source();
-    while let Some(source) = cause {
-        text.push_str(": ");
-        text.push_str(&source.to_string());
-        cause = source.source();
-    }
-    text
 }
 
 #[cfg(test)]
@@ -167,33 +154,5 @@ mod tests {
 
         let nobody = persons.iter().find(|p| p.name == "□□").unwrap();
         assert!(items_of(escrow, nobody.id).await.unwrap().is_empty());
-    }
-
-    /// 失敗は原因まで繋いで1つの文にする。直す先を言うのは原因の側。
-    #[test]
-    fn a_failure_reads_down_to_its_cause() {
-        /// 「段階: 原因」の2段。`escrow-app` の `Config` / `Open` と同じ形。
-        #[derive(Debug)]
-        struct Staged(&'static str, Option<Box<Staged>>);
-
-        impl std::fmt::Display for Staged {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                f.write_str(self.0)
-            }
-        }
-        impl std::error::Error for Staged {
-            fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-                self.1.as_deref().map(|cause| cause as _)
-            }
-        }
-
-        let failure = Staged(
-            "設定を読めない",
-            Some(Box::new(Staged("設定ファイルを TOML として読めない", None))),
-        );
-        assert_eq!(
-            why(&failure),
-            "設定を読めない: 設定ファイルを TOML として読めない"
-        );
     }
 }
