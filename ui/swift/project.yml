@@ -50,6 +50,19 @@ targets:
         script: '"$SRCROOT/rust.sh" "$([ "$CONFIGURATION" = Release ] && echo release || echo debug)"'
         basedOnDependencyAnalysis: false
 
+  EscrowUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - path: Tests/EscrowUITests
+    dependencies:
+      - target: Escrow
+    settings:
+      base:
+        SWIFT_VERSION: "6.0"
+        TEST_TARGET_NAME: Escrow
+        GENERATE_INFOPLIST_FILE: "YES"
+
   Escrow:
     type: application
     platform: macOS
@@ -83,6 +96,9 @@ targets:
         # staticlib と、それが要るもの。挙げたのは `cargo rustc -- --print native-static-libs`
         # （Security と CoreFoundation は上の sdk の2行）。
         OTHER_LDFLAGS: -lescrow_ffi -liconv
+    scheme:
+      testTargets:
+        - EscrowUITests
     postBuildScripts:
       - name: CLI を同じ .app へ入れる
         script: cp -f "$ESCROW_RUST_TARGET_DIR/escrow" "$BUILT_PRODUCTS_DIR/$EXECUTABLE_FOLDER_PATH/escrow"
