@@ -10,6 +10,7 @@ members = [
     "app/crates/slices/*",
     "ui/cli",
     "ui/gui",
+    "ui/swift/ffi",
     "tests",
 ]
 
@@ -43,6 +44,9 @@ directories = "6.0"
 iced = { version = "0.14", features = ["tokio"] }
 # 画面を窓なしで動かして確かめる。iced と同じ版で、同じ repository が出している。
 iced_test = "0.14"
+# Rust 以外の入口（#79）。tokio feature は sqlx の runtime に合わせる。bindgen 用の cli /
+# cargo-metadata は既定で切り、ui/swift/ffi の feature `cli` だけが足す。
+uniffi = { version = "0.32", default-features = false, features = ["tokio"] }
 quick-xml = { version = "0.42", features = ["serialize"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "webpki-roots", "http2", "charset"] }
 serde = { version = "1.0", features = ["derive"] }

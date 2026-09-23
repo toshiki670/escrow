@@ -43,6 +43,15 @@ const TESTS: &str = "tests";
 /// [`the_external_tools_stay_under_the_scheduler`] が黙って通るのを防ぐため。
 const EXTERNAL: (&str, &str) = ("escrow-external", "app/crates/scheduler/external");
 
+/// Rust 以外の言語へ公開する crate と、その場所（#79）。Swift の入口の Rust 側で、`ui/swift/` の
+/// 子。Rust の外（C ABI）へ出る形（`staticlib` / `cdylib`）を持ち、`uniffi` を名前で知ってよいのは
+/// これだけ。
+///
+/// 置き場所の規則が届くのは crate 同士の依存までで、Swift が繋ぐ `.a` はその外に在る。別の crate が
+/// `staticlib` を出したり `uniffi` を依存に持ったりすれば、Swift から `escrow-app` を経ずに呼べる
+/// 経路ができる。
+const FFI: (&str, &str) = ("escrow-ffi", "ui/swift/ffi");
+
 /// `app/crates/` に横並びで置く crate の間で、左が右を依存に持ってよいもの。
 ///
 /// 横並び同士の可否は構造から決まらないので、この分だけ表で持つ。パスは `app/crates/` からの
@@ -183,6 +192,41 @@ fn the_external_tools_stay_under_the_scheduler() {
         Path::new(dir),
         "{name} の置き場所。scheduler の子でなくなると、知ってよいのが scheduler だけという規則が消える"
     );
+}
+
+/// Rust 以外の言語へ公開する crate が [`FFI`] だけであること（#79）。
+///
+/// `Cargo.toml` の `crate-type` と依存の名前で見る。場所も固定するのは [`EXTERNAL`] と同じ理由で、
+/// `ui/swift/` の外へ動くと「Swift の入口の Rust 側」でなくなる。
+#[test]
+fn only_the_ffi_crate_is_exported_beyond_rust() {
+    let (name, dir) = FFI;
+    let members = members();
+    let ffi = members
+        .iter()
+        .find(|m| m.name == name)
+        .unwrap_or_else(|| panic!("{name} がワークスペースに無い。改名したなら FFI も直す"));
+    assert_eq!(ffi.dir, Path::new(dir), "{name} の置き場所");
+
+    for member in &members {
+        let crate_types = member.crate_types();
+        let exported = crate_types
+            .iter()
+            .any(|t| t == "staticlib" || t == "cdylib");
+        assert_eq!(
+            exported,
+            member.name == name,
+            "{} の crate-type: {crate_types:?}",
+            member.name
+        );
+
+        assert_eq!(
+            member.dependencies().contains("uniffi"),
+            member.name == name,
+            "{} から uniffi への依存",
+            member.name
+        );
+    }
 }
 
 /// 全 member が木のどこかに在ること。

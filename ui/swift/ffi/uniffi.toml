@@ -1,0 +1,3 @@
+# 生成物の名前。`Escrow.swift` と、それが `import` する C の層 `EscrowFFI`（header と modulemap）。
+[bindings.swift]
+module_name = "Escrow"
