@@ -14,6 +14,9 @@ settings:
     # ad-hoc 署名（#3「署名」）。Apple Silicon が起動するのは署名の有る実行ファイルだけ。
     CODE_SIGN_IDENTITY: "-"
     CODE_SIGN_STYLE: Manual
+    # Rust 側の staticlib は aarch64-apple-darwin だけ（rust-toolchain.toml）。#3 の対象も
+    # Apple Silicon。宣言しないと、建てる arch を xcodebuild の destination 選びに任せることになる。
+    ARCHS: arm64
     # 使っていない部分を落とす。Xcode の素の既定は NO で、app の template が YES にしている。
     DEAD_CODE_STRIPPING: "YES"
     # 警告で落とす。`cargo clippy -- -D warnings` に当たる層（CONTRIBUTING.md「検査の3層」）。
@@ -40,6 +43,12 @@ targets:
     settings:
       base:
         SWIFT_VERSION: "5.0"
+    preBuildScripts:
+      # Xcode の Run ボタンは Rust 側を建て直さない。生成した層と繋ぐ staticlib の版が食い違うと、
+      # UniFFI が起動時の照合で止まるので、ここで揃える。中身は build.sh が呼ぶものと同じ。
+      - name: Rust 側を建てて Swift が読む層を生成する
+        script: '"$SRCROOT/rust.sh" "$([ "$CONFIGURATION" = Release ] && echo release || echo debug)"'
+        basedOnDependencyAnalysis: false
 
   Escrow:
     type: application
