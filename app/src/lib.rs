@@ -1,7 +1,7 @@
 //! 入口が呼ぶ関数（#82）。
 //!
 //! 設定を読んでイベントストアを開く手順と、そこから読む・書く関数をここに置く。入口
-//! （`escrow-cli` / `escrow-gui`、#79 の SwiftUI）はこの crate だけを見て、出力の形
+//! （`escrow-cli` と、#79 の SwiftUI が繋ぐ `escrow-ffi`）はこの crate だけを見て、出力の形
 //! （`println!`・画面）だけを持つ。画面ごとに足す関数もここに置くので、入口が増えても
 //! 書く場所は1つ。
 //!
@@ -370,7 +370,8 @@ mod tests {
 
     /// 仕込んだ形（[`App::seeded`]）が、持ち主ごとに新しい順で返ること。
     ///
-    /// 描いた結果は `escrow-gui` のテストが見る。ここは入口に依らない値のほう。
+    /// 描いた結果は SwiftUI の UI テスト（`ui/swift/Tests/EscrowUITests`）が見る。ここは入口に
+    /// 依らない値のほう。
     #[tokio::test]
     async fn items_of_a_person_come_newest_first() {
         let media = tempfile::tempdir().unwrap();
