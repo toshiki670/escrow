@@ -2,7 +2,8 @@
 //!
 //! 入口が名前で知る crate は `escrow-app` だけ（`tests/dependency_direction.rs`）なので、
 //! イベントストアを仕込むのもここの仕事。入口のテストは [`App`] を受け取り、描いた結果だけを
-//! 見る。
+//! 見る。別のプロセスで動く入口（#106 の SwiftUI の UI テスト）へは、ファイルの DB に置いて
+//! 渡す（`escrow-fixture`）。
 
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
@@ -37,93 +38,97 @@ async fn a_source_for(store: &EventStore, person: PersonId, raw: &str) -> Source
         .unwrap()
 }
 
+/// CLI の `person add` → `source add` → `item add` → `fetch` が作る形を、イベントストアへ直接置く。
+///
+/// ○○ は配信1本（`holding`）と投稿1件（`kept`）、□□ は項目を持たない。
+///
+/// **新しいほうを後から見つける。** リードモデルは id の順で返るので、こうしないと
+/// 「並べ替えを忘れた」と「たまたま合っている」の区別が付かなくなる。
+async fn put(store: &EventStore) {
+    let owner = store.add_person("○○").await.unwrap();
+    let youtube = a_source_for(
+        store,
+        owner,
+        "https://www.youtube.com/channel/UCBR8-60-B28hp2BmDPdntcQ",
+    )
+    .await;
+    let x = a_source_for(store, owner, "https://x.com/i/user/12").await;
+
+    // 本文だけの投稿は、取るものが無いのでそのまま kept から始まる（#1）。
+    store
+        .discover(
+            &Discovered {
+                source_id: x,
+                url: url::normalize_item("https://x.com/jack/status/20")
+                    .unwrap()
+                    .0,
+                published_at: at("2026-03-01T12:00:00+09:00"),
+                scheduled_start_at: None,
+                content: Content::Post {
+                    body: "明日の配信は21時から。".to_owned(),
+                    in_reply_to: None,
+                    quoted: None,
+                },
+                media: MediaPresence::Absent,
+            },
+            at("2026-03-01T12:01:00+09:00"),
+        )
+        .await
+        .unwrap();
+
+    let live = store
+        .discover(
+            &Discovered {
+                source_id: youtube,
+                url: url::normalize_item("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+                    .unwrap()
+                    .0,
+                published_at: at("2026-03-01T20:00:00+09:00"),
+                scheduled_start_at: None,
+                content: Content::Media {
+                    media_type: MediaType::YoutubeLive,
+                    title: "○○の雑談配信".to_owned(),
+                },
+                media: MediaPresence::Present,
+            },
+            at("2026-03-01T20:05:00+09:00"),
+        )
+        .await
+        .unwrap();
+    let seq = store
+        .append(
+            live,
+            Seq::FIRST,
+            &Event::AcquisitionStarted,
+            at("2026-03-01T20:10:00+09:00"),
+        )
+        .await
+        .unwrap();
+    store
+        .append(
+            live,
+            seq,
+            &Event::Acquired {
+                transcript: TranscriptNeed::NotNeeded,
+                hold: Hold::Until(at("2026-03-09T00:30:00+09:00")),
+            },
+            at("2026-03-02T00:30:00+09:00"),
+        )
+        .await
+        .unwrap();
+
+    store.add_person("□□").await.unwrap();
+}
+
 impl App {
-    /// CLI の `person add` → `source add` → `item add` → `fetch` が作る形を、イベントストアへ直接置く。
+    /// [`put`] の形を置いたイベントストアを、メモリの上に開く。
     ///
-    /// ○○ は配信1本（`holding`）と投稿1件（`kept`）、□□ は項目を持たない。
-    ///
-    /// **新しいほうを後から見つける。** リードモデルは id の順で返るので、こうしないと
-    /// 「並べ替えを忘れた」と「たまたま合っている」の区別が付かなくなる。
-    ///
-    /// イベントストアはメモリの上に在り、実体の置き場所だけを `media_dir` で受ける。設定は
-    /// 既定で、外部ツールを探す場所は空 — **動くのは読む側だけ**で、外へ出る `add_item` と
-    /// `fetch` は [`crate::AppError::MissingTool`] で止まる。
+    /// 実体の置き場所だけを `media_dir` で受ける。設定は既定で、外部ツールを探す場所は空 —
+    /// **動くのは読む側だけ**で、外へ出る `add_item` と `fetch` は [`crate::AppError::MissingTool`]
+    /// で止まる。
     pub async fn seeded(media_dir: &Path) -> Self {
         let store = EventStore::open_in_memory().await.unwrap();
-
-        let owner = store.add_person("○○").await.unwrap();
-        let youtube = a_source_for(
-            &store,
-            owner,
-            "https://www.youtube.com/channel/UCBR8-60-B28hp2BmDPdntcQ",
-        )
-        .await;
-        let x = a_source_for(&store, owner, "https://x.com/i/user/12").await;
-
-        // 本文だけの投稿は、取るものが無いのでそのまま kept から始まる（#1）。
-        store
-            .discover(
-                &Discovered {
-                    source_id: x,
-                    url: url::normalize_item("https://x.com/jack/status/20")
-                        .unwrap()
-                        .0,
-                    published_at: at("2026-03-01T12:00:00+09:00"),
-                    scheduled_start_at: None,
-                    content: Content::Post {
-                        body: "明日の配信は21時から。".to_owned(),
-                        in_reply_to: None,
-                        quoted: None,
-                    },
-                    media: MediaPresence::Absent,
-                },
-                at("2026-03-01T12:01:00+09:00"),
-            )
-            .await
-            .unwrap();
-
-        let live = store
-            .discover(
-                &Discovered {
-                    source_id: youtube,
-                    url: url::normalize_item("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
-                        .unwrap()
-                        .0,
-                    published_at: at("2026-03-01T20:00:00+09:00"),
-                    scheduled_start_at: None,
-                    content: Content::Media {
-                        media_type: MediaType::YoutubeLive,
-                        title: "○○の雑談配信".to_owned(),
-                    },
-                    media: MediaPresence::Present,
-                },
-                at("2026-03-01T20:05:00+09:00"),
-            )
-            .await
-            .unwrap();
-        let seq = store
-            .append(
-                live,
-                Seq::FIRST,
-                &Event::AcquisitionStarted,
-                at("2026-03-01T20:10:00+09:00"),
-            )
-            .await
-            .unwrap();
-        store
-            .append(
-                live,
-                seq,
-                &Event::Acquired {
-                    transcript: TranscriptNeed::NotNeeded,
-                    hold: Hold::Until(at("2026-03-09T00:30:00+09:00")),
-                },
-                at("2026-03-02T00:30:00+09:00"),
-            )
-            .await
-            .unwrap();
-
-        store.add_person("□□").await.unwrap();
+        put(&store).await;
 
         Self {
             config: Config::default(),
@@ -136,5 +141,19 @@ impl App {
             store,
             resolver: Resolver::new(None, &[]),
         }
+    }
+
+    /// [`App::open`] と同じ場所に DB を開き、[`put`] の形を置く。
+    ///
+    /// 置き場所は環境（`HOME`）が決める。**空の場所で呼ぶ** — 同じ DB へ2度呼ぶと、持ち主が
+    /// 2人ずつになる。
+    ///
+    /// # Errors
+    ///
+    /// [`App::open`] と同じ。
+    pub async fn open_seeded() -> Result<Self, crate::AppError> {
+        let app = Self::open().await?;
+        put(&app.store).await;
+        Ok(app)
     }
 }

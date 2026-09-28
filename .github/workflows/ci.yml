@@ -42,7 +42,7 @@ jobs:
       - run: brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
 
       # 書き方の検査。`swift format` は Xcode 16 以降に同梱で、設定ファイルは置かず既定に従う。
-      - run: swift format lint --strict --recursive ui/swift/Sources/Escrow
+      - run: swift format lint --strict --recursive ui/swift/Sources/Escrow ui/swift/Tests
 
       # 建てるのは手元と同じ1本（ui/swift/build.sh）。
       # 見るのは #3 の Cask が要求する形 — GUI と CLI が同じ MacOS/ に居て、署名が通る。
@@ -51,3 +51,6 @@ jobs:
           test -x "$app/Contents/MacOS/escrow-gui"
           test -x "$app/Contents/MacOS/escrow"
           codesign --verify --deep --strict "$app"
+
+      # アプリを起動して画面の文字を読む（#106）。仕込んだ DB は project.yml の phase が作る。
+      - run: ui/swift/test.sh

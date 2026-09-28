@@ -16,6 +16,7 @@ escrow-acquisition.workspace = true
 escrow-transcription.workspace = true
 escrow-handover.workspace = true
 thiserror.workspace = true
+tokio = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile.workspace = true
@@ -24,7 +25,12 @@ tokio.workspace = true
 [features]
 # 入口のテストがイベントストアへ置く形（#82）。入口が名前で知る crate はこれ1つなので、
 # 仕込みもここが持つ。
-fixture = []
+fixture = ["dep:tokio"]
+
+# 仕込みをファイルの DB へ書く（#106）。別のプロセスで動く入口のテストが使う。
+[[bin]]
+name = "escrow-fixture"
+required-features = ["fixture"]
 
 [lints]
 workspace = true

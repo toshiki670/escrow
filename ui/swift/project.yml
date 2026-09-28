@@ -62,6 +62,24 @@ targets:
         SWIFT_VERSION: "6.0"
         TEST_TARGET_NAME: Escrow
         GENERATE_INFOPLIST_FILE: "YES"
+    postBuildScripts:
+      # テストが渡す HOME を、テストの bundle へ入れる（#106）。DB は建てるたびに今のスキーマで
+      # できるので、repository に置いた DB のように古くならない。前の回の分は消す —— 同じ DB へ
+      # 2度置くと持ち主が2人ずつになる。
+      - name: 仕込んだ HOME を作る
+        script: |
+          set -eu
+          command -v cargo >/dev/null 2>&1 || . "$HOME/.cargo/env"
+          cd "$SRCROOT/../.."
+          cargo build --quiet -p escrow-app --features fixture --bin escrow-fixture
+          home="$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/home"
+          rm -rf "$home"
+          mkdir -p "$home"
+          HOME="$home" target/debug/escrow-fixture
+        # 出力を宣言しないと、増分ビルドで Xcode が署名をやり直さず、bundle の封が壊れる。
+        outputFiles:
+          - $(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/home
+        basedOnDependencyAnalysis: false
 
   Escrow:
     type: application
