@@ -63,20 +63,11 @@ targets:
         TEST_TARGET_NAME: Escrow
         GENERATE_INFOPLIST_FILE: "YES"
     postBuildScripts:
-      # テストが渡す HOME を、テストの bundle へ入れる（#106）。DB は建てるたびに今のスキーマで
-      # できるので、repository に置いた DB のように古くならない。前の回の分は消す —— 同じ DB へ
-      # 2度置くと持ち主が2人ずつになる。
+      # テストが渡す HOME を、テストの bundle へ入れる（#106）。書く先は TARGET_BUILD_DIR —— UI テストの
+      # bundle は Runner.app の中で組まれるので、BUILT_PRODUCTS_DIR へ書くとテストから見えない。
       - name: 仕込んだ HOME を作る
-        script: |
-          set -eu
-          command -v cargo >/dev/null 2>&1 || . "$HOME/.cargo/env"
-          cd "$SRCROOT/../.."
-          cargo build --quiet -p escrow-app --features fixture --bin escrow-fixture
-          home="$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/home"
-          rm -rf "$home"
-          mkdir -p "$home"
-          HOME="$home" target/debug/escrow-fixture
-        # 出力を宣言しないと、増分ビルドで Xcode が署名をやり直さず、bundle の封が壊れる。
+        script: '"$SRCROOT/fixture.sh" "$([ "$CONFIGURATION" = Release ] && echo release || echo debug)" "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/home"'
+        # 出力を宣言しないと、増分ビルドで Xcode が署名をやり直さず、bundle の署名が壊れる。
         outputFiles:
           - $(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/home
         basedOnDependencyAnalysis: false

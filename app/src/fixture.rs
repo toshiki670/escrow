@@ -15,7 +15,7 @@ use escrow_domain::source::{Monitoring, PersonId, SourceId};
 use escrow_domain::state::{Event, Hold, MediaPresence, TranscriptNeed};
 use escrow_domain::timestamp::Timestamp;
 use escrow_domain::url;
-use escrow_event_store::{EventStore, NewSource, Seq};
+use escrow_event_store::{EventStore, EventStoreError, NewSource, Seq};
 
 use crate::App;
 
@@ -23,7 +23,11 @@ fn at(text: &str) -> Timestamp {
     Timestamp::parse(text).expect(text)
 }
 
-async fn a_source_for(store: &EventStore, person: PersonId, raw: &str) -> SourceId {
+async fn a_source_for(
+    store: &EventStore,
+    person: PersonId,
+    raw: &str,
+) -> Result<SourceId, EventStoreError> {
     store
         .add_source(&NewSource {
             person_id: person,
@@ -35,24 +39,21 @@ async fn a_source_for(store: &EventStore, person: PersonId, raw: &str) -> Source
             monitoring: Monitoring::Continuous,
         })
         .await
-        .unwrap()
 }
 
-/// CLI の `person add` → `source add` → `item add` → `fetch` が作る形を、イベントストアへ直接置く。
-///
-/// ○○ は配信1本（`holding`）と投稿1件（`kept`）、□□ は項目を持たない。
+/// [`App::seeded`] の形を置く。
 ///
 /// **新しいほうを後から見つける。** リードモデルは id の順で返るので、こうしないと
 /// 「並べ替えを忘れた」と「たまたま合っている」の区別が付かなくなる。
-async fn put(store: &EventStore) {
-    let owner = store.add_person("○○").await.unwrap();
+async fn put(store: &EventStore) -> Result<(), EventStoreError> {
+    let owner = store.add_person("○○").await?;
     let youtube = a_source_for(
         store,
         owner,
         "https://www.youtube.com/channel/UCBR8-60-B28hp2BmDPdntcQ",
     )
-    .await;
-    let x = a_source_for(store, owner, "https://x.com/i/user/12").await;
+    .await?;
+    let x = a_source_for(store, owner, "https://x.com/i/user/12").await?;
 
     // 本文だけの投稿は、取るものが無いのでそのまま kept から始まる（#1）。
     store
@@ -73,8 +74,7 @@ async fn put(store: &EventStore) {
             },
             at("2026-03-01T12:01:00+09:00"),
         )
-        .await
-        .unwrap();
+        .await?;
 
     let live = store
         .discover(
@@ -93,8 +93,7 @@ async fn put(store: &EventStore) {
             },
             at("2026-03-01T20:05:00+09:00"),
         )
-        .await
-        .unwrap();
+        .await?;
     let seq = store
         .append(
             live,
@@ -102,8 +101,7 @@ async fn put(store: &EventStore) {
             &Event::AcquisitionStarted,
             at("2026-03-01T20:10:00+09:00"),
         )
-        .await
-        .unwrap();
+        .await?;
     store
         .append(
             live,
@@ -114,21 +112,25 @@ async fn put(store: &EventStore) {
             },
             at("2026-03-02T00:30:00+09:00"),
         )
-        .await
-        .unwrap();
+        .await?;
 
-    store.add_person("□□").await.unwrap();
+    store.add_person("□□").await?;
+    Ok(())
 }
 
 impl App {
-    /// [`put`] の形を置いたイベントストアを、メモリの上に開く。
+    /// CLI の `person add` → `source add` → `item add` → `fetch` が作る形を置いたイベントストアを、
+    /// メモリの上に開く。
+    ///
+    /// ○○ は配信1本（`holding`）と投稿1件（`kept`）、□□ は項目を持たない。○○ の2件は、配信の
+    /// ほうが新しい。
     ///
     /// 実体の置き場所だけを `media_dir` で受ける。設定は既定で、外部ツールを探す場所は空 —
     /// **動くのは読む側だけ**で、外へ出る `add_item` と `fetch` は [`crate::AppError::MissingTool`]
     /// で止まる。
     pub async fn seeded(media_dir: &Path) -> Self {
         let store = EventStore::open_in_memory().await.unwrap();
-        put(&store).await;
+        put(&store).await.unwrap();
 
         Self {
             config: Config::default(),
@@ -143,17 +145,18 @@ impl App {
         }
     }
 
-    /// [`App::open`] と同じ場所に DB を開き、[`put`] の形を置く。
+    /// [`App::open`] と同じ場所に DB を開き、[`App::seeded`] と同じ形を置く。
     ///
     /// 置き場所は環境（`HOME`）が決める。**空の場所で呼ぶ** — 同じ DB へ2度呼ぶと、持ち主が
     /// 2人ずつになる。
     ///
     /// # Errors
     ///
-    /// [`App::open`] と同じ。
+    /// [`App::open`] の失敗に加えて、置く途中でイベントストアへ書けないとき
+    /// [`crate::AppError::EventStore`]。
     pub async fn open_seeded() -> Result<Self, crate::AppError> {
         let app = Self::open().await?;
-        put(&app.store).await;
+        put(&app.store).await?;
         Ok(app)
     }
 }

@@ -2,8 +2,8 @@ import XCTest
 
 /// #30 の受け入れを、描いた画面で見る（#106）。
 ///
-/// 仕込みは `escrow-app` の `App::seeded` と同じ形（○○ は配信1本と投稿1件、□□ は項目を持たない）。
-/// `project.yml` の phase が、それを置いた HOME をこの bundle へ入れる。
+/// 仕込みは `escrow-app` の `App::open_seeded`。`project.yml` の phase（`fixture.sh`）が、それを置いた
+/// HOME をこの bundle へ入れる。
 @MainActor
 final class ListingTests: XCTestCase {
   private func launched() throws -> XCUIApplication {
@@ -11,12 +11,13 @@ final class ListingTests: XCTestCase {
       Bundle(for: ListingTests.self).url(forResource: "home", withExtension: nil),
       "仕込んだ HOME が bundle に無い。project.yml の「仕込んだ HOME を作る」を見る")
     // 回ごとに写す。アプリは開いた DB へ書くことがあり、前の回の分を次の回へ持ち越さない。
+    // `escrow.db` だけでなく HOME ごと写す —— 中身は WAL の `escrow.db-wal` の側に在る。
     let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.copyItem(at: seeded, to: home)
 
     let app = XCUIApplication()
     app.launchEnvironment["HOME"] = home.path
-    // 窓の再開を止める。前の回が落ちていると、再開を訊くダイアログが窓の代わりに出る。
+    // ウインドウの復元を止める。前の回が落ちていると、復元を訊くダイアログがウインドウの代わりに出る。
     app.launchArguments = ["-ApplePersistenceIgnoreState", "YES"]
     app.launch()
     return app
@@ -39,9 +40,13 @@ final class ListingTests: XCTestCase {
     let post = text("明日の配信は21時から。", in: app)
     XCTAssertTrue(post.exists, "Post の見出しは body の先頭")
 
-    // 状態と種別は #1 の表の値。
-    for value in ["holding", "kept", "youtube_live", "x_post"] {
-      XCTAssertTrue(text(value, in: app).exists, "\(value) が出る")
+    // 状態と種別は #1 の表の値。どの行に出たかまで見る。
+    for (value, row) in [
+      ("holding", live), ("youtube_live", live), ("kept", post), ("x_post", post),
+    ] {
+      let cell = text(value, in: app)
+      XCTAssertTrue(cell.exists, "\(value) が出る")
+      XCTAssertEqual(cell.frame.midY, row.frame.midY, accuracy: 4, "\(value) が見出しと同じ行に出る")
     }
 
     XCTAssertLessThan(live.frame.minY, post.frame.minY, "新しい項目が上に来る")
