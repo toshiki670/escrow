@@ -9,7 +9,6 @@ members = [
     "app/crates/scheduler/external",
     "app/crates/slices/*",
     "ui/cli",
-    "ui/gui",
     "ui/swift/ffi",
     "tests",
 ]
@@ -39,11 +38,6 @@ chrono = "0.4"
 # 識別子の newtype。const fn new と Display と i64 への変換を出す。
 derive_more = { version = "2.1", default-features = false, features = ["std", "constructor", "display", "into"] }
 directories = "6.0"
-# GUI。tokio feature を指定するのは、既定の executor が futures の thread-pool で、
-# sqlx の tokio と噛み合わないため（#7）。
-iced = { version = "0.14", features = ["tokio"] }
-# 画面を窓なしで動かして確かめる。iced と同じ版で、同じ repository が出している。
-iced_test = "0.14"
 # Rust 以外の入口（#79）。tokio feature は sqlx の runtime に合わせる。bindgen 用の cli /
 # cargo-metadata は既定で切り、ui/swift/ffi の feature `cli` だけが足す。
 uniffi = { version = "0.32", default-features = false, features = ["tokio"] }

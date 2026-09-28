@@ -20,6 +20,7 @@ required-features = ["cli"]
 
 # 段5 の入口。組み立てる crate だけを見る（#82）。
 [dependencies]
+anyhow.workspace = true
 escrow-app.workspace = true
 thiserror.workspace = true
 uniffi = { workspace = true, features = ["tokio"] }
