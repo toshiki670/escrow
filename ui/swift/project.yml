@@ -50,6 +50,28 @@ targets:
         script: '"$SRCROOT/rust.sh" "$([ "$CONFIGURATION" = Release ] && echo release || echo debug)"'
         basedOnDependencyAnalysis: false
 
+  EscrowUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - path: Tests/EscrowUITests
+    dependencies:
+      - target: Escrow
+    settings:
+      base:
+        SWIFT_VERSION: "6.0"
+        TEST_TARGET_NAME: Escrow
+        GENERATE_INFOPLIST_FILE: "YES"
+    postBuildScripts:
+      # テストが渡す HOME を、テストの bundle へ入れる（#106）。書く先は TARGET_BUILD_DIR —— UI テストの
+      # bundle は Runner.app の中で組まれるので、BUILT_PRODUCTS_DIR へ書くとテストから見えない。
+      - name: 仕込んだ HOME を作る
+        script: '"$SRCROOT/fixture.sh" "$([ "$CONFIGURATION" = Release ] && echo release || echo debug)" "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/home"'
+        # 出力を宣言しないと、増分ビルドで Xcode が署名をやり直さず、bundle の署名が壊れる。
+        outputFiles:
+          - $(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/home
+        basedOnDependencyAnalysis: false
+
   Escrow:
     type: application
     platform: macOS
@@ -83,6 +105,9 @@ targets:
         # staticlib と、それが要るもの。挙げたのは `cargo rustc -- --print native-static-libs`
         # （Security と CoreFoundation は上の sdk の2行）。
         OTHER_LDFLAGS: -lescrow_ffi -liconv
+    scheme:
+      testTargets:
+        - EscrowUITests
     postBuildScripts:
       - name: CLI を同じ .app へ入れる
         script: cp -f "$ESCROW_RUST_TARGET_DIR/escrow" "$BUILT_PRODUCTS_DIR/$EXECUTABLE_FOLDER_PATH/escrow"
